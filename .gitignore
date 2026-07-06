@@ -1,0 +1,9 @@
+# 原始文档
+文字设定/
+
+# Python
+__pycache__/
+*.pyc
+
+# 数据库（可选，看你想不想上传）
+# oc_characters.db

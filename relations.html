@@ -1,0 +1,1199 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>关系网 · 高校拟人OC</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #faf8f6;
+    --card-bg: #fffef9;
+    --text: #3d322b;
+    --text-light: #8c7b6e;
+    --accent: #6b4c8a;
+    --accent-light: #9b7ec4;
+    --accent-pale: #f0e8f8;
+    --danger: #c0392b;
+    --danger-bg: #fce4e4;
+    --border: #e0d5c7;
+    --shadow: 0 2px 16px rgba(60,40,20,.08);
+    --shadow-lg: 0 8px 40px rgba(60,40,20,.12);
+    --radius: 14px;
+    --radius-sm: 8px;
+    --font-serif: 'Georgia', 'Noto Serif SC', 'SimSun', serif;
+    --font-sans: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+    --transition: 0.25s cubic-bezier(.4,0,.2,1);
+  }
+
+  body {
+    font-family: var(--font-sans);
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    background-image:
+      radial-gradient(ellipse at 20% 10%, rgba(155,126,196,.05) 0%, transparent 60%),
+      radial-gradient(ellipse at 80% 90%, rgba(107,76,138,.04) 0%, transparent 60%);
+  }
+
+  /* ====== Header ====== */
+  .header {
+    background: linear-gradient(135deg, #2b1f3d 0%, #3e2b5a 40%, #55437a 100%);
+    color: #f0e8f8;
+    padding: 20px 24px;
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+  }
+  .header::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='0.025'%3E%3Cpath d='M30 30L36 24M30 30L36 36M30 30L24 36M30 30L24 24' stroke='%23ffffff' stroke-opacity='0.06' stroke-width='1'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+    pointer-events: none;
+  }
+  .header h1 {
+    font-family: var(--font-serif);
+    font-size: 1.8rem;
+    font-weight: 400;
+    letter-spacing: 0.06em;
+  }
+  .header .subtitle {
+    margin-top: 4px; font-size: .88rem;
+    opacity: .65; letter-spacing: .08em;
+  }
+
+  /* ====== 侧边栏布局 ====== */
+  .app-layout { display: flex; min-height: 100vh; }
+  .sidebar {
+    width: 180px;
+    background: linear-gradient(180deg, #2a1a12 0%, #1a0e08 100%);
+    color: #f5ede4;
+    display: flex; flex-direction: column;
+    transition: width 0.3s cubic-bezier(.4,0,.2,1);
+    flex-shrink: 0; overflow: hidden;
+    position: sticky; top: 0; height: 100vh; z-index: 10;
+    box-shadow: 2px 0 16px rgba(0,0,0,.15);
+  }
+  .sidebar.collapsed { width: 54px; }
+  .sidebar-toggle {
+    background: none; border: none; color: #b8a090; font-size: 1.2rem;
+    padding: 14px 16px 6px; cursor: pointer; transition: var(--transition);
+    text-align: left; letter-spacing: .04em;
+  }
+  .sidebar.collapsed .sidebar-toggle { text-align: center; padding-left: 0; padding-right: 0; }
+  .sidebar-toggle:hover { color: #fff; }
+  .sidebar-nav { display: flex; flex-direction: column; padding: 8px; gap: 3px; flex: 1; }
+  .sidebar-item {
+    display: flex; align-items: center; gap: 10px; padding: 10px 12px;
+    border-radius: 8px; color: #c8b8a8; text-decoration: none;
+    font-size: .88rem; font-family: var(--font-sans); transition: var(--transition); white-space: nowrap;
+  }
+  .sidebar-item:hover { background: rgba(255,255,255,.06); color: #f5ede4; }
+  .sidebar-item.active { background: rgba(139,94,60,.3); color: #f5ede4; font-weight: 500; }
+  .sidebar-icon { font-size: 1.15rem; flex-shrink: 0; width: 22px; text-align: center; }
+  .sidebar-text { transition: opacity 0.2s, width 0.2s; overflow: hidden; }
+  .sidebar.collapsed .sidebar-text { opacity: 0; width: 0; }
+  .sidebar.collapsed .sidebar-item { gap: 0; justify-content: center; padding: 10px 0; }
+  .sidebar-footer {
+    padding: 12px; border-top: 1px solid rgba(255,255,255,.08); text-align: center;
+  }
+  .sidebar.collapsed .sidebar-footer { display: none; }
+  .main-content { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+
+  /* ====== Container ====== */
+  .container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 24px 20px 40px;
+    width: 100%;
+  }
+
+  /* ====== 图形区域 ====== */
+  .graph-section {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    margin-bottom: 24px;
+    overflow: hidden;
+  }
+  .graph-header {
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .graph-header .hint {
+    font-size: .82rem;
+    color: var(--text-light);
+  }
+  .graph-canvas-wrap {
+    position: relative;
+    width: 100%;
+    height: 480px;
+    background: radial-gradient(ellipse at center, #faf8f6 0%, #ece5dd 100%);
+  }
+  .graph-canvas-wrap canvas {
+    display: block;
+    cursor: default;
+  }
+  .graph-legend {
+    display: flex;
+    gap: 14px;
+    padding: 10px 20px;
+    border-top: 1px solid var(--border);
+    flex-wrap: wrap;
+  }
+  .legend-item {
+    display: flex; align-items: center; gap: 5px;
+    font-size: .78rem; color: var(--text-light);
+  }
+  .legend-dot {
+    width: 10px; height: 10px; border-radius: 50%;
+    border: 2px solid currentColor;
+  }
+
+  /* ====== 按钮 ====== */
+  .btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 9px 18px; border: none; border-radius: var(--radius-sm);
+    font-size: .88rem; font-family: var(--font-sans); cursor: pointer;
+    transition: var(--transition); font-weight: 500; letter-spacing: .02em;
+  }
+  .btn-primary { background: var(--accent); color: #fff; }
+  .btn-primary:hover { background: #5a3e78; transform: translateY(-1px); box-shadow: 0 4px 14px rgba(107,76,138,.3); }
+  .btn-outline { background: transparent; color: var(--accent); border: 1.5px solid var(--accent-light); }
+  .btn-outline:hover { background: var(--accent-pale); }
+  .btn-sm { padding: 5px 12px; font-size: .8rem; }
+  .btn-danger { background: var(--danger); color: #fff; }
+  .btn-danger:hover { background: #a93226; }
+  .btn-ghost { background: transparent; color: var(--text-light); border: 1px solid var(--border); }
+  .btn-ghost:hover { background: var(--accent-pale); }
+
+  /* ====== 关系列表 ====== */
+  .section-title {
+    font-family: var(--font-serif);
+    font-size: 1.15rem;
+    color: var(--accent);
+    margin-bottom: 14px;
+    letter-spacing: .04em;
+  }
+  .rel-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .rel-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    transition: var(--transition);
+    cursor: pointer;
+  }
+  .rel-item:hover { border-color: var(--accent-light); box-shadow: var(--shadow); }
+  .rel-item.highlight { border-color: var(--accent); background: var(--accent-pale); }
+  .rel-info { flex: 1; min-width: 0; }
+  .rel-names { font-weight: 600; font-size: .93rem; }
+  .rel-names .arrow { color: var(--accent-light); margin: 0 6px; }
+  .rel-type {
+    display: inline-block;
+    font-size: .78rem;
+    padding: 2px 10px;
+    border-radius: 12px;
+    background: var(--accent-pale);
+    color: var(--accent);
+    margin-left: 8px;
+    font-weight: 500;
+  }
+  .rel-desc { font-size: .82rem; color: var(--text-light); margin-top: 2px; }
+  .rel-actions { display: flex; gap: 6px; flex-shrink: 0; }
+
+  .empty {
+    text-align: center; padding: 60px 20px; color: var(--text-light);
+  }
+  .empty .icon { font-size: 3rem; margin-bottom: 10px; opacity: .5; }
+  .empty p { font-size: .95rem; }
+
+  /* ====== Modal ====== */
+  .modal-overlay {
+    position: fixed; inset: 0; background: rgba(30,18,8,.45);
+    backdrop-filter: blur(4px); z-index: 1000;
+    display: flex; align-items: center; justify-content: center; padding: 20px;
+    opacity: 0; visibility: hidden; transition: var(--transition);
+  }
+  .modal-overlay.active { opacity: 1; visibility: visible; }
+  .modal {
+    background: var(--card-bg); border-radius: var(--radius); box-shadow: var(--shadow-lg);
+    width: 100%; max-width: 480px; max-height: 90vh; overflow-y: auto;
+    transform: translateY(20px); transition: var(--transition);
+  }
+  .modal-overlay.active .modal { transform: translateY(0); }
+  .modal-header {
+    padding: 18px 24px; border-bottom: 1px solid var(--border);
+    display: flex; justify-content: space-between; align-items: center;
+    position: sticky; top: 0; background: var(--card-bg); z-index: 2;
+  }
+  .modal-header h2 {
+    font-family: var(--font-serif); font-size: 1.2rem; font-weight: 600; color: #3d2b1f;
+  }
+  .modal-close {
+    width: 32px; height: 32px; border: none; background: #f5f0eb;
+    border-radius: 50%; cursor: pointer; font-size: 1rem; color: var(--text-light);
+    display: flex; align-items: center; justify-content: center; transition: var(--transition);
+  }
+  .modal-close:hover { background: #e8ddd0; color: var(--text); }
+  .modal-body { padding: 20px 24px; }
+  .form-group { margin-bottom: 14px; }
+  .form-group label {
+    display: block; font-size: .83rem; font-weight: 600; color: var(--accent);
+    margin-bottom: 4px; letter-spacing: .03em;
+  }
+  .form-group select, .form-group input, .form-group textarea {
+    width: 100%; padding: 9px 12px; border: 1.5px solid var(--border);
+    border-radius: var(--radius-sm); font-size: .9rem; font-family: var(--font-sans);
+    background: #fefdf9; color: var(--text); transition: var(--transition); resize: vertical;
+  }
+  .form-group select:focus, .form-group input:focus, .form-group textarea:focus {
+    outline: none; border-color: var(--accent-light); box-shadow: 0 0 0 3px rgba(155,126,196,.12);
+  }
+  .form-group textarea { min-height: 70px; }
+  .modal-footer {
+    padding: 14px 24px 20px; display: flex; justify-content: flex-end; gap: 10px;
+  }
+
+  /* ====== Toast ====== */
+  .toast {
+    position: fixed; top: 20px; right: 20px; z-index: 2000;
+    padding: 12px 24px; border-radius: var(--radius-sm);
+    background: #2d2a26; color: #f5ede4; font-size: .9rem;
+    box-shadow: var(--shadow-lg); transform: translateX(120%);
+    transition: var(--transition); max-width: 380px;
+  }
+  .toast.show { transform: translateX(0); }
+  .toast.success { background: #2d5a27; }
+  .toast.error { background: var(--danger); }
+
+  @media (max-width: 768px) {
+    .header h1 { font-size: 1.4rem; }
+    .graph-canvas-wrap { height: 340px; }
+  }
+</style>
+</head>
+<body>
+<div class="app-layout">
+
+<aside class="sidebar" id="sidebar">
+  <button class="sidebar-toggle" onclick="toggleSidebar()" title="展开/收起侧边栏">☰</button>
+  <nav class="sidebar-nav">
+    <a href="/" class="sidebar-item">
+      <span class="sidebar-icon">📖</span><span class="sidebar-text">角色设定</span>
+    </a>
+    <a href="/worldview" class="sidebar-item">
+      <span class="sidebar-icon">🌍</span><span class="sidebar-text">世界观设定</span>
+    </a>
+    <a href="/documents" class="sidebar-item">
+      <span class="sidebar-icon">📄</span><span class="sidebar-text">文档管理</span>
+    </a>
+    <a href="/relations" class="sidebar-item active">
+      <span class="sidebar-icon">🔗</span><span class="sidebar-text">关系网</span>
+    </a>
+  </nav>
+  <div class="sidebar-footer">
+    <span style="font-size:.75rem;opacity:.5;">高校拟人OC</span>
+  </div>
+</aside>
+
+<div class="main-content">
+
+<header class="header">
+  <h1>关系网</h1>
+  <p class="subtitle">角色之间的关系图谱 · 可视化 & 管理</p>
+</header>
+
+<div class="container">
+  <!-- 图形区域 -->
+  <div class="graph-section">
+    <div class="graph-header">
+      <span class="hint">💡 拖拽节点调整位置 · 双击查看角色 · 滚轮缩放</span>
+      <div style="display:flex;gap:8px;">
+        <button class="btn btn-outline btn-sm" onclick="openFamilyModal()">🏛 管理家族</button>
+        <button class="btn btn-outline btn-sm" onclick="resetLayout()">⟳ 重置布局</button>
+      </div>
+    </div>
+    <div class="graph-canvas-wrap" id="canvasWrap">
+      <canvas id="graphCanvas"></canvas>
+    </div>
+    <div class="graph-legend" id="graphLegend">
+      <div class="legend-item"><span class="legend-dot" style="background:#6b4c8a;border-color:#6b4c8a;"></span> 男</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#c44b7a;border-color:#c44b7a;"></span> 女</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#4b8a6b;border-color:#4b8a6b;"></span> 其他</div>
+      <div class="legend-item"><span style="color:#8c7b6e;margin-left:8px;">━━</span> 关系连线</div>
+      <div class="legend-item" style="margin-left:16px;color:var(--text-light);">|</div>
+    </div>
+  </div>
+
+  <!-- 工具栏 -->
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:10px;">
+    <h2 class="section-title" style="margin-bottom:0;">所有关系</h2>
+    <button class="btn btn-primary" onclick="openCreateModal()">＋ 添加关系</button>
+  </div>
+
+  <div class="rel-list" id="relList"></div>
+  <div class="empty" id="emptyState">
+    <div class="icon">🔗</div>
+    <p>还没有建立角色关系，点击上方按钮添加吧</p>
+  </div>
+</div>
+
+</div><!-- /main-content -->
+</div><!-- /app-layout -->
+
+<!-- ====== 添加/编辑关系 Modal ====== -->
+<div class="modal-overlay" id="modalOverlay">
+  <div class="modal">
+    <div class="modal-header">
+      <h2 id="modalTitle">添加关系</h2>
+      <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <form id="relForm" onsubmit="submitForm(event)">
+        <input type="hidden" id="editId">
+        <div class="form-group">
+          <label for="fromChar">角色A *</label>
+          <select id="fromChar" required></select>
+        </div>
+        <div class="form-group">
+          <label for="toChar">角色B *</label>
+          <select id="toChar" required></select>
+        </div>
+        <div class="form-group">
+          <label for="relType">关系类型</label>
+          <input type="text" id="relType" list="relTypeList" placeholder="如：好友、宿敌、同族、盟友…" autocomplete="off">
+          <datalist id="relTypeList">
+            <option value="好友"><option value="对手"><option value="师徒"><option value="恋人">
+            <option value="同窗"><option value="联盟"><option value="宿敌"><option value="亲属">
+            <option value="合作"><option value="崇拜"><option value="保护"><option value="同族">
+            <option value="同门"><option value="战友"><option value="世交"><option value="其他">
+          </datalist>
+        </div>
+        <div class="form-group">
+          <label for="relDesc">关系描述</label>
+          <textarea id="relDesc" rows="2" placeholder="补充说明两人关系的细节…"></textarea>
+        </div>
+      </form>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal()">取消</button>
+      <button class="btn btn-primary" id="submitBtn" onclick="submitForm(event)">确认添加</button>
+    </div>
+  </div>
+</div>
+
+<!-- ====== 删除确认 Modal ====== -->
+<div class="modal-overlay" id="deleteOverlay" style="z-index:2000;">
+  <div class="modal" style="max-width:400px;">
+    <div class="modal-header">
+      <h2>确认删除</h2>
+      <button class="modal-close" onclick="closeDeleteModal()">✕</button>
+    </div>
+    <div class="modal-body" style="text-align:center; padding: 24px;">
+      <p style="font-size:1rem; margin-bottom:4px;">确定要删除关系 <strong id="deleteRelInfo" style="color:var(--danger);"></strong> 吗？</p>
+      <p style="font-size:.82rem; color:var(--text-light);">此操作无法撤销</p>
+    </div>
+    <div class="modal-footer" style="justify-content:center;">
+      <button class="btn btn-ghost" onclick="closeDeleteModal()">取消</button>
+      <button class="btn btn-danger" onclick="confirmDelete()">确认删除</button>
+    </div>
+  </div>
+</div>
+
+<!-- ====== 角色信息 Modal ====== -->
+<div class="modal-overlay" id="infoOverlay">
+  <div class="modal" style="max-width:400px;">
+    <div class="modal-header">
+      <h2 id="infoName"></h2>
+      <button class="modal-close" onclick="closeInfoModal()">✕</button>
+    </div>
+    <div class="modal-body" id="infoBody" style="text-align:center;"></div>
+    <div class="modal-footer" style="justify-content:center;">
+      <button class="btn btn-primary btn-sm" onclick="startRelationFromInfo()">＋ 添加与此角色的关系</button>
+      <button class="btn btn-ghost btn-sm" onclick="closeInfoModal()">关闭</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<!-- ====== 家族管理 Modal ====== -->
+<div class="modal-overlay" id="familyOverlay">
+  <div class="modal" style="max-width:560px;">
+    <div class="modal-header">
+      <h2>🏛 家族管理</h2>
+      <button class="modal-close" onclick="closeFamilyModal()">✕</button>
+    </div>
+    <div class="modal-body" id="familyBody" style="max-height:60vh;overflow-y:auto;"></div>
+    <div class="modal-footer">
+      <button class="btn btn-primary" onclick="saveFamilies()">💾 保存全部</button>
+      <button class="btn btn-ghost" onclick="closeFamilyModal()">关闭</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const API_REL = '/api/relations';
+const API_CHAR = '/api/characters';
+let allRelations = [];
+let allCharacters = [];
+let deleteTargetId = null;
+let selectedFromCharId = null;
+
+// 家族颜色配置
+const FAMILY_COLORS = [
+  '#e74c3c', '#3498db', '#2ecc71', '#f39c12', '#9b59b6',
+  '#1abc9c', '#e67e22', '#2980b9', '#27ae60', '#8e44ad',
+  '#e91e63', '#00bcd4', '#ff5722', '#607d8b', '#cddc39',
+  '#795548', '#673ab7', '#009688', '#ff9800', '#3f51b5',
+];
+let familyColorMap = {};  // family名 → 颜色
+let familyEditMap = {};   // 家族编辑临时存储 charId → family名
+
+// Graph state
+let nodes = [];       // {id, name, gender, x, y, r}
+let edges = [];       // {id, from, to, type, desc}
+let nodeMap = {};
+let dragNode = null;
+let dragOffX = 0, dragOffY = 0;
+let offsetX = 0, offsetY = 0;
+let scale = 1;
+let canvas, ctx, cw, ch;
+
+document.addEventListener('DOMContentLoaded', () => {
+  loadData();
+});
+
+async function loadData() {
+  try {
+    const [relRes, charRes] = await Promise.all([
+      fetch(API_REL),
+      fetch(API_CHAR)
+    ]);
+    allRelations = await relRes.json();
+    allCharacters = await charRes.json();
+
+    buildNodeMap();
+    buildEdges();
+    renderRelList();
+    initCanvas();
+    drawGraph();
+    updateFamilyLegend();
+  } catch(e) {
+    showToast('加载失败，请确认后端已启动', 'error');
+  }
+}
+
+function buildNodeMap() {
+  nodeMap = {};
+  allCharacters.forEach(c => {
+    nodeMap[c.id] = c;
+  });
+  buildFamilyColors();
+}
+
+function buildFamilyColors() {
+  familyColorMap = {};
+  let colorIdx = 0;
+  allCharacters.forEach(c => {
+    const fam = (c.family || '').trim();
+    if (fam && !(fam in familyColorMap)) {
+      familyColorMap[fam] = FAMILY_COLORS[colorIdx % FAMILY_COLORS.length];
+      colorIdx++;
+    }
+  });
+}
+
+function getFamilyColor(node) {
+  const fam = (node.family || '').trim();
+  return fam ? familyColorMap[fam] : null;
+}
+
+function updateFamilyLegend() {
+  const legend = document.getElementById('graphLegend');
+  // 保留前5项（性别 + 连线 + 分隔线），重建家族部分
+  const families = Object.keys(familyColorMap);
+  let famHtml = '';
+  families.forEach(fam => {
+    const color = familyColorMap[fam];
+    famHtml += `<div class="legend-item fam-legend"><span class="legend-dot" style="background:${color};border-color:${color};border:3px solid ${color};"></span> ${fam}</div>`;
+  });
+  // 找到已有的家族legend项并替换，或追加
+  legend.querySelectorAll('.fam-legend').forEach(el => el.remove());
+  if (famHtml) {
+    legend.insertAdjacentHTML('beforeend', famHtml);
+  }
+}
+
+function buildEdges() {
+  edges = allRelations.map(r => ({
+    id: r.id,
+    from: r.from_char_id,
+    to: r.to_char_id,
+    type: r.relation_type || '关联',
+    desc: r.description || '',
+  }));
+}
+
+// --- Canvas Graph ---
+function initCanvas() {
+  canvas = document.getElementById('graphCanvas');
+  const wrap = document.getElementById('canvasWrap');
+  cw = wrap.clientWidth;
+  ch = wrap.clientHeight;
+  canvas.width = cw * window.devicePixelRatio;
+  canvas.height = ch * window.devicePixelRatio;
+  canvas.style.width = cw + 'px';
+  canvas.style.height = ch + 'px';
+  ctx = canvas.getContext('2d');
+  ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+
+  // 计算初始布局
+  computeLayout();
+
+  // Events
+  canvas.addEventListener('mousedown', onMouseDown);
+  canvas.addEventListener('mousemove', onMouseMove);
+  canvas.addEventListener('mouseup', onMouseUp);
+  canvas.addEventListener('wheel', onWheel, {passive: false});
+
+  window.addEventListener('resize', () => {
+    const wrap = document.getElementById('canvasWrap');
+    cw = wrap.clientWidth; ch = wrap.clientHeight;
+    canvas.style.width = cw + 'px';
+    canvas.style.height = ch + 'px';
+    canvas.width = cw * window.devicePixelRatio;
+    canvas.height = ch * window.devicePixelRatio;
+    ctx.setTransform(window.devicePixelRatio, 0, 0, window.devicePixelRatio, 0, 0);
+    computeLayout();
+    drawGraph();
+  });
+}
+
+function computeLayout() {
+  nodes = [];
+  const chars = allCharacters;
+  if (chars.length === 0) return;
+
+  const cx = cw / 2 + offsetX;
+  const cy = ch / 2 + offsetY;
+  const rx = (cw - 100) / 2 * scale;
+  const ry = (ch - 100) / 2 * scale;
+
+  chars.forEach((c, i) => {
+    const angle = (2 * Math.PI * i) / chars.length - Math.PI / 2;
+    nodes.push({
+      id: c.id,
+      name: c.name,
+      family: c.family || '',
+      gender: c.gender,
+      x: cx + rx * Math.cos(angle),
+      y: cy + ry * Math.sin(angle),
+      r: 28,
+    });
+  });
+}
+
+function resetLayout() {
+  offsetX = 0; offsetY = 0; scale = 1;
+  computeLayout();
+  drawGraph();
+}
+
+function drawGraph() {
+  ctx.clearRect(0, 0, cw, ch);
+
+  // 背景网格
+  ctx.strokeStyle = '#e8e0d5';
+  ctx.lineWidth = 0.5;
+  const gs = 40;
+  for (let x = gs; x < cw; x += gs) {
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, ch); ctx.stroke();
+  }
+  for (let y = gs; y < ch; y += gs) {
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(cw, y); ctx.stroke();
+  }
+
+  // 画边
+  edges.forEach(edge => {
+    const from = nodes.find(n => n.id === edge.from);
+    const to = nodes.find(n => n.id === edge.to);
+    if (!from || !to) return;
+
+    const mx = (from.x + to.x) / 2;
+    const my = (from.y + to.y) / 2;
+
+    ctx.beginPath();
+    ctx.moveTo(from.x, from.y);
+    ctx.lineTo(to.x, to.y);
+    ctx.strokeStyle = 'rgba(107,76,138,0.35)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // 标签背景
+    ctx.font = '12px "PingFang SC","Microsoft YaHei",sans-serif';
+    const label = edge.type;
+    const tw = ctx.measureText(label).width + 8;
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(mx - tw/2, my - 9, tw, 18);
+    ctx.strokeStyle = 'rgba(107,76,138,0.3)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(mx - tw/2, my - 9, tw, 18);
+
+    // 标签文字
+    ctx.fillStyle = '#6b4c8a';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, mx, my);
+  });
+
+  // 节点头尺寸排序（小的先画）
+  const sortedNodes = [...nodes];
+
+  // 画节点
+  sortedNodes.forEach(node => {
+    // 光晕
+    const grad = ctx.createRadialGradient(node.x, node.y, node.r * 0.6, node.x, node.y, node.r + 6);
+    if (node.gender === '男') {
+      grad.addColorStop(0, 'rgba(107,76,138,0.4)');
+      grad.addColorStop(1, 'rgba(107,76,138,0)');
+      ctx.fillStyle = '#6b4c8a';
+    } else if (node.gender === '女') {
+      grad.addColorStop(0, 'rgba(196,75,122,0.4)');
+      grad.addColorStop(1, 'rgba(196,75,122,0)');
+      ctx.fillStyle = '#c44b7a';
+    } else {
+      grad.addColorStop(0, 'rgba(75,138,107,0.4)');
+      grad.addColorStop(1, 'rgba(75,138,107,0)');
+      ctx.fillStyle = '#4b8a6b';
+    }
+    ctx.beginPath();
+    ctx.arc(node.x, node.y, node.r + 6, 0, Math.PI * 2);
+    ctx.fillStyle = grad;
+    ctx.fill();
+
+    // 主体圆
+    const bodyGrad = ctx.createLinearGradient(node.x - node.r, node.y - node.r, node.x + node.r, node.y + node.r);
+    if (node.gender === '男') {
+      bodyGrad.addColorStop(0, '#8b6fc4');
+      bodyGrad.addColorStop(1, '#6b4c8a');
+    } else if (node.gender === '女') {
+      bodyGrad.addColorStop(0, '#e07ba4');
+      bodyGrad.addColorStop(1, '#c44b7a');
+    } else {
+      bodyGrad.addColorStop(0, '#6baf8a');
+      bodyGrad.addColorStop(1, '#4b8a6b');
+    }
+    ctx.beginPath();
+    ctx.arc(node.x, node.y, node.r, 0, Math.PI * 2);
+    ctx.fillStyle = bodyGrad;
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // 家族色环
+    const famColor = getFamilyColor(node);
+    if (famColor) {
+      ctx.beginPath();
+      ctx.arc(node.x, node.y, node.r + 3, 0, Math.PI * 2);
+      ctx.strokeStyle = famColor;
+      ctx.lineWidth = 3;
+      ctx.stroke();
+    }
+
+    // 名字
+    ctx.font = 'bold 13px "PingFang SC","Microsoft YaHei",sans-serif';
+    ctx.fillStyle = '#fff';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const shortName = node.name.length > 4 ? node.name.substring(0, 4) + '…' : node.name;
+    ctx.fillText(shortName, node.x, node.y - 2);
+
+    // 家族标签
+    if (node.family) {
+      ctx.font = '10px "PingFang SC","Microsoft YaHei",sans-serif';
+      ctx.fillStyle = famColor || 'rgba(255,255,255,0.7)';
+      const famLabel = node.family.length > 5 ? node.family.substring(0, 5) + '…' : node.family;
+      ctx.fillText(famLabel, node.x, node.y + 14);
+    }
+  });
+}
+
+function findNodeAt(mx, my) {
+  for (let i = nodes.length - 1; i >= 0; i--) {
+    const n = nodes[i];
+    const dx = mx - n.x, dy = my - n.y;
+    if (dx * dx + dy * dy <= n.r * n.r) return n;
+  }
+  return null;
+}
+
+function onMouseDown(e) {
+  const rect = canvas.getBoundingClientRect();
+  const mx = e.clientX - rect.left;
+  const my = e.clientY - rect.top;
+
+  const node = findNodeAt(mx, my);
+  if (node) {
+    if (e.ctrlKey || e.metaKey) {
+      // Ctrl+Click: add relation from this node
+      selectedFromCharId = node.id;
+      openCreateModal();
+      return;
+    }
+    dragNode = node;
+    dragOffX = mx - node.x;
+    dragOffY = my - node.y;
+    canvas.style.cursor = 'grabbing';
+  } else {
+    dragNode = null;
+    // pan
+    dragOffX = mx;
+    dragOffY = my;
+    canvas.style.cursor = 'grab';
+  }
+}
+
+function onMouseMove(e) {
+  const rect = canvas.getBoundingClientRect();
+  const mx = e.clientX - rect.left;
+  const my = e.clientY - rect.top;
+
+  if (dragNode) {
+    dragNode.x = mx - dragOffX;
+    dragNode.y = my - dragOffY;
+    drawGraph();
+    canvas.style.cursor = 'grabbing';
+  } else if (dragNode === null && e.buttons > 0) {
+    // panning (dragNode === null from mousedown on empty area)
+    offsetX += (mx - dragOffX);
+    offsetY += (my - dragOffY);
+    dragOffX = mx;
+    dragOffY = my;
+    computeLayout();
+    drawGraph();
+    canvas.style.cursor = 'grabbing';
+  } else {
+    const node = findNodeAt(mx, my);
+    canvas.style.cursor = node ? 'pointer' : 'default';
+  }
+}
+
+function onMouseUp(e) {
+  if (dragNode) {
+    canvas.style.cursor = 'default';
+    dragNode = null;
+  } else if (dragNode === null) {
+    dragNode = undefined; // reset
+    canvas.style.cursor = 'default';
+  }
+}
+
+function onWheel(e) {
+  e.preventDefault();
+  const delta = e.deltaY > 0 ? 0.9 : 1.1;
+  scale = Math.max(0.3, Math.min(3, scale * delta));
+  computeLayout();
+  drawGraph();
+}
+
+// 双击节点查看角色
+canvas?.addEventListener('dblclick', e => {
+  const rect = canvas.getBoundingClientRect();
+  const node = findNodeAt(e.clientX - rect.left, e.clientY - rect.top);
+  if (node) showCharInfo(node.id);
+});
+
+// --- 角色信息 ---
+let infoCharId = null;
+
+async function showCharInfo(charId) {
+  infoCharId = charId;
+  try {
+    const res = await fetch(`${API_CHAR}/${charId}`);
+    const c = await res.json();
+    document.getElementById('infoName').textContent = c.name;
+    let body = '';
+    if (c.university) body += `<p style="margin:4px 0;color:var(--text-light);">${esc(c.university)}</p>`;
+    if (c.region) body += `<p style="margin:4px 0;">地区: ${esc(c.region)}</p>`;
+    if (c.family) {
+      const famColor = familyColorMap[c.family.trim()] || '#8b6914';
+      body += `<p style="margin:4px 0;font-weight:500;"><span class="legend-dot" style="display:inline-block;vertical-align:middle;margin-right:4px;background:${famColor};border-color:${famColor};width:10px;height:10px;border-radius:50%;"></span>家族: ${esc(c.family)}</p>`;
+    }
+    if (c.gender) body += `<p style="margin:4px 0;">${esc(c.gender)} · ${esc(c.height||'?')}</p>`;
+    if (c.setting) body += `<p style="margin:10px 0 4px;font-size:.85rem;color:var(--text-light);">${esc(c.setting.substring(0,150))}${c.setting.length>150?'…':''}</p>`;
+    document.getElementById('infoBody').innerHTML = body || '<p style="color:var(--text-light);">暂无详细信息</p>';
+    document.getElementById('infoOverlay').classList.add('active');
+  } catch(e) {
+    showToast('获取角色信息失败', 'error');
+  }
+}
+
+function startRelationFromInfo() {
+  if (infoCharId) {
+    selectedFromCharId = infoCharId;
+    closeInfoModal();
+    openCreateModal();
+  }
+}
+
+function closeInfoModal() {
+  document.getElementById('infoOverlay').classList.remove('active');
+  infoCharId = null;
+}
+
+document.getElementById('infoOverlay').addEventListener('click', function(e) {
+  if (e.target === this) closeInfoModal();
+});
+
+// --- 关系列表 ---
+function renderRelList() {
+  const list = document.getElementById('relList');
+  const empty = document.getElementById('emptyState');
+
+  if (allRelations.length === 0) {
+    list.innerHTML = '';
+    empty.style.display = 'block';
+    return;
+  }
+  empty.style.display = 'none';
+
+  list.innerHTML = allRelations.map(r => {
+    const fromName = r.from_name || '角色#' + r.from_char_id;
+    const toName = r.to_name || '角色#' + r.to_char_id;
+    const typeHtml = r.relation_type ? `<span class="rel-type">${esc(r.relation_type)}</span>` : '';
+    return `
+      <div class="rel-item" id="rel-${r.id}" 
+           onmouseenter="highlightRelation(${r.id}, true)"
+           onmouseleave="highlightRelation(${r.id}, false)">
+        <div class="rel-info" onclick="openEditModal(${r.id})">
+          <div class="rel-names">
+            ${esc(fromName)} <span class="arrow">→</span> ${esc(toName)}
+            ${typeHtml}
+          </div>
+          ${r.description ? `<div class="rel-desc">${esc(r.description)}</div>` : ''}
+        </div>
+        <div class="rel-actions">
+          <button class="btn btn-outline btn-sm" onclick="event.stopPropagation();openEditModal(${r.id})">编辑</button>
+          <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openDeleteModal(${r.id},'${esc(fromName)}→${esc(toName)}')">删除</button>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+function highlightRelation(relId, on) {
+  const edge = edges.find(e => e.id === relId);
+  if (edge) {
+    edge.highlight = on;
+    if (on) {
+      edge._origWidth = 3;
+      edge._origAlpha = 0.7;
+    }
+    drawGraphWithHighlight();
+  }
+  const item = document.getElementById('rel-' + relId);
+  if (item) item.classList.toggle('highlight', on);
+}
+
+function drawGraphWithHighlight() {
+  ctx.clearRect(0, 0, cw, ch);
+
+  // 背景网格
+  ctx.strokeStyle = '#e8e0d5'; ctx.lineWidth = 0.5;
+  for (let x = 40; x < cw; x += 40) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, ch); ctx.stroke(); }
+  for (let y = 40; y < ch; y += 40) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(cw, y); ctx.stroke(); }
+
+  edges.forEach(edge => {
+    const from = nodes.find(n => n.id === edge.from);
+    const to = nodes.find(n => n.id === edge.to);
+    if (!from || !to) return;
+
+    const mx = (from.x + to.x) / 2, my = (from.y + to.y) / 2;
+    const hl = edge.highlight;
+
+    ctx.beginPath();
+    ctx.moveTo(from.x, from.y);
+    ctx.lineTo(to.x, to.y);
+    ctx.strokeStyle = hl ? 'rgba(107,76,138,0.8)' : 'rgba(107,76,138,0.35)';
+    ctx.lineWidth = hl ? 3 : 2;
+    ctx.stroke();
+
+    const label = edge.type;
+    const tw = ctx.measureText(label).width + 8;
+    ctx.fillStyle = hl ? '#f0e8f8' : '#fff';
+    ctx.fillRect(mx - tw/2, my - 9, tw, 18);
+    ctx.strokeStyle = hl ? 'rgba(107,76,138,0.6)' : 'rgba(107,76,138,0.3)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(mx - tw/2, my - 9, tw, 18);
+    ctx.fillStyle = '#6b4c8a';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(label, mx, my);
+  });
+
+  nodes.forEach(node => {
+    const grad = ctx.createRadialGradient(node.x, node.y, node.r * 0.6, node.x, node.y, node.r + 6);
+    if (node.gender === '男') { grad.addColorStop(0, 'rgba(107,76,138,0.4)'); grad.addColorStop(1, 'rgba(107,76,138,0)'); ctx.fillStyle = '#6b4c8a'; }
+    else if (node.gender === '女') { grad.addColorStop(0, 'rgba(196,75,122,0.4)'); grad.addColorStop(1, 'rgba(196,75,122,0)'); ctx.fillStyle = '#c44b7a'; }
+    else { grad.addColorStop(0, 'rgba(75,138,107,0.4)'); grad.addColorStop(1, 'rgba(75,138,107,0)'); ctx.fillStyle = '#4b8a6b'; }
+
+    ctx.beginPath(); ctx.arc(node.x, node.y, node.r + 6, 0, Math.PI * 2);
+    ctx.fillStyle = grad; ctx.fill();
+
+    const bodyGrad = ctx.createLinearGradient(node.x - node.r, node.y - node.r, node.x + node.r, node.y + node.r);
+    if (node.gender === '男') { bodyGrad.addColorStop(0, '#8b6fc4'); bodyGrad.addColorStop(1, '#6b4c8a'); }
+    else if (node.gender === '女') { bodyGrad.addColorStop(0, '#e07ba4'); bodyGrad.addColorStop(1, '#c44b7a'); }
+    else { bodyGrad.addColorStop(0, '#6baf8a'); bodyGrad.addColorStop(1, '#4b8a6b'); }
+
+    ctx.beginPath(); ctx.arc(node.x, node.y, node.r, 0, Math.PI * 2);
+    ctx.fillStyle = bodyGrad; ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,0.5)'; ctx.lineWidth = 2; ctx.stroke();
+
+    // 家族色环
+    const famColor = getFamilyColor(node);
+    if (famColor) {
+      ctx.beginPath();
+      ctx.arc(node.x, node.y, node.r + 3, 0, Math.PI * 2);
+      ctx.strokeStyle = famColor;
+      ctx.lineWidth = 3;
+      ctx.stroke();
+    }
+
+    ctx.font = 'bold 13px "PingFang SC","Microsoft YaHei",sans-serif';
+    ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    const shortName = node.name.length > 4 ? node.name.substring(0, 4) + '…' : node.name;
+    ctx.fillText(shortName, node.x, node.y - 2);
+
+    if (node.family) {
+      ctx.font = '10px "PingFang SC","Microsoft YaHei",sans-serif';
+      ctx.fillStyle = famColor || 'rgba(255,255,255,0.7)';
+      const famLabel = node.family.length > 5 ? node.family.substring(0, 5) + '…' : node.family;
+      ctx.fillText(famLabel, node.x, node.y + 14);
+    }
+  });
+}
+
+// --- Modal: 添加/编辑 ---
+function populateCharSelects() {
+  const fromSel = document.getElementById('fromChar');
+  const toSel = document.getElementById('toChar');
+  const opts = allCharacters.map(c => `<option value="${c.id}">${esc(c.name)}${c.university ? ' · ' + esc(c.university) : ''}</option>`).join('');
+  fromSel.innerHTML = opts;
+  toSel.innerHTML = opts;
+}
+
+function openCreateModal() {
+  populateCharSelects();
+  document.getElementById('modalTitle').textContent = '添加关系';
+  document.getElementById('submitBtn').textContent = '确认添加';
+  document.getElementById('editId').value = '';
+  document.getElementById('relForm').reset();
+  if (selectedFromCharId) {
+    document.getElementById('fromChar').value = selectedFromCharId;
+  }
+  document.getElementById('modalOverlay').classList.add('active');
+}
+
+async function openEditModal(id) {
+  try {
+    const res = await fetch(`${API_REL}/${id}`);
+    const r = await res.json();
+    populateCharSelects();
+    document.getElementById('modalTitle').textContent = '编辑关系';
+    document.getElementById('submitBtn').textContent = '保存修改';
+    document.getElementById('editId').value = r.id;
+    document.getElementById('fromChar').value = r.from_char_id;
+    document.getElementById('toChar').value = r.to_char_id;
+    document.getElementById('relType').value = r.relation_type || '';
+    document.getElementById('relDesc').value = r.description || '';
+    document.getElementById('modalOverlay').classList.add('active');
+  } catch(e) {
+    showToast('获取关系数据失败', 'error');
+  }
+}
+
+async function submitForm(e) {
+  e.preventDefault();
+  const form = document.getElementById('relForm');
+  if (!form.checkValidity()) { form.reportValidity(); return; }
+
+  const editId = document.getElementById('editId').value;
+  const data = {
+    from_char_id: parseInt(document.getElementById('fromChar').value),
+    to_char_id: parseInt(document.getElementById('toChar').value),
+    relation_type: document.getElementById('relType').value,
+    description: document.getElementById('relDesc').value.trim(),
+  };
+
+  try {
+    const url = editId ? `${API_REL}/${editId}` : API_REL;
+    const method = editId ? 'PUT' : 'POST';
+    const res = await fetch(url, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) { const err = await res.json(); throw new Error(err.detail || '操作失败'); }
+    closeModal();
+    selectedFromCharId = null;
+    loadData();
+    showToast(editId ? '关系已更新' : '关系已创建', 'success');
+  } catch(e) {
+    showToast(e.message || '操作失败', 'error');
+  }
+}
+
+function closeModal() {
+  document.getElementById('modalOverlay').classList.remove('active');
+}
+
+document.getElementById('modalOverlay').addEventListener('click', function(e) {
+  if (e.target === this) { closeModal(); selectedFromCharId = null; }
+});
+
+// --- Modal: 删除 ---
+function openDeleteModal(id, info) {
+  deleteTargetId = id;
+  document.getElementById('deleteRelInfo').textContent = info;
+  document.getElementById('deleteOverlay').classList.add('active');
+}
+
+function closeDeleteModal() {
+  document.getElementById('deleteOverlay').classList.remove('active');
+  deleteTargetId = null;
+}
+
+async function confirmDelete() {
+  if (!deleteTargetId) return;
+  try {
+    await fetch(`${API_REL}/${deleteTargetId}`, { method: 'DELETE' });
+    closeDeleteModal();
+    loadData();
+    showToast('关系已删除', 'success');
+  } catch(e) {
+    showToast('删除失败', 'error');
+  }
+}
+
+document.getElementById('deleteOverlay').addEventListener('click', function(e) {
+  if (e.target === this) closeDeleteModal();
+});
+
+// --- 全局键盘 ---
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') {
+    closeModal(); closeDeleteModal(); closeInfoModal(); closeFamilyModal();
+  }
+});
+
+// --- Toast ---
+let toastTimer;
+function showToast(msg, type) {
+  const toast = document.getElementById('toast');
+  toast.textContent = msg;
+  toast.className = 'toast ' + (type || '') + ' show';
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { toast.classList.remove('show'); }, 2500);
+}
+
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+// ====== 家族管理 ======
+function openFamilyModal() {
+  familyEditMap = {};
+  allCharacters.forEach(c => {
+    familyEditMap[c.id] = c.family || '';
+  });
+
+  // 收集已有家族作为建议
+  const existingFams = [...new Set(allCharacters.map(c => (c.family || '').trim()).filter(Boolean))];
+  const datalistOpts = existingFams.map(f => `<option value="${esc(f)}">`).join('');
+
+  const body = document.getElementById('familyBody');
+  body.innerHTML = allCharacters.map(c => `
+    <div class="form-group" style="display:flex;align-items:center;gap:12px;margin-bottom:10px;">
+      <span style="min-width:90px;font-weight:600;font-size:.9rem;">${esc(c.name)}</span>
+      <input type="text" class="fam-input" data-char-id="${c.id}" value="${esc(c.family || '')}"
+             list="famSuggest_${c.id}" placeholder="输入家族名…"
+             style="flex:1;padding:6px 10px;border:1.5px solid var(--border);border-radius:6px;font-size:.85rem;font-family:var(--font-sans);">
+      <datalist id="famSuggest_${c.id}">${datalistOpts}</datalist>
+      ${familyEditMap[c.id] ? `<span class="legend-dot" style="background:${familyColorMap[familyEditMap[c.id]] || '#ccc'};border-color:${familyColorMap[familyEditMap[c.id]] || '#ccc'};flex-shrink:0;"></span>` : ''}
+    </div>
+  `).join('');
+
+  // 绑定事件
+  body.querySelectorAll('.fam-input').forEach(input => {
+    input.addEventListener('input', function() {
+      familyEditMap[parseInt(this.dataset.charId)] = this.value.trim();
+    });
+  });
+
+  document.getElementById('familyOverlay').classList.add('active');
+}
+
+function closeFamilyModal() {
+  document.getElementById('familyOverlay').classList.remove('active');
+}
+
+async function saveFamilies() {
+  const toast = document.getElementById('toast');
+  let successCount = 0;
+  let failCount = 0;
+
+  for (const charId in familyEditMap) {
+    const newFamily = familyEditMap[charId].trim();
+    const char = allCharacters.find(c => c.id === parseInt(charId));
+    if (!char || (char.family || '').trim() === newFamily) continue;
+
+    try {
+      const res = await fetch(`${API_CHAR}/${charId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ family: newFamily }),
+      });
+      if (res.ok) {
+        char.family = newFamily;
+        successCount++;
+      } else {
+        failCount++;
+      }
+    } catch(e) {
+      failCount++;
+    }
+  }
+
+  closeFamilyModal();
+  buildFamilyColors();
+  updateFamilyLegend();
+  computeLayout();
+  drawGraph();
+  showToast(`家族更新完成：${successCount} 成功 ${failCount > 0 ? failCount + ' 失败' : ''}`, failCount > 0 ? 'error' : 'success');
+}
+
+document.getElementById('familyOverlay').addEventListener('click', function(e) {
+  if (e.target === this) closeFamilyModal();
+});
+
+function toggleSidebar(){document.getElementById('sidebar').classList.toggle('collapsed');}
+</script>
+
+</body>
+</html>
