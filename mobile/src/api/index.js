@@ -24,12 +24,26 @@ const api = {
       delete config.headers['Content-Type'];
     }
 
-    const res = await fetch(url, config);
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ detail: '请求失败' }));
-      throw new Error(err.detail || `HTTP ${res.status}`);
+    // 超时控制：10秒未响应即失败，避免界面卡死
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
+    config.signal = controller.signal;
+
+    try {
+      const res = await fetch(url, config);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: '请求失败' }));
+        throw new Error(err.detail || `HTTP ${res.status}`);
+      }
+      return res.json();
+    } catch (e) {
+      if (e.name === 'AbortError') {
+        throw new Error('请求超时，请检查网络连接或后端地址');
+      }
+      throw e;
+    } finally {
+      clearTimeout(timeoutId);
     }
-    return res.json();
   },
 
   // ====== 角色 ======
