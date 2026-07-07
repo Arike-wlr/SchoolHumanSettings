@@ -887,9 +887,10 @@ def sync_replace_all(payload: SyncPayload):
         values = [w[col] for col in cols]
         cursor.execute(f"INSERT INTO world_buildings ({col_names}) VALUES ({placeholders})", values)
 
-    # 替换关系
+    # 替换关系（过滤掉 api-shim 添加的 from_name / to_name）
     cursor.execute("DELETE FROM relations")
     for r in payload.relations:
+        r = {k: v for k, v in r.items() if k not in ("from_name", "to_name")}
         cols = list(r.keys())
         placeholders = ",".join(["?"] * len(cols))
         col_names = ",".join(cols)
