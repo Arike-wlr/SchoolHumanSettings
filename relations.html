@@ -214,6 +214,10 @@
     margin-left: 8px;
     font-weight: 500;
   }
+  .rel-type-cp { background: #fce4ec; color: #c44b7a; }
+  .rel-type-memory { background: #e0f2f1; color: #2e8b8a; }
+  .info-label { width: 90px; font-weight: 500; color: var(--text-light); vertical-align: top; padding: 3px 12px 3px 0; white-space: nowrap; font-size: .85rem; }
+  .info-label + td { padding: 3px 0; }
   .rel-desc { font-size: .82rem; color: var(--text-light); margin-top: 2px; }
   .rel-actions { display: flex; gap: 6px; flex-shrink: 0; }
 
@@ -266,6 +270,13 @@
     outline: none; border-color: var(--accent-light); box-shadow: 0 0 0 3px rgba(155,126,196,.12);
   }
   .form-group textarea { min-height: 70px; }
+  .char-search {
+    width: 100%; padding: 9px 12px; border: 1.5px solid var(--border);
+    border-radius: var(--radius-sm); font-size: .9rem; font-family: var(--font-sans);
+    background: #fefdf9; color: var(--text); transition: var(--transition);
+    margin-bottom: 4px;
+  }
+  .char-search:focus { outline: none; border-color: var(--accent-light); box-shadow: 0 0 0 3px rgba(155,126,196,.12); }
   .modal-footer {
     padding: 14px 24px 20px; display: flex; justify-content: flex-end; gap: 10px;
   }
@@ -326,7 +337,7 @@
       <span class="hint">💡 拖拽节点调整位置 · 双击查看角色 · 滚轮缩放</span>
       <div style="display:flex;gap:8px;">
         <button class="btn btn-outline btn-sm" onclick="openFamilyModal()">🏛 管理家族</button>
-        <button class="btn btn-outline btn-sm" onclick="resetLayout()">⟳ 重置布局</button>
+
       </div>
     </div>
     <div class="graph-canvas-wrap" id="canvasWrap">
@@ -336,7 +347,9 @@
       <div class="legend-item"><span class="legend-dot" style="background:#6b4c8a;border-color:#6b4c8a;"></span> 男</div>
       <div class="legend-item"><span class="legend-dot" style="background:#c44b7a;border-color:#c44b7a;"></span> 女</div>
       <div class="legend-item"><span class="legend-dot" style="background:#4b8a6b;border-color:#4b8a6b;"></span> 其他</div>
-      <div class="legend-item"><span style="color:#8c7b6e;margin-left:8px;">━━</span> 关系连线</div>
+      <div class="legend-item"><span style="color:#c44b7a;">⇄</span> CP</div>
+      <div class="legend-item"><span style="color:#6b4c8a;margin-left:8px;">━━</span> 单箭头</div>
+      <div class="legend-item"><span style="color:#2e8b8a;margin-left:4px;">┅┅</span> 继承记忆</div>
       <div class="legend-item" style="margin-left:16px;color:var(--text-light);">|</div>
     </div>
   </div>
@@ -368,22 +381,23 @@
       <form id="relForm" onsubmit="submitForm(event)">
         <input type="hidden" id="editId">
         <div class="form-group">
-          <label for="fromChar">角色A *</label>
-          <select id="fromChar" required></select>
+          <label for="fromCharSearch">角色A *</label>
+          <input type="text" class="char-search" id="fromCharSearch" placeholder="🔍 输入名称搜索…" oninput="filterSelect(this, 'fromChar')" autocomplete="off">
+          <select id="fromChar" required size="6" style="width:100%;" onchange="onCharSelect(this, 'fromCharSearch')"></select>
         </div>
         <div class="form-group">
-          <label for="toChar">角色B *</label>
-          <select id="toChar" required></select>
+          <label for="toCharSearch">角色B *</label>
+          <input type="text" class="char-search" id="toCharSearch" placeholder="🔍 输入名称搜索…" oninput="filterSelect(this, 'toChar')" autocomplete="off">
+          <select id="toChar" required size="6" style="width:100%;" onchange="onCharSelect(this, 'toCharSearch')"></select>
         </div>
         <div class="form-group">
           <label for="relType">关系类型</label>
-          <input type="text" id="relType" list="relTypeList" placeholder="如：好友、宿敌、同族、盟友…" autocomplete="off">
-          <datalist id="relTypeList">
-            <option value="好友"><option value="对手"><option value="师徒"><option value="恋人">
-            <option value="同窗"><option value="联盟"><option value="宿敌"><option value="亲属">
-            <option value="合作"><option value="崇拜"><option value="保护"><option value="同族">
-            <option value="同门"><option value="战友"><option value="世交"><option value="其他">
-          </datalist>
+          <select id="relType" required>
+            <option value="">-- 选择 --</option>
+            <option value="CP">CP</option>
+            <option value="单箭头">单箭头</option>
+            <option value="继承记忆">继承记忆</option>
+          </select>
         </div>
         <div class="form-group">
           <label for="relDesc">关系描述</label>
@@ -418,12 +432,12 @@
 
 <!-- ====== 角色信息 Modal ====== -->
 <div class="modal-overlay" id="infoOverlay">
-  <div class="modal" style="max-width:400px;">
+  <div class="modal" style="max-width:520px;">
     <div class="modal-header">
       <h2 id="infoName"></h2>
       <button class="modal-close" onclick="closeInfoModal()">✕</button>
     </div>
-    <div class="modal-body" id="infoBody" style="text-align:center;"></div>
+    <div class="modal-body" id="infoBody" style="text-align:left;max-height:60vh;overflow-y:auto;"></div>
     <div class="modal-footer" style="justify-content:center;">
       <button class="btn btn-primary btn-sm" onclick="startRelationFromInfo()">＋ 添加与此角色的关系</button>
       <button class="btn btn-ghost btn-sm" onclick="closeInfoModal()">关闭</button>
@@ -474,6 +488,7 @@ let dragNode = null;
 let dragOffX = 0, dragOffY = 0;
 let offsetX = 0, offsetY = 0;
 let scale = 1;
+const pinnedPos = new Map();  // id → {x, y} 手动拖动过的节点位置
 let canvas, ctx, cw, ch;
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -496,7 +511,8 @@ async function loadData() {
     drawGraph();
     updateFamilyLegend();
   } catch(e) {
-    showToast('加载失败，请确认后端已启动', 'error');
+    console.error('加载失败:', e.message, e.stack);
+    showToast('加载失败: ' + e.message, 'error');
   }
 }
 
@@ -512,33 +528,40 @@ function buildFamilyColors() {
   familyColorMap = {};
   let colorIdx = 0;
   allCharacters.forEach(c => {
-    const fam = (c.family || '').trim();
-    if (fam && !(fam in familyColorMap)) {
-      familyColorMap[fam] = FAMILY_COLORS[colorIdx % FAMILY_COLORS.length];
-      colorIdx++;
-    }
+    const fams = splitFamilies(c.family || '');
+    fams.forEach(fam => {
+      if (fam && !(fam in familyColorMap)) {
+        familyColorMap[fam] = FAMILY_COLORS[colorIdx % FAMILY_COLORS.length];
+        colorIdx++;
+      }
+    });
   });
 }
 
+function splitFamilies(famStr) {
+  return (famStr || '').split(/[、,，]/).map(s => s.trim()).filter(Boolean);
+}
+
 function getFamilyColor(node) {
-  const fam = (node.family || '').trim();
-  return fam ? familyColorMap[fam] : null;
+  const fams = splitFamilies(node.family || '');
+  return fams.length > 0 ? familyColorMap[fams[0]] : null;
+}
+
+function getNodeFamilies(node) {
+  return splitFamilies(node.family || '');
 }
 
 function updateFamilyLegend() {
   const legend = document.getElementById('graphLegend');
-  // 保留前5项（性别 + 连线 + 分隔线），重建家族部分
+  // 重建家族图例
   const families = Object.keys(familyColorMap);
   let famHtml = '';
   families.forEach(fam => {
     const color = familyColorMap[fam];
-    famHtml += `<div class="legend-item fam-legend"><span class="legend-dot" style="background:${color};border-color:${color};border:3px solid ${color};"></span> ${fam}</div>`;
+    famHtml += `<div class="legend-item fam-legend"><span class="legend-dot" style="background:${color};border-color:${color};"></span> ${fam}</div>`;
   });
-  // 找到已有的家族legend项并替换，或追加
   legend.querySelectorAll('.fam-legend').forEach(el => el.remove());
-  if (famHtml) {
-    legend.insertAdjacentHTML('beforeend', famHtml);
-  }
+  if (famHtml) legend.insertAdjacentHTML('beforeend', famHtml);
 }
 
 function buildEdges() {
@@ -564,6 +587,17 @@ function initCanvas() {
   ctx = canvas.getContext('2d');
   ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
 
+  // 恢复上次保存的拖拽位置
+  const saved = localStorage.getItem('graphPinnedPos');
+  if (saved) {
+    try {
+      const data = JSON.parse(saved);
+      for (const [k, v] of Object.entries(data)) {
+        pinnedPos.set(Number(k), v);
+      }
+    } catch(e) {}
+  }
+
   // 计算初始布局
   computeLayout();
 
@@ -572,6 +606,7 @@ function initCanvas() {
   canvas.addEventListener('mousemove', onMouseMove);
   canvas.addEventListener('mouseup', onMouseUp);
   canvas.addEventListener('wheel', onWheel, {passive: false});
+  canvas.addEventListener('dblclick', onDblClick);
 
   window.addEventListener('resize', () => {
     const wrap = document.getElementById('canvasWrap');
@@ -581,8 +616,7 @@ function initCanvas() {
     canvas.width = cw * window.devicePixelRatio;
     canvas.height = ch * window.devicePixelRatio;
     ctx.setTransform(window.devicePixelRatio, 0, 0, window.devicePixelRatio, 0, 0);
-    computeLayout();
-    drawGraph();
+    drawGraph();  // 只重绘，保持节点位置
   });
 }
 
@@ -593,27 +627,396 @@ function computeLayout() {
 
   const cx = cw / 2 + offsetX;
   const cy = ch / 2 + offsetY;
-  const rx = (cw - 100) / 2 * scale;
-  const ry = (ch - 100) / 2 * scale;
+  const nodeR = 28;
+  const minGap = 14;
+  const clusterPad = 24;
 
-  chars.forEach((c, i) => {
-    const angle = (2 * Math.PI * i) / chars.length - Math.PI / 2;
-    nodes.push({
-      id: c.id,
-      name: c.name,
-      family: c.family || '',
-      gender: c.gender,
-      x: cx + rx * Math.cos(angle),
-      y: cy + ry * Math.sin(angle),
-      r: 28,
+  // ====== 1. 每个角色属于所有家族（非仅第一个） ======
+  const charFams = {};          // charId → [家族名]
+  const famMemberSet = {};      // 家族名 → Set(charId) 用于重叠计算
+  const famMembers = {};        // 家族名 → [char] 用于有序放置
+  const noFamily = [];
+
+  chars.forEach(c => {
+    const fams = splitFamilies(c.family || '');
+    charFams[c.id] = fams;
+    if (fams.length === 0) {
+      noFamily.push(c);
+    } else {
+      fams.forEach(f => {
+        if (!famMemberSet[f]) { famMemberSet[f] = new Set(); famMembers[f] = []; }
+        famMemberSet[f].add(c.id);
+        famMembers[f].push(c);
+      });
+    }
+  });
+
+  const allFams = Object.keys(famMembers);
+
+  // ====== 2. 构建家族重叠图 + 连通分量 ======
+  const overlaps = {};
+  allFams.forEach(f => { overlaps[f] = []; });
+  for (let i = 0; i < allFams.length; i++) {
+    for (let j = i + 1; j < allFams.length; j++) {
+      const setI = famMemberSet[allFams[i]];
+      const setJ = famMemberSet[allFams[j]];
+      const [smallS, bigS] = setI.size < setJ.size ? [setI, setJ] : [setJ, setI];
+      for (const id of smallS) { if (bigS.has(id)) { overlaps[allFams[i]].push(allFams[j]); overlaps[allFams[j]].push(allFams[i]); break; } }
+    }
+  }
+
+  // 重叠关系存于 overlaps，力模拟用到
+
+  // ====== 3. 辅助 ======
+  function calcMemberR(n) {
+    if (n <= 1) return 0;
+    if (n === 2) return nodeR + minGap / 2;
+    return (nodeR * 2 + minGap) / (2 * Math.sin(Math.PI / n));
+  }
+
+  // ====== 4. 计算每个家族的成员圈 + 集群半径 ======
+  const famMR = {};  // member circle radius
+  const famCR = {};  // cluster bounding radius (mR + nodeR + pad)
+  allFams.forEach(f => {
+    const n = famMemberSet[f].size;
+    famMR[f] = calcMemberR(n);
+    famCR[f] = famMR[f] + nodeR + clusterPad;
+  });
+
+  // ====== 5. 力导向布局：放置各家族中心 ======
+  const famCenter = {};  // fam → {x, y, r}
+  allFams.forEach(f => {
+    // 初始随机散布
+    const a = Math.random() * 2 * Math.PI;
+    const d = Math.random() * 80;
+    famCenter[f] = { x: cx + d * Math.cos(a), y: cy + d * Math.sin(a), r: famMR[f] };
+  });
+
+  // 力模拟迭代
+  const forces = {};
+  const iters = 200;
+  for (let iter = 0; iter < iters; iter++) {
+    const cool = (iters - iter) / iters;  // 逐渐冷却
+    allFams.forEach(f => { forces[f] = { fx: 0, fy: 0 }; });
+
+    // 对所有家族对施加力
+    for (let i = 0; i < allFams.length; i++) {
+      for (let j = i + 1; j < allFams.length; j++) {
+        const f1 = allFams[i], f2 = allFams[j];
+        const c1 = famCenter[f1], c2 = famCenter[f2];
+        const dx = c2.x - c1.x, dy = c2.y - c1.y;
+        const dist = Math.sqrt(dx * dx + dy * dy) || 0.1;
+        const ndx = dx / dist, ndy = dy / dist;
+        const minDist = famCR[f1] + famCR[f2] + 40;
+
+        if (overlaps[f1].includes(f2)) {
+          // 共享角色 → 强吸引力聚拢
+          const shared = [...famMemberSet[f1]].filter(id => famMemberSet[f2].has(id)).length;
+          const pull = Math.min(shared * 0.6, 2) * (dist > minDist * 2 ? 0.15 : dist > minDist ? 0.05 : -0.1);
+          forces[f1].fx += ndx * pull;
+          forces[f1].fy += ndy * pull;
+          forces[f2].fx -= ndx * pull;
+          forces[f2].fy -= ndy * pull;
+        } else if (dist < minDist * 3) {
+          // 无共享 → 排斥力推开
+          const push = Math.max(0, (minDist - dist)) * 0.04;
+          forces[f1].fx -= ndx * push;
+          forces[f1].fy -= ndy * push;
+          forces[f2].fx += ndx * push;
+          forces[f2].fy += ndy * push;
+        }
+      }
+    }
+
+    // 中心引力
+    allFams.forEach(f => {
+      forces[f].fx += (cx - famCenter[f].x) * 0.015;
+      forces[f].fy += (cy - famCenter[f].y) * 0.015;
     });
+
+    // 阻尼
+    allFams.forEach(f => {
+      forces[f].fx *= 0.9;
+      forces[f].fy *= 0.9;
+      famCenter[f].x += forces[f].fx * cool;
+      famCenter[f].y += forces[f].fy * cool;
+    });
+  }
+
+  // ====== 7. 计算每个角色的位置 ======
+  const posMap = {};  // charId → {x, y}
+
+  chars.forEach(c => {
+    const fams = charFams[c.id] || [];
+
+    if (fams.length === 0) {
+      posMap[c.id] = { x: 0, y: 0, noFam: true };
+      return;
+    }
+
+    if (fams.length === 1) {
+      // 单家族：放在该家族成员圈上
+      const fc = famCenter[fams[0]];
+      if (!fc) { posMap[c.id] = { x: cx, y: cy, noFam: true }; return; }
+      const members = famMembers[fams[0]];  // 有序数组
+      const idx = members.findIndex(m => m.id === c.id);
+      const mR = famMR[fams[0]];
+      const angle = members.length > 1
+        ? (2 * Math.PI * idx) / members.length - Math.PI / 2
+        : 0;
+      posMap[c.id] = {
+        x: fc.x + mR * Math.cos(angle),
+        y: fc.y + mR * Math.sin(angle),
+      };
+    } else {
+      // 多家族：放在所属家族中心的加权平均位置
+      let sx = 0, sy = 0, cnt = 0;
+      fams.forEach(f => {
+        const fc = famCenter[f];
+        if (fc) { sx += fc.x; sy += fc.y; cnt++; }
+      });
+      posMap[c.id] = cnt > 0 ? { x: sx / cnt, y: sy / cnt } : { x: cx, y: cy, noFam: true };
+    }
+  });
+
+  // ====== 8. 力导向微调：多家族角色相互排斥，同时被家族中心吸引 ======
+  const multiChars = chars.filter(c => (charFams[c.id] || []).length > 1);
+  for (let iter = 0; iter < 40; iter++) {
+    multiChars.forEach(c => {
+      const pos = posMap[c.id];
+      if (!pos || pos.noFam) return;
+      let fx = 0, fy = 0;
+
+      // 排斥其他多家族角色
+      multiChars.forEach(o => {
+        if (o.id === c.id) return;
+        const op = posMap[o.id];
+        if (!op || op.noFam) return;
+        const dx = pos.x - op.x, dy = pos.y - op.y;
+        const dist = Math.sqrt(dx * dx + dy * dy) || 0.1;
+        const minDist = nodeR * 2 + minGap;
+        if (dist < minDist) {
+          const force = (minDist - dist) / dist * 0.4;
+          fx += dx * force; fy += dy * force;
+        }
+      });
+
+      // 被所属家族中心吸引
+      (charFams[c.id] || []).forEach(f => {
+        const fc = famCenter[f];
+        if (fc) {
+          fx += (fc.x - pos.x) * 0.15;
+          fy += (fc.y - pos.y) * 0.15;
+        }
+      });
+
+      pos.x += fx; pos.y += fy;
+    });
+  }
+
+  // ====== 9. 放置无家族角色：右侧竖列 ======
+  if (noFamily.length > 0) {
+    // 找到所有家族中心的最右边界
+    let rightEdge = cx;
+    allFams.forEach(f => {
+      const fc = famCenter[f];
+      if (fc) rightEdge = Math.max(rightEdge, fc.x + famCR[f] + 20);
+    });
+    const colX = rightEdge + 60;
+    const gap = nodeR * 2 + minGap + 8;
+    const totalH = (noFamily.length - 1) * gap;
+    const startY = cy - totalH / 2;
+    noFamily.forEach((c, i) => {
+      posMap[c.id] = { x: colX, y: startY + i * gap };
+    });
+  }
+
+  // ====== 10. 输出 nodes（恢复已手动拖动过的节点位置） ======
+  chars.forEach(c => {
+    const p = posMap[c.id];
+    const pinned = pinnedPos.get(c.id);
+    nodes.push({
+      id: c.id, name: c.name, family: c.family || '',
+      gender: c.gender,
+      x: pinned ? pinned.x : (p ? p.x : cx),
+      y: pinned ? pinned.y : (p ? p.y : cy),
+      r: nodeR,
+    });
+  });
+
+  // 保存数据供 drawFamilyClusters 使用
+  window._famMemberSet = famMemberSet;
+  window._famCenter = famCenter;
+}
+
+
+
+// ====== 凸包算法（Monotone Chain） ======
+function convexHull(points) {
+  if (points.length <= 2) return points;
+  const sorted = points.slice().sort((a, b) => a.x - b.x || a.y - b.y);
+  const lower = [];
+  for (const p of sorted) {
+    while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) lower.pop();
+    lower.push(p);
+  }
+  const upper = [];
+  for (let i = sorted.length - 1; i >= 0; i--) {
+    const p = sorted[i];
+    while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) upper.pop();
+    upper.push(p);
+  }
+  lower.pop(); upper.pop();
+  return lower.concat(upper);
+}
+function cross(o, a, b) { return (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x); }
+
+function drawFamilyClusters() {
+  // 每个节点贡献到【所有】所属家族的包围圈（非仅第一个）
+  const famPoints = {};   // 家族名 → [{x,y}] 成员圆心
+  const famNodeIds = {};  // 家族名 → Set(nodeId) 去重
+
+  nodes.forEach(n => {
+    const fams = getNodeFamilies(n);
+    fams.forEach(fam => {
+      if (!famPoints[fam]) { famPoints[fam] = []; famNodeIds[fam] = new Set(); }
+      if (famNodeIds[fam].has(n.id)) return;
+      famNodeIds[fam].add(n.id);
+      famPoints[fam].push({ x: n.x, y: n.y });
+    });
+  });
+
+  const pad = 12;  // 凸包外扩距离
+
+  Object.entries(famPoints).forEach(([fam, pts]) => {
+    const totalCount = window._famMemberSet?.[fam]?.size ?? 0;
+    if (pts.length < 2 && totalCount < 2) return;
+
+    const color = familyColorMap[fam] || '#ccc';
+    const nodeR = 28;
+
+    if (pts.length === 1) {
+      // 单节点：画小圆
+      const r = nodeR + pad;
+      ctx.beginPath();
+      ctx.arc(pts[0].x, pts[0].y, r, 0, Math.PI * 2);
+      ctx.fillStyle = color + '0A';
+      ctx.fill();
+      ctx.strokeStyle = color + '44';
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([6, 4]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = color;
+      ctx.font = '11px "PingFang SC","Microsoft YaHei",sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'bottom';
+      ctx.fillText(fam, pts[0].x, pts[0].y - r - 6);
+      return;
+    }
+
+    // 为每个节点生成环绕点（节点圆上的采样点 + 外扩）
+    const periPts = [];
+    const samples = 8;
+    pts.forEach(p => {
+      for (let i = 0; i < samples; i++) {
+        const a = (2 * Math.PI * i) / samples;
+        periPts.push({
+          x: p.x + (nodeR + pad) * Math.cos(a),
+          y: p.y + (nodeR + pad) * Math.sin(a)
+        });
+      }
+    });
+
+    const hull = convexHull(periPts);
+    if (hull.length < 3) return;
+
+    // 画填充
+    ctx.beginPath();
+    ctx.moveTo(hull[0].x, hull[0].y);
+    for (let i = 1; i < hull.length; i++) ctx.lineTo(hull[i].x, hull[i].y);
+    ctx.closePath();
+    ctx.fillStyle = color + '08';
+    ctx.fill();
+
+    // 画边框
+    ctx.beginPath();
+    ctx.moveTo(hull[0].x, hull[0].y);
+    for (let i = 1; i < hull.length; i++) ctx.lineTo(hull[i].x, hull[i].y);
+    ctx.closePath();
+    ctx.strokeStyle = color + '55';
+    ctx.lineWidth = 1.8;
+    ctx.setLineDash([6, 4]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // 标签：放在凸包几何中心偏上
+    let cx = 0, cy = 0;
+    hull.forEach(p => { cx += p.x; cy += p.y; });
+    cx /= hull.length; cy /= hull.length;
+    // 找凸包最上方的点
+    let topY = Infinity;
+    hull.forEach(p => { topY = Math.min(topY, p.y); });
+    ctx.fillStyle = color;
+    ctx.font = '11px "PingFang SC","Microsoft YaHei",sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
+    ctx.fillText(fam, cx, topY - 6);
   });
 }
 
-function resetLayout() {
-  offsetX = 0; offsetY = 0; scale = 1;
-  computeLayout();
-  drawGraph();
+// CP / 单箭头 / 继承记忆 边线渲染
+function drawEdge(fromX, fromY, toX, toY, type, hl) {
+  const dx = toX - fromX, dy = toY - fromY;
+  const len = Math.sqrt(dx * dx + dy * dy) || 1;
+  const ux = dx / len, uy = dy / len;
+  const nodeR = 28;
+  const arrowSize = 8;
+
+  // 从节点边缘起止
+  const sx = fromX + ux * nodeR;
+  const sy = fromY + uy * nodeR;
+  const ex = toX - ux * nodeR;
+  const ey = toY - uy * nodeR;
+
+  let color;
+  if (type === 'CP') color = '#c44b7a';
+  else if (type === '继承记忆') color = '#2e8b8a';
+  else color = '#6b4c8a';
+  const alpha = hl ? 'b3' : '55';
+  const isDashed = type === '继承记忆';
+
+  ctx.beginPath();
+  ctx.moveTo(sx, sy);
+  ctx.lineTo(ex, ey);
+  ctx.strokeStyle = color + alpha;
+  ctx.lineWidth = hl ? 3 : 2;
+  if (isDashed) ctx.setLineDash([8, 5]);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // 箭头函数
+  function drawTip(x, y) {
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x - ux * arrowSize - uy * arrowSize * 0.6, y - uy * arrowSize + ux * arrowSize * 0.6);
+    ctx.lineTo(x - ux * arrowSize + uy * arrowSize * 0.6, y - uy * arrowSize - ux * arrowSize * 0.6);
+    ctx.closePath();
+    ctx.fillStyle = color + alpha;
+    ctx.fill();
+  }
+
+  drawTip(ex, ey);  // 目标端箭头
+  if (type === 'CP') {
+    // CP 双向：source端也画箭头，指向源节点（从target方向来）
+    ctx.beginPath();
+    ctx.moveTo(sx, sy);
+    ctx.lineTo(sx + ux * arrowSize - uy * arrowSize * 0.6, sy + uy * arrowSize + ux * arrowSize * 0.6);
+    ctx.lineTo(sx + ux * arrowSize + uy * arrowSize * 0.6, sy + uy * arrowSize - ux * arrowSize * 0.6);
+    ctx.closePath();
+    ctx.fillStyle = color + alpha;
+    ctx.fill();
+  }
 }
 
 function drawGraph() {
@@ -630,34 +1033,34 @@ function drawGraph() {
     ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(cw, y); ctx.stroke();
   }
 
+  // 画家族聚类圈
+  drawFamilyClusters();
+
   // 画边
   edges.forEach(edge => {
     const from = nodes.find(n => n.id === edge.from);
     const to = nodes.find(n => n.id === edge.to);
     if (!from || !to) return;
 
+    const isCP = edge.type === 'CP';
+    drawEdge(from.x, from.y, to.x, to.y, edge.type, false);
+
+    // 标签
     const mx = (from.x + to.x) / 2;
     const my = (from.y + to.y) / 2;
-
-    ctx.beginPath();
-    ctx.moveTo(from.x, from.y);
-    ctx.lineTo(to.x, to.y);
-    ctx.strokeStyle = 'rgba(107,76,138,0.35)';
-    ctx.lineWidth = 2;
-    ctx.stroke();
-
-    // 标签背景
-    ctx.font = '12px "PingFang SC","Microsoft YaHei",sans-serif';
     const label = edge.type;
+    let labelColor;
+    if (edge.type === 'CP') labelColor = '#c44b7a';
+    else if (edge.type === '继承记忆') labelColor = '#2e8b8a';
+    else labelColor = '#6b4c8a';
+    ctx.font = '12px "PingFang SC","Microsoft YaHei",sans-serif';
     const tw = ctx.measureText(label).width + 8;
     ctx.fillStyle = '#fff';
     ctx.fillRect(mx - tw/2, my - 9, tw, 18);
-    ctx.strokeStyle = 'rgba(107,76,138,0.3)';
+    ctx.strokeStyle = labelColor + '55';
     ctx.lineWidth = 1;
     ctx.strokeRect(mx - tw/2, my - 9, tw, 18);
-
-    // 标签文字
-    ctx.fillStyle = '#6b4c8a';
+    ctx.fillStyle = labelColor;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(label, mx, my);
@@ -726,11 +1129,13 @@ function drawGraph() {
     const shortName = node.name.length > 4 ? node.name.substring(0, 4) + '…' : node.name;
     ctx.fillText(shortName, node.x, node.y - 2);
 
-    // 家族标签
-    if (node.family) {
+    // 家族标签（显示所有）
+    const nodeFams = getNodeFamilies(node);
+    if (nodeFams.length > 0) {
       ctx.font = '10px "PingFang SC","Microsoft YaHei",sans-serif';
+      const displayFams = nodeFams.map(f => f.length > 4 ? f.substring(0, 4) + '…' : f).join('·');
+      const famLabel = displayFams.length > 12 ? displayFams.substring(0, 12) + '…' : displayFams;
       ctx.fillStyle = famColor || 'rgba(255,255,255,0.7)';
-      const famLabel = node.family.length > 5 ? node.family.substring(0, 5) + '…' : node.family;
       ctx.fillText(famLabel, node.x, node.y + 14);
     }
   });
@@ -782,12 +1187,14 @@ function onMouseMove(e) {
     drawGraph();
     canvas.style.cursor = 'grabbing';
   } else if (dragNode === null && e.buttons > 0) {
-    // panning (dragNode === null from mousedown on empty area)
-    offsetX += (mx - dragOffX);
-    offsetY += (my - dragOffY);
+    // 平移：直接偏移所有节点位置，不重新计算布局
+    const pdx = mx - dragOffX;
+    const pdy = my - dragOffY;
+    nodes.forEach(n => { n.x += pdx; n.y += pdy; });
+    offsetX += pdx;
+    offsetY += pdy;
     dragOffX = mx;
     dragOffY = my;
-    computeLayout();
     drawGraph();
     canvas.style.cursor = 'grabbing';
   } else {
@@ -798,6 +1205,12 @@ function onMouseMove(e) {
 
 function onMouseUp(e) {
   if (dragNode) {
+    // 保存手动拖动后的位置
+    pinnedPos.set(dragNode.id, { x: dragNode.x, y: dragNode.y });
+    // 持久化到 localStorage
+    const allPinned = {};
+    pinnedPos.forEach((v, k) => { allPinned[k] = v; });
+    localStorage.setItem('graphPinnedPos', JSON.stringify(allPinned));
     canvas.style.cursor = 'default';
     dragNode = null;
   } else if (dragNode === null) {
@@ -808,21 +1221,33 @@ function onMouseUp(e) {
 
 function onWheel(e) {
   e.preventDefault();
+  const rect = canvas.getBoundingClientRect();
+  const mx = e.clientX - rect.left;
+  const my = e.clientY - rect.top;
   const delta = e.deltaY > 0 ? 0.9 : 1.1;
   scale = Math.max(0.3, Math.min(3, scale * delta));
-  computeLayout();
+  // 直接缩放节点坐标，不重新计算布局
+  nodes.forEach(n => {
+    n.x = mx + (n.x - mx) * delta;
+    n.y = my + (n.y - my) * delta;
+  });
   drawGraph();
 }
 
 // 双击节点查看角色
-canvas?.addEventListener('dblclick', e => {
+function onDblClick(e) {
   const rect = canvas.getBoundingClientRect();
   const node = findNodeAt(e.clientX - rect.left, e.clientY - rect.top);
   if (node) showCharInfo(node.id);
-});
+}
 
 // --- 角色信息 ---
 let infoCharId = null;
+
+function infoRow(label, value) {
+  if (!value) return '';
+  return `<tr><td class="info-label">${label}</td><td>${esc(value)}</td></tr>`;
+}
 
 async function showCharInfo(charId) {
   infoCharId = charId;
@@ -830,16 +1255,29 @@ async function showCharInfo(charId) {
     const res = await fetch(`${API_CHAR}/${charId}`);
     const c = await res.json();
     document.getElementById('infoName').textContent = c.name;
-    let body = '';
-    if (c.university) body += `<p style="margin:4px 0;color:var(--text-light);">${esc(c.university)}</p>`;
-    if (c.region) body += `<p style="margin:4px 0;">地区: ${esc(c.region)}</p>`;
+    let body = '<table style="width:100%;border-collapse:collapse;">';
+    body += infoRow('代表高校', c.university);
+    body += infoRow('地区', c.region);
+    body += infoRow('诞生地', c.birthplace);
+    body += infoRow('性别', c.gender);
+    body += infoRow('身高', c.height);
+    body += infoRow('生日', c.birthday);
+    body += infoRow('诞生时间', c.birth_time);
+    body += infoRow('身份存在时间', c.identity_period);
+    body += infoRow('存在状态', c.status);
+    body += infoRow('取名依据', c.naming_rationale);
+    body += infoRow('外貌', c.appearance);
     if (c.family) {
-      const famColor = familyColorMap[c.family.trim()] || '#8b6914';
-      body += `<p style="margin:4px 0;font-weight:500;"><span class="legend-dot" style="display:inline-block;vertical-align:middle;margin-right:4px;background:${famColor};border-color:${famColor};width:10px;height:10px;border-radius:50%;"></span>家族: ${esc(c.family)}</p>`;
+      const fams = splitFamilies(c.family);
+      const famBadges = fams.map(f => {
+        const fc = familyColorMap[f] || '#8b6914';
+        return `<span style="display:inline-flex;align-items:center;gap:4px;margin-right:8px;"><span class="legend-dot" style="display:inline-block;background:${fc};border-color:${fc};width:10px;height:10px;border-radius:50%;"></span>${esc(f)}</span>`;
+      }).join('');
+      body += `<tr><td class="info-label">家族</td><td>${famBadges}</td></tr>`;
     }
-    if (c.gender) body += `<p style="margin:4px 0;">${esc(c.gender)} · ${esc(c.height||'?')}</p>`;
-    if (c.setting) body += `<p style="margin:10px 0 4px;font-size:.85rem;color:var(--text-light);">${esc(c.setting.substring(0,150))}${c.setting.length>150?'…':''}</p>`;
-    document.getElementById('infoBody').innerHTML = body || '<p style="color:var(--text-light);">暂无详细信息</p>';
+    if (c.setting) body += `<tr><td class="info-label">设定</td><td style="white-space:pre-wrap;line-height:1.6;">${esc(c.setting)}</td></tr>`;
+    body += '</table>';
+    document.getElementById('infoBody').innerHTML = body || '<p style="color:var(--text-light);text-align:center;">暂无详细信息</p>';
     document.getElementById('infoOverlay').classList.add('active');
   } catch(e) {
     showToast('获取角色信息失败', 'error');
@@ -878,7 +1316,7 @@ function renderRelList() {
   list.innerHTML = allRelations.map(r => {
     const fromName = r.from_name || '角色#' + r.from_char_id;
     const toName = r.to_name || '角色#' + r.to_char_id;
-    const typeHtml = r.relation_type ? `<span class="rel-type">${esc(r.relation_type)}</span>` : '';
+    const typeHtml = r.relation_type ? `<span class="rel-type ${r.relation_type === 'CP' ? 'rel-type-cp' : r.relation_type === '继承记忆' ? 'rel-type-memory' : ''}">${esc(r.relation_type)}</span>` : '';
     return `
       <div class="rel-item" id="rel-${r.id}" 
            onmouseenter="highlightRelation(${r.id}, true)"
@@ -920,29 +1358,30 @@ function drawGraphWithHighlight() {
   for (let x = 40; x < cw; x += 40) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, ch); ctx.stroke(); }
   for (let y = 40; y < ch; y += 40) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(cw, y); ctx.stroke(); }
 
+  drawFamilyClusters();
+
   edges.forEach(edge => {
     const from = nodes.find(n => n.id === edge.from);
     const to = nodes.find(n => n.id === edge.to);
     if (!from || !to) return;
 
-    const mx = (from.x + to.x) / 2, my = (from.y + to.y) / 2;
+    const isCP = edge.type === 'CP';
     const hl = edge.highlight;
+    drawEdge(from.x, from.y, to.x, to.y, edge.type, hl);
 
-    ctx.beginPath();
-    ctx.moveTo(from.x, from.y);
-    ctx.lineTo(to.x, to.y);
-    ctx.strokeStyle = hl ? 'rgba(107,76,138,0.8)' : 'rgba(107,76,138,0.35)';
-    ctx.lineWidth = hl ? 3 : 2;
-    ctx.stroke();
-
+    const mx = (from.x + to.x) / 2, my = (from.y + to.y) / 2;
     const label = edge.type;
+    let labelColor;
+    if (edge.type === 'CP') labelColor = '#c44b7a';
+    else if (edge.type === '继承记忆') labelColor = '#2e8b8a';
+    else labelColor = '#6b4c8a';
     const tw = ctx.measureText(label).width + 8;
     ctx.fillStyle = hl ? '#f0e8f8' : '#fff';
     ctx.fillRect(mx - tw/2, my - 9, tw, 18);
-    ctx.strokeStyle = hl ? 'rgba(107,76,138,0.6)' : 'rgba(107,76,138,0.3)';
+    ctx.strokeStyle = hl ? labelColor + '99' : labelColor + '55';
     ctx.lineWidth = 1;
     ctx.strokeRect(mx - tw/2, my - 9, tw, 18);
-    ctx.fillStyle = '#6b4c8a';
+    ctx.fillStyle = labelColor;
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.fillText(label, mx, my);
   });
@@ -980,10 +1419,12 @@ function drawGraphWithHighlight() {
     const shortName = node.name.length > 4 ? node.name.substring(0, 4) + '…' : node.name;
     ctx.fillText(shortName, node.x, node.y - 2);
 
-    if (node.family) {
+    const nodeFams2 = getNodeFamilies(node);
+    if (nodeFams2.length > 0) {
       ctx.font = '10px "PingFang SC","Microsoft YaHei",sans-serif';
+      const displayFams = nodeFams2.map(f => f.length > 4 ? f.substring(0, 4) + '…' : f).join('·');
+      const famLabel = displayFams.length > 12 ? displayFams.substring(0, 12) + '…' : displayFams;
       ctx.fillStyle = famColor || 'rgba(255,255,255,0.7)';
-      const famLabel = node.family.length > 5 ? node.family.substring(0, 5) + '…' : node.family;
       ctx.fillText(famLabel, node.x, node.y + 14);
     }
   });
@@ -996,6 +1437,32 @@ function populateCharSelects() {
   const opts = allCharacters.map(c => `<option value="${c.id}">${esc(c.name)}${c.university ? ' · ' + esc(c.university) : ''}</option>`).join('');
   fromSel.innerHTML = opts;
   toSel.innerHTML = opts;
+  // 重置搜索输入
+  document.getElementById('fromCharSearch').value = '';
+  document.getElementById('toCharSearch').value = '';
+  filterSelect({value:''}, 'fromChar');
+  filterSelect({value:''}, 'toChar');
+}
+
+function filterSelect(input, selectId) {
+  const sel = document.getElementById(selectId);
+  const q = input.value.toLowerCase().trim();
+  Array.from(sel.options).forEach(opt => {
+    const text = opt.textContent.toLowerCase();
+    opt.hidden = q && !text.includes(q);
+  });
+  // 如果只有一个匹配项且输入非空，自动选中
+  const visible = Array.from(sel.options).filter(o => !o.hidden);
+  if (q && visible.length === 1 && visible[0].textContent.toLowerCase().includes(q)) {
+    sel.value = visible[0].value;
+  }
+}
+
+function onCharSelect(sel, searchId) {
+  // 选中后把角色名填入搜索框，显示所有选项
+  const opt = sel.options[sel.selectedIndex];
+  if (opt) document.getElementById(searchId).value = opt.textContent.split(' · ')[0];
+  Array.from(sel.options).forEach(o => { o.hidden = false; });
 }
 
 function openCreateModal() {
@@ -1006,6 +1473,8 @@ function openCreateModal() {
   document.getElementById('relForm').reset();
   if (selectedFromCharId) {
     document.getElementById('fromChar').value = selectedFromCharId;
+    const c = allCharacters.find(ch => ch.id === selectedFromCharId);
+    if (c) document.getElementById('fromCharSearch').value = c.name;
   }
   document.getElementById('modalOverlay').classList.add('active');
 }
@@ -1020,6 +1489,11 @@ async function openEditModal(id) {
     document.getElementById('editId').value = r.id;
     document.getElementById('fromChar').value = r.from_char_id;
     document.getElementById('toChar').value = r.to_char_id;
+    // 填入对应角色名称到搜索框
+    const fromC = allCharacters.find(c => c.id === r.from_char_id);
+    const toC = allCharacters.find(c => c.id === r.to_char_id);
+    if (fromC) document.getElementById('fromCharSearch').value = fromC.name;
+    if (toC) document.getElementById('toCharSearch').value = toC.name;
     document.getElementById('relType').value = r.relation_type || '';
     document.getElementById('relDesc').value = r.description || '';
     document.getElementById('modalOverlay').classList.add('active');
@@ -1123,21 +1597,30 @@ function openFamilyModal() {
     familyEditMap[c.id] = c.family || '';
   });
 
-  // 收集已有家族作为建议
-  const existingFams = [...new Set(allCharacters.map(c => (c.family || '').trim()).filter(Boolean))];
-  const datalistOpts = existingFams.map(f => `<option value="${esc(f)}">`).join('');
+  // 收集已有家族作为建议（拆分后的单个家族名）
+  const allFams = new Set();
+  allCharacters.forEach(c => {
+    const fams = splitFamilies(c.family || '');
+    fams.forEach(f => allFams.add(f));
+  });
+  const datalistOpts = [...allFams].map(f => `<option value="${esc(f)}">`).join('');
 
   const body = document.getElementById('familyBody');
-  body.innerHTML = allCharacters.map(c => `
+  body.innerHTML = allCharacters.map(c => {
+    const fams = splitFamilies(c.family || '');
+    const famDots = fams.map(f =>
+      `<span class="legend-dot" style="background:${familyColorMap[f] || '#ccc'};border-color:${familyColorMap[f] || '#ccc'};flex-shrink:0;display:inline-block;margin-left:3px;" title="${esc(f)}"></span>`
+    ).join('');
+    return `
     <div class="form-group" style="display:flex;align-items:center;gap:12px;margin-bottom:10px;">
       <span style="min-width:90px;font-weight:600;font-size:.9rem;">${esc(c.name)}</span>
       <input type="text" class="fam-input" data-char-id="${c.id}" value="${esc(c.family || '')}"
-             list="famSuggest_${c.id}" placeholder="输入家族名…"
+             list="famSuggest_${c.id}" placeholder="多个用、分隔…"
              style="flex:1;padding:6px 10px;border:1.5px solid var(--border);border-radius:6px;font-size:.85rem;font-family:var(--font-sans);">
       <datalist id="famSuggest_${c.id}">${datalistOpts}</datalist>
-      ${familyEditMap[c.id] ? `<span class="legend-dot" style="background:${familyColorMap[familyEditMap[c.id]] || '#ccc'};border-color:${familyColorMap[familyEditMap[c.id]] || '#ccc'};flex-shrink:0;"></span>` : ''}
-    </div>
-  `).join('');
+      <span style="display:flex;gap:2px;flex-shrink:0;">${famDots}</span>
+    </div>`;
+  }).join('');
 
   // 绑定事件
   body.querySelectorAll('.fam-input').forEach(input => {
