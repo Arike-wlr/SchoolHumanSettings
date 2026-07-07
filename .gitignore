@@ -4,11 +4,50 @@
 # Python
 __pycache__/
 *.pyc
+.venv/
+venv/
 
 # 数据库（可选，看你想不想上传）
 # oc_characters.db
 
-# Mobile (Expo/React Native)
-mobile/node_modules/
-mobile/.expo/
-mobile/dist/
+# ============================================================
+# Mobile (Expo/React Native，实验性，不上传)
+# ============================================================
+mobile/
+
+# ============================================================
+# Android SDK（本地安装的工具链，不应上传）
+# ============================================================
+android-sdk/
+
+# ============================================================
+# Android App 构建产物
+# ============================================================
+android-app/.gradle/
+android-app/build/
+android-app/app/build/
+android-app/gradle-dist/
+android-app/local.properties
+android-app/.idea/
+android-app/captures/
+android-app/*.iml
+android-app/app/*.iml
+
+# APK 文件（构建产物）
+*.apk
+*.aab
+*.ap_
+
+# ============================================================
+# 构建工具临时文件
+# ============================================================
+*.log
+*.tmp
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
