@@ -1,0 +1,29 @@
+{
+  "expo": {
+    "name": "高校拟人OC",
+    "slug": "oc-characters",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "backgroundColor": "#3d2b1f"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.oc.characters"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#3d2b1f"
+      },
+      "package": "com.oc.characters"
+    },
+    "plugins": [
+      "expo-file-system",
+      "expo-document-picker",
+      "expo-asset",
+      "expo-font"
+    ]
+  }
+}
