@@ -225,6 +225,8 @@ class RelationCreate(BaseModel):
 
 
 class RelationUpdate(BaseModel):
+    from_char_id: Optional[int] = None
+    to_char_id: Optional[int] = None
     relation_type: Optional[str] = None
     description: Optional[str] = None
 
@@ -536,6 +538,25 @@ def create_relation(data: RelationCreate):
     return row_to_dict(row)
 
 
+@app.get("/api/relations/{rel_id}")
+def get_relation(rel_id: int):
+    """获取单个关系"""
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT r.*, c1.name as from_name, c2.name as to_name
+        FROM relations r
+        LEFT JOIN characters c1 ON r.from_char_id = c1.id
+        LEFT JOIN characters c2 ON r.to_char_id = c2.id
+        WHERE r.id = ?
+    """, (rel_id,))
+    row = cursor.fetchone()
+    conn.close()
+    if not row:
+        raise HTTPException(status_code=404, detail="关系不存在")
+    return row_to_dict(row)
+
+
 @app.post("/api/relations/reorder")
 def reorder_relations(data: ReorderRequest):
     """批量更新关系排序"""
@@ -561,10 +582,24 @@ def update_relation(rel_id: int, data: RelationUpdate):
         conn.close()
         raise HTTPException(status_code=404, detail="关系不存在")
     updates = {}
-    for field in ["relation_type", "description"]:
+    for field in ["from_char_id", "to_char_id", "relation_type", "description"]:
         val = getattr(data, field)
         if val is not None:
             updates[field] = val
+    # 验证角色存在
+    if "from_char_id" in updates:
+        cursor.execute("SELECT id FROM characters WHERE id = ?", (updates["from_char_id"],))
+        if not cursor.fetchone():
+            conn.close()
+            raise HTTPException(status_code=404, detail="来源角色不存在")
+    if "to_char_id" in updates:
+        cursor.execute("SELECT id FROM characters WHERE id = ?", (updates["to_char_id"],))
+        if not cursor.fetchone():
+            conn.close()
+            raise HTTPException(status_code=404, detail="目标角色不存在")
+    if "from_char_id" in updates and "to_char_id" in updates and updates["from_char_id"] == updates["to_char_id"]:
+        conn.close()
+        raise HTTPException(status_code=400, detail="不能与自己建立关系")
     if updates:
         updates["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         set_clause = ", ".join(f"{k} = ?" for k in updates)

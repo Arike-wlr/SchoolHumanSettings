@@ -432,22 +432,22 @@ function openCreateModal() {
   document.getElementById('modalOverlay').classList.add('active');
 }
 
-async function openEditModal(id) {
-  try {
-    const res = await fetch(`${API_REL}/${id}`);
-    const r = await res.json();
-    populateCharSelects();
-    document.getElementById('modalTitle').textContent = '编辑关系';
-    document.getElementById('submitBtn').textContent = '保存修改';
-    document.getElementById('editId').value = r.id;
-    document.getElementById('fromChar').value = r.from_char_id;
-    document.getElementById('toChar').value = r.to_char_id;
-    document.getElementById('relType').value = r.relation_type || '';
-    document.getElementById('relDesc').value = r.description || '';
-    document.getElementById('modalOverlay').classList.add('active');
-  } catch(e) {
-    showToast('获取数据失败', 'error');
+function openEditModal(id) {
+  // 从已加载的数据中查找，避免请求不存在的单条API
+  const r = allRelations.find(rel => rel.id === id);
+  if (!r) {
+    showToast('未找到关系数据', 'error');
+    return;
   }
+  populateCharSelects();
+  document.getElementById('modalTitle').textContent = '编辑关系';
+  document.getElementById('submitBtn').textContent = '保存修改';
+  document.getElementById('editId').value = r.id;
+  document.getElementById('fromChar').value = r.from_char_id;
+  document.getElementById('toChar').value = r.to_char_id;
+  document.getElementById('relType').value = r.relation_type || '';
+  document.getElementById('relDesc').value = r.description || '';
+  document.getElementById('modalOverlay').classList.add('active');
 }
 
 async function submitForm(e) {

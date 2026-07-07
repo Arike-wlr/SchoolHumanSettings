@@ -25,19 +25,23 @@ async function handleApiRequest(url, init) {
   const method = (init?.method || 'GET').toUpperCase();
   const body = init?.body;
 
+  // 分离路径和查询参数
+  const [path, queryString] = url.split('?');
+  const queryParams = new URLSearchParams(queryString || '');
+
   try {
     // ---- 角色 ----
-    if (url === '/api/characters' && method === 'GET') {
+    if (path === '/api/characters' && method === 'GET') {
       return makeResponse(await charDB.list());
     }
-    if (url === '/api/characters' && method === 'POST') {
+    if (path === '/api/characters' && method === 'POST') {
       const data = JSON.parse(body);
       delete data.id;
       const id = await charDB.create(data);
       const created = { ...data, id };
       return makeResponse(created, 200);
     }
-    let m = url.match(/^\/api\/characters\/(\d+)$/);
+    let m = path.match(/^\/api\/characters\/(\d+)$/);
     if (m) {
       const id = parseInt(m[1]);
       if (method === 'GET') return makeResponse(await charDB.get(id));
@@ -52,23 +56,24 @@ async function handleApiRequest(url, init) {
         return makeResponse({ message: '删除成功' });
       }
     }
-    if (url === '/api/characters/reorder' && method === 'POST') {
+    if (path === '/api/characters/reorder' && method === 'POST') {
       // 离线模式不支持排序，静默成功
       return makeResponse({ message: 'ok' });
     }
 
     // ---- 世界设定 ----
-    if (url.startsWith('/api/world-buildings')) {
-      if (url === '/api/world-buildings' && method === 'GET') {
-        return makeResponse(await worldDB.list());
+    if (path.startsWith('/api/world-buildings')) {
+      if (path === '/api/world-buildings' && method === 'GET') {
+        const mainCat = queryParams.get('main_category') || '';
+        return makeResponse(await worldDB.list(mainCat));
       }
-      if (url === '/api/world-buildings' && method === 'POST') {
+      if (path === '/api/world-buildings' && method === 'POST') {
         const data = JSON.parse(body);
         delete data.id;
         const id = await worldDB.create(data);
         return makeResponse({ ...data, id });
       }
-      m = url.match(/^\/api\/world-buildings\/(\d+)$/);
+      m = path.match(/^\/api\/world-buildings\/(\d+)$/);
       if (m) {
         const id = parseInt(m[1]);
         if (method === 'GET') return makeResponse(await worldDB.get(id));
@@ -83,14 +88,14 @@ async function handleApiRequest(url, init) {
           return makeResponse({ message: '删除成功' });
         }
       }
-      if (url === '/api/world-buildings/reorder' && method === 'POST') {
+      if (path === '/api/world-buildings/reorder' && method === 'POST') {
         return makeResponse({ message: 'ok' });
       }
     }
 
     // ---- 关系 ----
-    if (url.startsWith('/api/relations')) {
-      if (url === '/api/relations' && method === 'GET') {
+    if (path.startsWith('/api/relations')) {
+      if (path === '/api/relations' && method === 'GET') {
         const rels = await relDB.list();
         // 补充 from_name / to_name
         const chars = await charDB.list();
@@ -102,13 +107,13 @@ async function handleApiRequest(url, init) {
         });
         return makeResponse(rels);
       }
-      if (url === '/api/relations' && method === 'POST') {
+      if (path === '/api/relations' && method === 'POST') {
         const data = JSON.parse(body);
         delete data.id;
         const id = await relDB.create(data);
         return makeResponse({ ...data, id });
       }
-      m = url.match(/^\/api\/relations\/(\d+)$/);
+      m = path.match(/^\/api\/relations\/(\d+)$/);
       if (m) {
         const id = parseInt(m[1]);
         if (method === 'GET') return makeResponse(await relDB.get(id));
@@ -123,17 +128,17 @@ async function handleApiRequest(url, init) {
           return makeResponse({ message: '删除成功' });
         }
       }
-      if (url === '/api/relations/reorder' && method === 'POST') {
+      if (path === '/api/relations/reorder' && method === 'POST') {
         return makeResponse({ message: 'ok' });
       }
     }
 
     // ---- 文档 ----
-    if (url.startsWith('/api/files')) {
-      if (url === '/api/files' && method === 'GET') {
+    if (path.startsWith('/api/files')) {
+      if (path === '/api/files' && method === 'GET') {
         return makeResponse(await docDB.list());
       }
-      if (url === '/api/files/upload' && method === 'POST') {
+      if (path === '/api/files/upload' && method === 'POST') {
         // FormData 上传
         const formData = body;
         const files = formData.getAll('files');
@@ -151,7 +156,7 @@ async function handleApiRequest(url, init) {
         return makeResponse({ message: `已上传 ${uploaded.length} 个文件`, files: uploaded });
       }
       // /api/files/{name}/view
-      m = url.match(/^\/api\/files\/(.+)\/view$/);
+      m = path.match(/^\/api\/files\/(.+)\/view$/);
       if (m && method === 'GET') {
         const name = decodeURIComponent(m[1]);
         const doc = await docDB.get(name);
@@ -175,7 +180,7 @@ async function handleApiRequest(url, init) {
         });
       }
       // /api/files/{name} (GET 下载 / DELETE 删除)
-      m = url.match(/^\/api\/files\/(.+)$/);
+      m = path.match(/^\/api\/files\/(.+)$/);
       if (m) {
         const name = decodeURIComponent(m[1]);
         if (method === 'GET') {
@@ -192,7 +197,7 @@ async function handleApiRequest(url, init) {
     }
 
     // 未匹配的 API
-    console.warn('[api-shim] 未匹配的请求:', url, method);
+    console.warn('[api-shim] 未匹配的请求:', path, method);
     return makeResponse({ detail: '离线模式不支持此操作' }, 404);
 
   } catch (e) {
