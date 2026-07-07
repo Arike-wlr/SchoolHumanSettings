@@ -104,6 +104,22 @@ if (location.protocol === 'file:') {
   .toast.show { opacity: 1; }
   .toast.error { background: rgba(192,57,43,.92); }
   .toast.success { background: rgba(39,124,79,.92); }
+
+  /* ====== 导出模式 ====== */
+  .card-check { display: none; position: absolute; top:14px; left:12px; width:28px; height:28px; cursor:pointer; accent-color:var(--accent); z-index:2; }
+  .export-mode .card-check { display: block; }
+  .export-mode .file-card { cursor: default; }
+  .export-mode .file-card:active { transform: none; }
+  .file-card.selected { border-color: var(--accent); background: var(--accent-pale); }
+  .export-bar { display: none; gap: 8px; margin: 6px 14px 0; align-items: center; }
+  .export-mode .export-bar { display: flex; }
+  .btn-export-outline { padding:8px 14px; background:var(--card-bg); color:var(--text); border:1px solid var(--border); border-radius:8px; font-size:.82rem; cursor:pointer; }
+  .btn-export-primary { flex:1; padding:12px; background:var(--accent); color:#fff; border:none; border-radius:var(--radius); font-size:.95rem; font-weight:500; cursor:pointer; margin:0; box-shadow:0 2px 8px rgba(139,94,60,.25); }
+  .btn-export-primary:disabled { opacity:.5; cursor:default; }
+  .btn-export-trigger { display:block; width:calc(100% - 28px); margin:6px 14px 8px; padding:12px; background:var(--card-bg); color:var(--accent); border:1.5px solid var(--accent); border-radius:var(--radius); font-size:.95rem; font-weight:500; cursor:pointer; box-shadow:none; }
+  .btn-export-trigger:active { background:var(--accent-pale); }
+  .export-mode .btn-export-trigger { display: none; }
+  .file-card { position: relative; }
 </style>
 </head>
 <body>
@@ -119,6 +135,13 @@ if (location.protocol === 'file:') {
   <div class="upload-hint">支持 docx、txt、md、pdf 等格式</div>
   <input type="file" id="fileInput" multiple style="display:none" onchange="onFileSelect(event)">
 </div>
+
+<div class="export-bar" id="exportActions">
+  <button class="btn-export-outline" onclick="toggleSelectAll()">全选</button>
+  <button class="btn-export-outline" onclick="cancelExport()" style="color:var(--text-light);">放弃</button>
+  <button class="btn-export-primary" id="confirmExportBtn" onclick="confirmExport()" disabled>确认导出</button>
+</div>
+<button class="btn-export-trigger" id="exportBtn" onclick="enterExportMode()">📥 选择导出</button>
 
 <div class="count-bar">共 <strong id="fileCount">0</strong> 个文档</div>
 
@@ -176,6 +199,8 @@ if (location.protocol === 'file:') {
 const API = '/api/files';
 let deleteTarget = null;
 let currentViewFile = '';
+let selectedDocNames = new Set();
+let exportMode = false;
 
 function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
 
@@ -222,13 +247,16 @@ function renderFiles(files) {
   count.textContent = files.length;
   if (files.length === 0) { list.innerHTML=''; empty.style.display='block'; return; }
   empty.style.display = 'none';
+  if (exportMode) updateExportButtons();
   list.innerHTML = files.map(f => {
     const icon = getFileIcon(f.name);
     const ext = f.name.split('.').pop().toLowerCase();
     const canView = ['docx','txt','md'].includes(ext);
     const safeName = encodeURIComponent(f.name);
+    const isSelected = selectedDocNames.has(f.name);
     return `
-      <div class="file-card">
+      <div class="file-card${isSelected ? ' selected' : ''}">
+        <input type="checkbox" class="card-check" ${isSelected ? 'checked' : ''} onclick="event.stopPropagation();toggleFileSelect('${esc(f.name).replace(/'/g, "\\'")}', this.checked)" title="选择导出">
         <span class="file-icon">${icon}</span>
         <div class="file-info">
           <div class="file-name">${esc(f.name)}</div>
@@ -340,6 +368,85 @@ function showToast(msg, type) {
   t.textContent = msg;
   t.className = 'toast show' + (type ? ' '+type : '');
   setTimeout(() => t.classList.remove('show'), 2200);
+}
+
+// ====== 选择导出 ======
+function enterExportMode() {
+  exportMode = true;
+  selectedDocNames.clear();
+  document.body.classList.add('export-mode');
+  loadFiles();
+}
+
+function cancelExport() {
+  exportMode = false;
+  selectedDocNames.clear();
+  document.body.classList.remove('export-mode');
+  loadFiles();
+}
+
+function toggleFileSelect(name, checked) {
+  if (checked) selectedDocNames.add(name);
+  else selectedDocNames.delete(name);
+  var card = document.querySelector('.file-card.selected');
+  // re-render to update all checkboxes
+  loadFiles();
+}
+
+function toggleSelectAll() {
+  var cards = document.querySelectorAll('#fileList .file-card');
+  if (cards.length === 0) return;
+  // Get all visible names
+  var allNames = [];
+  document.querySelectorAll('#fileList .file-card .file-name').forEach(function(el) {
+    allNames.push(el.textContent);
+  });
+  if (allNames.length === 0) return;
+  var allSelected = allNames.every(function(n) { return selectedDocNames.has(n); });
+  if (allSelected) {
+    allNames.forEach(function(n) { selectedDocNames.delete(n); });
+  } else {
+    allNames.forEach(function(n) { selectedDocNames.add(n); });
+  }
+  loadFiles();
+}
+
+function updateExportButtons() {
+  var btn = document.getElementById('confirmExportBtn');
+  if (!btn) return;
+  btn.disabled = selectedDocNames.size === 0;
+  btn.textContent = selectedDocNames.size > 0 ? '确认导出 (' + selectedDocNames.size + ')' : '确认导出';
+}
+
+function confirmExport() {
+  if (selectedDocNames.size === 0) return;
+  var names = [];
+  selectedDocNames.forEach(function(n) { names.push(n); });
+  var exportData = { exportedAt: new Date().toISOString(), documents: names };
+  var jsonStr = JSON.stringify(exportData, null, 2);
+  var fileName = '文档列表_' + names.length + '个_' + new Date().toISOString().slice(0,10) + '.json';
+  saveExportFile(jsonStr, fileName, '已导出 ' + names.length + ' 个文档信息');
+  cancelExport();
+}
+
+function saveExportFile(jsonStr, fileName, msg) {
+  if (typeof Android !== 'undefined' && Android.saveFile) {
+    var blob = new Blob([jsonStr], {type: 'application/json'});
+    var reader = new FileReader();
+    reader.onloadend = function() { Android.saveFile(reader.result, fileName); };
+    reader.readAsDataURL(blob);
+    showToast('请选择保存位置', 'success');
+  } else {
+    var blob = new Blob([jsonStr], {type: 'application/json'});
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(a.href);
+    showToast(msg, 'success');
+  }
 }
 </script>
 <!-- 离线模式脚本（仅 APK 环境 file:// 协议加载） -->

@@ -125,6 +125,22 @@ if (location.protocol === 'file:') {
   .toast.show { opacity: 1; }
   .toast.error { background: rgba(192,57,43,.92); }
   .toast.success { background: rgba(39,124,79,.92); }
+
+  /* ====== 导出模式 ====== */
+  .card-check { display: none; position: absolute; top:12px; left:12px; width:28px; height:28px; cursor:pointer; accent-color:var(--accent); z-index:2; }
+  .export-mode .card-check { display: block; }
+  .export-mode .card .drag-handle, .export-mode .rel-card .drag-handle { display: none; }
+  .export-mode .card, .export-mode .rel-card { cursor: default; }
+  .export-mode .card:active, .export-mode .rel-card:active { transform: none; }
+  .card.selected, .rel-card.selected { border-color: var(--accent); background: var(--accent-pale); }
+  .export-bar { display: none; gap: 8px; margin: 6px 14px 0; align-items: center; }
+  .export-mode .export-bar { display: flex; }
+  .btn-export-outline { padding:8px 14px; background:var(--card-bg); color:var(--text); border:1px solid var(--border); border-radius:8px; font-size:.82rem; cursor:pointer; }
+  .btn-export-primary { flex:1; padding:12px; background:var(--accent); color:#fff; border:none; border-radius:var(--radius); font-size:.95rem; font-weight:500; cursor:pointer; margin:0; box-shadow:0 2px 8px rgba(139,94,60,.25); }
+  .btn-export-primary:disabled { opacity:.5; cursor:default; }
+  .btn-export-trigger { display:block; width:calc(100% - 28px); margin:6px 14px 8px; padding:12px; background:var(--card-bg); color:var(--accent); border:1.5px solid var(--accent); border-radius:var(--radius); font-size:.95rem; font-weight:500; cursor:pointer; box-shadow:none; }
+  .btn-export-trigger:active { background:var(--accent-pale); }
+  .export-mode .btn-export-trigger { display: none; }
 </style>
 </head>
 <body>
@@ -147,6 +163,13 @@ if (location.protocol === 'file:') {
   <button class="btn-add" onclick="openCreateModal()">＋ 添加关系</button>
   <button class="btn-fam" onclick="openFamilyModal()">🏛 家族</button>
 </div>
+
+<div class="export-bar" id="exportActions">
+  <button class="btn-export-outline" onclick="toggleSelectAll()">全选</button>
+  <button class="btn-export-outline" onclick="cancelExport()" style="color:var(--text-light);">放弃</button>
+  <button class="btn-export-primary" id="confirmExportBtn" onclick="confirmExport()" disabled>确认导出</button>
+</div>
+<button class="btn-export-trigger" id="exportBtn" onclick="enterExportMode()">📥 选择导出</button>
 
 <!-- 关系图可视化 -->
 <div class="graph-section">
@@ -266,6 +289,8 @@ const API_CHAR = '/api/characters';
 let allRelations = [];
 let allCharacters = [];
 let deleteTargetId = null;
+let selectedIds = new Set();
+let exportMode = false;
 
 function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
 
@@ -388,6 +413,8 @@ function renderRelList() {
   if (filtered.length === 0 && searchVal) { list.innerHTML=''; noResult.style.display='block'; return; }
   noResult.style.display = 'none';
 
+  if (exportMode) updateExportButtons();
+
   const idxMap = filtered.map(r => allRelations.indexOf(r));
   list.innerHTML = filtered.map((r, i) => {
     const fromName = r.from_name || '角色#' + r.from_char_id;
@@ -395,7 +422,8 @@ function renderRelList() {
     const typeClass = r.relation_type === 'CP' ? 'cp' : r.relation_type === '师生' ? '师生' : '';
     const typeHtml = r.relation_type ? `<span class="rel-type ${typeClass}">${esc(r.relation_type)}</span>` : '';
     return `
-      <div class="rel-card" data-drag-id="${r.id}" data-drag-idx="${idxMap[i]}">
+      <div class="rel-card${selectedIds.has(r.id)?' selected':''}" data-drag-id="${r.id}" data-drag-idx="${idxMap[i]}">
+        <input type="checkbox" class="card-check" ${selectedIds.has(r.id) ? 'checked' : ''} onclick="event.stopPropagation();toggleCardSelect(${r.id}, this.checked)" title="选择导出">
         <div class="rel-names">
           <span class="drag-handle" title="长按拖动排序">⠿</span>
           <span class="rel-name">${esc(fromName)}</span>
@@ -509,6 +537,85 @@ function showToast(msg, type) {
   t.textContent = msg;
   t.className = 'toast show' + (type ? ' '+type : '');
   setTimeout(() => t.classList.remove('show'), 2200);
+}
+
+// ====== 选择导出 ======
+function enterExportMode() {
+  exportMode = true;
+  selectedIds.clear();
+  document.body.classList.add('export-mode');
+  renderRelList();
+}
+
+function cancelExport() {
+  exportMode = false;
+  selectedIds.clear();
+  document.body.classList.remove('export-mode');
+  renderRelList();
+}
+
+function toggleCardSelect(id, checked) {
+  if (checked) selectedIds.add(id);
+  else selectedIds.delete(id);
+  var card = document.querySelector('.rel-card[data-drag-id="' + id + '"]');
+  if (card) card.classList.toggle('selected', checked);
+  updateExportButtons();
+}
+
+function toggleSelectAll() {
+  var cards = document.querySelectorAll('#relList .rel-card[data-drag-id]');
+  if (cards.length === 0) return;
+  var visibleIds = [];
+  cards.forEach(function(c) { visibleIds.push(parseInt(c.dataset.dragId)); });
+  var allSelected = visibleIds.every(function(id) { return selectedIds.has(id); });
+  if (allSelected) {
+    visibleIds.forEach(function(id) { selectedIds.delete(id); });
+  } else {
+    visibleIds.forEach(function(id) { selectedIds.add(id); });
+  }
+  renderRelList();
+}
+
+function updateExportButtons() {
+  var btn = document.getElementById('confirmExportBtn');
+  if (!btn) return;
+  btn.disabled = selectedIds.size === 0;
+  btn.textContent = selectedIds.size > 0 ? '确认导出 (' + selectedIds.size + ')' : '确认导出';
+}
+
+function confirmExport() {
+  if (selectedIds.size === 0) return;
+  var selected = allRelations.filter(function(r) { return selectedIds.has(r.id); });
+  var exportData = selected.map(function(r) { return {
+    角色A: r.from_name || '',
+    角色B: r.to_name || '',
+    关系类型: r.relation_type || '',
+    关系描述: r.description || '',
+  };});
+  var jsonStr = JSON.stringify(exportData, null, 2);
+  var fileName = '关系网_' + selected.length + '条_' + new Date().toISOString().slice(0,10) + '.json';
+  saveExportFile(jsonStr, fileName, '已导出 ' + selected.length + ' 条关系');
+  cancelExport();
+}
+
+function saveExportFile(jsonStr, fileName, msg) {
+  if (typeof Android !== 'undefined' && Android.saveFile) {
+    var blob = new Blob([jsonStr], {type: 'application/json'});
+    var reader = new FileReader();
+    reader.onloadend = function() { Android.saveFile(reader.result, fileName); };
+    reader.readAsDataURL(blob);
+    showToast('请选择保存位置', 'success');
+  } else {
+    var blob = new Blob([jsonStr], {type: 'application/json'});
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(a.href);
+    showToast(msg, 'success');
+  }
 }
 
 // ============================================================
