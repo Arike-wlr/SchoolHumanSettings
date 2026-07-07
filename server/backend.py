@@ -18,8 +18,12 @@ from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 from typing import Optional, List
 
-DB_PATH = "oc_characters.db"
-UPLOAD_DIR = "文字设定"
+# 路径配置：基于本文件所在目录
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DB_PATH = os.path.join(BASE_DIR, "oc_characters.db")
+UPLOAD_DIR = os.path.join(BASE_DIR, "文字设定")
+DESKTOP_DIR = os.path.join(BASE_DIR, "..", "web-desktop")
+MOBILE_DIR = os.path.join(BASE_DIR, "..", "web-mobile")
 
 # 确保上传目录存在
 os.makedirs(UPLOAD_DIR, exist_ok=True)
@@ -904,22 +908,22 @@ def sync_replace_all(payload: SyncPayload):
 
 @app.get("/worldview")
 def serve_worldview():
-    return FileResponse("worldview.html")
+    return FileResponse(os.path.join(DESKTOP_DIR, "worldview.html"))
 
 
 @app.get("/documents")
 def serve_documents():
-    return FileResponse("documents.html")
+    return FileResponse(os.path.join(DESKTOP_DIR, "documents.html"))
 
 
 @app.get("/relations")
 def serve_relations():
-    return FileResponse("relations.html")
+    return FileResponse(os.path.join(DESKTOP_DIR, "relations.html"))
 
 
 @app.get("/")
 def serve_index():
-    return FileResponse("index.html")
+    return FileResponse(os.path.join(DESKTOP_DIR, "index.html"))
 
 
 # ============================================================
@@ -927,27 +931,28 @@ def serve_index():
 # ============================================================
 @app.get("/m")
 def serve_m_index():
-    return FileResponse("m-index.html")
+    return FileResponse(os.path.join(MOBILE_DIR, "m-index.html"))
 
 
 @app.get("/m/worldview")
 def serve_m_worldview():
-    return FileResponse("m-worldview.html")
+    return FileResponse(os.path.join(MOBILE_DIR, "m-worldview.html"))
 
 
 @app.get("/m/relations")
 def serve_m_relations():
-    return FileResponse("m-relations.html")
+    return FileResponse(os.path.join(MOBILE_DIR, "m-relations.html"))
 
 
 @app.get("/m/documents")
 def serve_m_documents():
-    return FileResponse("m-documents.html")
+    return FileResponse(os.path.join(MOBILE_DIR, "m-documents.html"))
 
 
-# 托管静态文件
-if os.path.exists("index.html"):
-    app.mount("/static", StaticFiles(directory=".", html=True), name="static")
+# 托管静态文件（桌面版页面目录）
+_desktop_index = os.path.join(DESKTOP_DIR, "index.html")
+if os.path.exists(_desktop_index):
+    app.mount("/static", StaticFiles(directory=DESKTOP_DIR, html=True), name="static")
 
 
 if __name__ == "__main__":

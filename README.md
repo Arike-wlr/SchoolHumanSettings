@@ -24,8 +24,8 @@
 ### 安装与运行
 
 ```bash
-# 1. 进入项目目录
-cd SchoolHumanSettings
+# 1. 进入后端目录
+cd server
 
 # 2. 安装依赖
 pip install -r requirements.txt
@@ -39,16 +39,26 @@ python backend.py
 ## 项目结构
 
 ```
-SchoolHumanSettings/
-├── backend.py              # FastAPI 后端（API + 静态页面托管）
-├── index.html              # 角色管理页面
-├── worldview.html          # 世界设定页面
-├── relations.html          # 关系网页面
-├── documents.html          # 文档管理页面
-├── requirements.txt        # Python 依赖
-├── oc_characters.db        # SQLite 数据库
-├── 文字设定/               # 文档上传目录
-└── android-app/            # Android WebView 壳应用源码
+Settings/
+├── server/                 # 后端（FastAPI + SQLite）
+│   ├── backend.py          #   FastAPI 后端（API + 静态页面托管）
+│   ├── requirements.txt    #   Python 依赖
+│   ├── oc_characters.db    #   SQLite 数据库
+│   └── 文字设定/           #   文档上传目录
+├── web-desktop/            # 桌面网页版（浏览器访问，需后端运行）
+│   ├── index.html          #   角色管理页面
+│   ├── worldview.html      #   世界设定页面
+│   ├── relations.html      #   关系网页面
+│   └── documents.html      #   文档管理页面
+├── web-mobile/             # 移动网页版（手机浏览器访问，需后端运行）
+│   ├── m-index.html        #   角色管理页面（移动端）
+│   ├── m-worldview.html    #   世界设定页面（移动端）
+│   ├── m-relations.html    #   关系网页面（移动端）
+│   └── m-documents.html    #   文档管理页面（移动端）
+├── android-app/            # 离线移动版（APK 源码，WebView 壳 + IndexedDB 离线存储）
+├── mobile/                 # Expo 尝试（React Native，未完成，不上传）
+├── android-sdk/            # Android SDK（本地工具链，不上传）
+└── apks/                   # 构建产物（APK 文件）
 ```
 
 ## Android App
@@ -116,10 +126,10 @@ cd android-app
 ## 数据存储
 
 | 数据 | 存储位置 |
-|------|---------|
-| 角色、世界设定、关系网 | `oc_characters.db`（SQLite） |
-| 上传的文档 | `文字设定/` 文件夹 |
-| docx 中提取的图片缓存 | `文字设定/.images_cache/` |
+|------|----------|
+| 角色、世界设定、关系网 | `server/oc_characters.db`（SQLite） |
+| 上传的文档 | `server/文字设定/` 文件夹 |
+| docx 中提取的图片缓存 | `server/文字设定/.images_cache/` |
 
 备份整个项目文件夹即可保留所有数据。
 
