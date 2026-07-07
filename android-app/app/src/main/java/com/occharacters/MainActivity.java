@@ -124,7 +124,9 @@ public class MainActivity extends Activity {
     private void showWebView(String url) {
         setupPanel.setVisibility(View.GONE);
         webView.setVisibility(View.VISIBLE);
-        webView.loadUrl(url);
+        // 加载移动版页面（路径前缀 /m）
+        String mobileUrl = url.endsWith("/") ? url + "m" : url + "/m";
+        webView.loadUrl(mobileUrl);
     }
 
     private void showStatus(String msg) {

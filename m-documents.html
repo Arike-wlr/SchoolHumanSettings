@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#3d2b1f">
+<title>文档管理</title>
+<style>
+  :root {
+    --bg: #f5f0eb; --card-bg: #fffef9; --text: #3d322b; --text-light: #8c7b6e;
+    --accent: #8b5e3c; --accent-light: #c49a6c; --accent-pale: #f0e4d4;
+    --danger: #c0392b; --danger-bg: #fce4e4; --border: #e0d5c7;
+    --shadow: 0 2px 12px rgba(60,40,20,.06); --radius: 12px;
+    --font-serif: 'Georgia', 'Noto Serif SC', serif;
+    --font-sans: -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+    --safe-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  body { font-family: var(--font-sans); background: var(--bg); color: var(--text); min-height: 100vh; padding-bottom: calc(64px + var(--safe-bottom)); -webkit-font-smoothing: antialiased; }
+
+  .header { background: linear-gradient(135deg, #3d2b1f 0%, #5a3e2b 50%, #7a5543 100%); color: #f5ede4; padding: 16px; padding-top: max(16px, env(safe-area-inset-top, 0px)); position: sticky; top: 0; z-index: 100; box-shadow: 0 2px 12px rgba(0,0,0,.15); }
+  .header h1 { font-family: var(--font-serif); font-size: 1.15rem; font-weight: 500; }
+  .header .subtitle { font-size: .72rem; opacity: .65; margin-top: 2px; }
+
+  /* 上传区 */
+  .upload-zone {
+    margin: 12px 14px 8px;
+    padding: 20px;
+    background: var(--card-bg);
+    border: 2px dashed var(--border);
+    border-radius: var(--radius);
+    text-align: center;
+    cursor: pointer;
+    transition: all .2s;
+  }
+  .upload-zone:active { background: var(--accent-pale); border-color: var(--accent-light); }
+  .upload-icon { font-size: 2rem; margin-bottom: 6px; }
+  .upload-text { font-size: .9rem; color: var(--text); font-weight: 500; }
+  .upload-hint { font-size: .75rem; color: var(--text-light); margin-top: 4px; }
+
+  .count-bar { padding: 0 14px 8px; font-size: .82rem; color: var(--text-light); }
+  .count-bar strong { color: var(--accent); font-weight: 600; }
+
+  .file-list { padding: 0 14px 20px; display: flex; flex-direction: column; gap: 8px; }
+  .file-card { background: var(--card-bg); border-radius: var(--radius); padding: 12px; box-shadow: var(--shadow); display: flex; align-items: center; gap: 12px; }
+  .file-icon { font-size: 1.8rem; flex-shrink: 0; }
+  .file-info { flex: 1; min-width: 0; }
+  .file-name { font-size: .92rem; font-weight: 500; word-break: break-all; line-height: 1.3; }
+  .file-meta { font-size: .72rem; color: var(--text-light); margin-top: 3px; }
+  .file-actions { display: flex; gap: 6px; flex-shrink: 0; }
+  .btn-action { padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--card-bg); color: var(--text); font-size: .78rem; cursor: pointer; text-decoration: none; }
+  .btn-action:active { background: var(--accent-pale); }
+  .btn-action.danger { color: var(--danger); border-color: var(--danger-bg); }
+
+  .empty { text-align: center; padding: 60px 20px; color: var(--text-light); }
+  .empty .icon { font-size: 2.5rem; margin-bottom: 8px; opacity: .5; }
+
+  .bottom-nav { position: fixed; bottom: 0; left: 0; right: 0; background: linear-gradient(180deg, #2a1a12 0%, #1a0e08 100%); display: flex; padding-bottom: var(--safe-bottom); box-shadow: 0 -2px 12px rgba(0,0,0,.15); z-index: 200; }
+  .nav-item { flex: 1; padding: 10px 4px 8px; text-align: center; color: #8c7b6e; text-decoration: none; }
+  .nav-item.active { color: #c49a6c; }
+  .nav-icon { font-size: 1.3rem; display: block; }
+  .nav-text { font-size: .68rem; margin-top: 2px; }
+
+  /* Modal */
+  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 300; display: none; align-items: flex-end; justify-content: center; }
+  .modal-overlay.active { display: flex; }
+  .modal { background: var(--card-bg); width: 100%; max-height: 92vh; border-radius: 16px 16px 0 0; display: flex; flex-direction: column; animation: slideUp .25s ease-out; }
+  @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+  .modal-header { padding: 14px 16px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+  .modal-title { font-size: 1rem; font-weight: 600; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .modal-tag { font-size: .7rem; padding: 2px 8px; background: var(--accent-pale); color: var(--accent); border-radius: 10px; margin-left: 8px; flex-shrink: 0; }
+  .modal-close { background: none; border: none; font-size: 1.2rem; color: var(--text-light); padding: 4px 8px; cursor: pointer; flex-shrink: 0; }
+  .modal-body { padding: 14px 16px; overflow-y: auto; -webkit-overflow-scrolling: touch; flex: 1; }
+  .modal-footer { padding: 12px 16px calc(12px + var(--safe-bottom)); border-top: 1px solid var(--border); display: flex; gap: 10px; flex-shrink: 0; }
+  .btn-modal { flex: 1; padding: 12px; border: none; border-radius: var(--radius); font-size: .92rem; font-weight: 500; cursor: pointer; text-decoration: none; text-align: center; }
+  .btn-modal.primary { background: var(--accent); color: #fff; }
+  .btn-modal.cancel { background: var(--accent-pale); color: var(--text); }
+  .btn-modal.danger { background: var(--danger); color: #fff; }
+
+  /* 文档查看器 */
+  .doc-paragraph { font-size: .92rem; line-height: 1.8; margin: .6em 0; color: var(--text); }
+  .doc-heading { font-size: 1.05rem; font-weight: 600; margin: 1em 0 .5em; color: var(--text); }
+  .doc-empty { height: .8em; }
+  .doc-image { text-align: center; margin: 1em 0; }
+  .doc-image img { max-width: 100%; height: auto; border-radius: 8px; box-shadow: 0 2px 12px rgba(0,0,0,.1); }
+  .doc-image-caption { font-size: .8rem; color: var(--text-light); margin-top: 6px; }
+  .viewer-loading { text-align: center; padding: 40px 20px; color: var(--text-light); }
+  .spinner { display: inline-block; width: 24px; height: 24px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 1s linear infinite; margin-bottom: 8px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .toast { position: fixed; bottom: calc(80px + var(--safe-bottom)); left: 50%; transform: translateX(-50%); background: rgba(60,40,20,.92); color: #fff; padding: 10px 20px; border-radius: 20px; font-size: .85rem; z-index: 400; opacity: 0; transition: opacity .3s; pointer-events: none; max-width: 90%; text-align: center; }
+  .toast.show { opacity: 1; }
+  .toast.error { background: rgba(192,57,43,.92); }
+  .toast.success { background: rgba(39,124,79,.92); }
+</style>
+</head>
+<body>
+
+<header class="header">
+  <h1>文档管理</h1>
+  <p class="subtitle">上传、查看、下载文档</p>
+</header>
+
+<div class="upload-zone" onclick="document.getElementById('fileInput').click()">
+  <div class="upload-icon">📁</div>
+  <div class="upload-text">点击选择文件上传</div>
+  <div class="upload-hint">支持 docx、txt、md、pdf 等格式</div>
+  <input type="file" id="fileInput" multiple style="display:none" onchange="onFileSelect(event)">
+</div>
+
+<div class="count-bar">共 <strong id="fileCount">0</strong> 个文档</div>
+
+<div class="file-list" id="fileList"></div>
+<div class="empty" id="emptyState" style="display:none;">
+  <div class="icon">📄</div>
+  <p>还没有文档</p>
+</div>
+
+<!-- 文档查看器 -->
+<div class="modal-overlay" id="viewerOverlay">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title" id="viewerTitle">文档</span>
+      <span class="modal-tag" id="viewerTag">TXT</span>
+      <button class="modal-close" onclick="closeViewer()">✕</button>
+    </div>
+    <div class="modal-body" id="viewerBody"></div>
+    <div class="modal-footer">
+      <a class="btn-modal cancel" id="viewerDownload" href="#" download>下载</a>
+      <button class="btn-modal primary" onclick="closeViewer()">关闭</button>
+    </div>
+  </div>
+</div>
+
+<!-- 删除确认 -->
+<div class="modal-overlay" id="deleteOverlay">
+  <div class="modal" style="max-width:400px;">
+    <div class="modal-header">
+      <span class="modal-title">确认删除</span>
+      <button class="modal-close" onclick="closeDeleteModal()">✕</button>
+    </div>
+    <div class="modal-body" style="text-align:center;padding:24px 16px;">
+      <p style="margin-bottom:8px;">确定要删除</p>
+      <p style="font-size:1rem;font-weight:600;color:var(--danger);word-break:break-all;" id="deleteName"></p>
+      <p style="margin-top:8px;color:var(--text-light);font-size:.85rem;">此操作不可撤销</p>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-modal cancel" onclick="closeDeleteModal()">取消</button>
+      <button class="btn-modal danger" onclick="confirmDelete()">删除</button>
+    </div>
+  </div>
+</div>
+
+<nav class="bottom-nav">
+  <a href="/m" class="nav-item"><span class="nav-icon">📖</span><span class="nav-text">角色</span></a>
+  <a href="/m/worldview" class="nav-item"><span class="nav-icon">🌍</span><span class="nav-text">世界观</span></a>
+  <a href="/m/relations" class="nav-item"><span class="nav-icon">🔗</span><span class="nav-text">关系网</span></a>
+  <a href="/m/documents" class="nav-item active"><span class="nav-icon">📄</span><span class="nav-text">文档</span></a>
+</nav>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const API = '/api/files';
+let deleteTarget = null;
+let currentViewFile = '';
+
+function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+
+document.addEventListener('DOMContentLoaded', () => {
+  loadFiles();
+  document.getElementById('viewerOverlay').addEventListener('click', function(e) {
+    if (e.target === this) closeViewer();
+  });
+});
+
+function onFileSelect(e) {
+  if (e.target.files.length > 0) uploadFiles(e.target.files);
+  e.target.value = '';
+}
+
+async function uploadFiles(fileList) {
+  const formData = new FormData();
+  for (const f of fileList) formData.append('files', f);
+  try {
+    const res = await fetch(API + '/upload', { method: 'POST', body: formData });
+    if (!res.ok) { const err = await res.json(); throw new Error(err.detail || '上传失败'); }
+    const data = await res.json();
+    showToast(data.message, 'success');
+    loadFiles();
+  } catch (e) {
+    showToast(e.message || '上传失败', 'error');
+  }
+}
+
+async function loadFiles() {
+  try {
+    const res = await fetch(API);
+    const files = await res.json();
+    renderFiles(files);
+  } catch (e) {
+    showToast('加载失败', 'error');
+  }
+}
+
+function renderFiles(files) {
+  const list = document.getElementById('fileList');
+  const empty = document.getElementById('emptyState');
+  const count = document.getElementById('fileCount');
+  count.textContent = files.length;
+  if (files.length === 0) { list.innerHTML=''; empty.style.display='block'; return; }
+  empty.style.display = 'none';
+  list.innerHTML = files.map(f => {
+    const icon = getFileIcon(f.name);
+    const ext = f.name.split('.').pop().toLowerCase();
+    const canView = ['docx','txt','md'].includes(ext);
+    const safeName = encodeURIComponent(f.name);
+    return `
+      <div class="file-card">
+        <span class="file-icon">${icon}</span>
+        <div class="file-info">
+          <div class="file-name">${esc(f.name)}</div>
+          <div class="file-meta">${f.size_display} · ${f.modified}</div>
+        </div>
+        <div class="file-actions">
+          ${canView ? `<button class="btn-action" onclick="openViewer('${safeName}')">查看</button>` : ''}
+          <a class="btn-action" href="${API}/${safeName}" download>下载</a>
+          <button class="btn-action danger" onclick="openDeleteModal('${safeName}')">删除</button>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+function getFileIcon(name) {
+  const ext = name.split('.').pop().toLowerCase();
+  const map = { docx:'📝', doc:'📝', pdf:'📕', txt:'📄', md:'📋' };
+  return map[ext] || '📎';
+}
+
+function openDeleteModal(encodedName) {
+  deleteTarget = encodedName;
+  document.getElementById('deleteName').textContent = decodeURIComponent(encodedName);
+  document.getElementById('deleteOverlay').classList.add('active');
+}
+function closeDeleteModal() { document.getElementById('deleteOverlay').classList.remove('active'); deleteTarget = null; }
+async function confirmDelete() {
+  if (!deleteTarget) return;
+  try {
+    await fetch(`${API}/${deleteTarget}`, { method: 'DELETE' });
+    if (currentViewFile === deleteTarget) closeViewer();
+    closeDeleteModal();
+    loadFiles();
+    showToast('已删除', 'success');
+  } catch (e) { showToast('删除失败', 'error'); }
+}
+
+async function openViewer(encodedName) {
+  const fname = decodeURIComponent(encodedName);
+  currentViewFile = encodedName;
+  const body = document.getElementById('viewerBody');
+  document.getElementById('viewerTitle').textContent = fname;
+  const ext = fname.split('.').pop().toLowerCase();
+  document.getElementById('viewerTag').textContent = ext.toUpperCase();
+  document.getElementById('viewerDownload').href = `${API}/${encodedName}`;
+  body.innerHTML = '<div class="viewer-loading"><div class="spinner"></div><div>加载中…</div></div>';
+  document.getElementById('viewerOverlay').classList.add('active');
+  try {
+    const res = await fetch(`${API}/${encodedName}/view`);
+    if (!res.ok) { const err = await res.json(); throw new Error(err.detail || '加载失败'); }
+    const data = await res.json();
+    renderViewerContent(data);
+  } catch (e) {
+    body.innerHTML = `<div class="viewer-loading" style="color:var(--danger);"><p style="font-size:1.5rem;margin-bottom:8px;">⚠️</p><p>${esc(e.message||'加载失败')}</p></div>`;
+  }
+}
+
+function renderViewerContent(data) {
+  const body = document.getElementById('viewerBody');
+  if (data.type === 'docx') {
+    let html = '';
+    const content = data.content;
+    const cacheKey = data.cache_key || '';
+    const isNewFormat = Array.isArray(content) && content.length > 0 && content[0].type !== undefined;
+    if (Array.isArray(content)) {
+      for (const item of content) {
+        if (isNewFormat && item.type === 'image') {
+          const imgUrl = cacheKey ? `/api/files/images/${encodeURIComponent(cacheKey)}/${encodeURIComponent(item.src)}` : '';
+          html += `<div class="doc-image"><img src="${imgUrl}" alt="${esc(item.caption||'')}" loading="lazy" onerror="this.style.display='none'">${item.caption?`<div class="doc-image-caption">${esc(item.caption)}</div>`:''}</div>`;
+        } else if (isNewFormat && item.type === 'text') {
+          if (!item.text.trim()) html += '<div class="doc-empty"></div>';
+          else if (item.is_heading) html += `<div class="doc-heading">${esc(item.text)}</div>`;
+          else html += `<div class="doc-paragraph">${esc(item.text)}</div>`;
+        } else if (typeof item === 'string') {
+          if (!item.trim()) html += '<div class="doc-empty"></div>';
+          else html += `<div class="doc-paragraph">${esc(item)}</div>`;
+        }
+      }
+    } else {
+      html = `<div class="doc-paragraph">${esc(content||'')}</div>`;
+    }
+    body.innerHTML = html || '<div class="viewer-loading">文档为空</div>';
+  } else {
+    // txt / md
+    const text = typeof data.content === 'string' ? data.content : '';
+    body.innerHTML = text ? `<div class="doc-paragraph">${esc(text)}</div>` : '<div class="viewer-loading">文档为空</div>';
+  }
+}
+
+function closeViewer() {
+  document.getElementById('viewerOverlay').classList.remove('active');
+  currentViewFile = '';
+}
+
+function showToast(msg, type) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast show' + (type ? ' '+type : '');
+  setTimeout(() => t.classList.remove('show'), 2200);
+}
+</script>
+</body>
+</html>

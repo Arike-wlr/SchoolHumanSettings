@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#3d2b1f">
+<title>关系网</title>
+<style>
+  :root {
+    --bg: #f5f0eb; --card-bg: #fffef9; --text: #3d322b; --text-light: #8c7b6e;
+    --accent: #8b5e3c; --accent-light: #c49a6c; --accent-pale: #f0e4d4;
+    --danger: #c0392b; --danger-bg: #fce4e4; --border: #e0d5c7;
+    --shadow: 0 2px 12px rgba(60,40,20,.06); --radius: 12px;
+    --font-serif: 'Georgia', 'Noto Serif SC', serif;
+    --font-sans: -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+    --safe-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  body { font-family: var(--font-sans); background: var(--bg); color: var(--text); min-height: 100vh; padding-bottom: calc(64px + var(--safe-bottom)); -webkit-font-smoothing: antialiased; }
+
+  .header { background: linear-gradient(135deg, #3d2b1f 0%, #5a3e2b 50%, #7a5543 100%); color: #f5ede4; padding: 16px; padding-top: max(16px, env(safe-area-inset-top, 0px)); position: sticky; top: 0; z-index: 100; box-shadow: 0 2px 12px rgba(0,0,0,.15); }
+  .header h1 { font-family: var(--font-serif); font-size: 1.15rem; font-weight: 500; }
+  .header .subtitle { font-size: .72rem; opacity: .65; margin-top: 2px; }
+
+  .toolbar { padding: 12px 14px 8px; display: flex; align-items: center; gap: 8px; }
+  .count { font-size: .82rem; color: var(--text-light); flex-shrink: 0; }
+  .count strong { color: var(--accent); font-weight: 600; }
+  .search-wrap { flex: 1; position: relative; display: flex; align-items: center; }
+  .search-icon { position: absolute; left: 10px; font-size: .9rem; opacity: .5; pointer-events: none; }
+  .search-input { width: 100%; padding: 8px 32px 8px 30px; border: 1px solid var(--border); border-radius: 20px; font-size: .88rem; background: var(--card-bg); color: var(--text); outline: none; }
+  .search-input:focus { border-color: var(--accent-light); }
+  .clear-btn { position: absolute; right: 8px; background: none; border: none; color: var(--text-light); font-size: .85rem; padding: 4px 8px; cursor: pointer; display: none; }
+  .search-wrap.has-value .clear-btn { display: block; }
+
+  .btn-add { display: block; width: calc(100% - 28px); margin: 4px 14px 8px; padding: 12px; background: var(--accent); color: #fff; border: none; border-radius: var(--radius); font-size: .95rem; font-weight: 500; cursor: pointer; box-shadow: 0 2px 8px rgba(139,94,60,.25); }
+  .btn-add:active { transform: scale(.98); }
+
+  .card-list { padding: 4px 14px 20px; display: flex; flex-direction: column; gap: 10px; }
+  .rel-card { background: var(--card-bg); border-radius: var(--radius); padding: 14px; box-shadow: var(--shadow); }
+  .rel-names { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+  .rel-name { font-size: .95rem; font-weight: 600; }
+  .rel-arrow { color: var(--accent); font-size: .9rem; }
+  .rel-type { font-size: .72rem; padding: 2px 8px; border-radius: 10px; background: var(--accent-pale); color: var(--accent); font-weight: 500; }
+  .rel-type.cp { background: #fce4ec; color: #c2185b; }
+  .rel-type.师生 { background: #e3f2fd; color: #1565c0; }
+  .rel-desc { font-size: .85rem; color: var(--text-light); line-height: 1.5; margin-top: 4px; }
+  .card-actions { display: flex; gap: 8px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
+  .btn-action { flex: 1; padding: 7px; border: 1px solid var(--border); border-radius: 8px; background: var(--card-bg); color: var(--text); font-size: .82rem; cursor: pointer; }
+  .btn-action:active { background: var(--accent-pale); }
+  .btn-action.danger { color: var(--danger); border-color: var(--danger-bg); }
+
+  .empty { text-align: center; padding: 60px 20px; color: var(--text-light); }
+  .empty .icon { font-size: 2.5rem; margin-bottom: 8px; opacity: .5; }
+  .no-result { text-align: center; padding: 40px 20px; color: var(--text-light); font-size: .88rem; }
+
+  .bottom-nav { position: fixed; bottom: 0; left: 0; right: 0; background: linear-gradient(180deg, #2a1a12 0%, #1a0e08 100%); display: flex; padding-bottom: var(--safe-bottom); box-shadow: 0 -2px 12px rgba(0,0,0,.15); z-index: 200; }
+  .nav-item { flex: 1; padding: 10px 4px 8px; text-align: center; color: #8c7b6e; text-decoration: none; }
+  .nav-item.active { color: #c49a6c; }
+  .nav-icon { font-size: 1.3rem; display: block; }
+  .nav-text { font-size: .68rem; margin-top: 2px; }
+
+  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 300; display: none; align-items: flex-end; justify-content: center; }
+  .modal-overlay.active { display: flex; }
+  .modal { background: var(--card-bg); width: 100%; max-height: 92vh; border-radius: 16px 16px 0 0; display: flex; flex-direction: column; animation: slideUp .25s ease-out; }
+  @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+  .modal-header { padding: 14px 16px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+  .modal-title { font-size: 1rem; font-weight: 600; }
+  .modal-close { background: none; border: none; font-size: 1.2rem; color: var(--text-light); padding: 4px 8px; cursor: pointer; }
+  .modal-body { padding: 14px 16px; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+  .modal-footer { padding: 12px 16px calc(12px + var(--safe-bottom)); border-top: 1px solid var(--border); display: flex; gap: 10px; }
+  .btn-modal { flex: 1; padding: 12px; border: none; border-radius: var(--radius); font-size: .92rem; font-weight: 500; cursor: pointer; }
+  .btn-modal.primary { background: var(--accent); color: #fff; }
+  .btn-modal.cancel { background: var(--accent-pale); color: var(--text); }
+  .btn-modal.danger { background: var(--danger); color: #fff; }
+
+  .form-group { margin-bottom: 14px; }
+  .form-label { display: block; font-size: .82rem; color: var(--text-light); margin-bottom: 5px; }
+  .form-input, .form-select, .form-textarea { width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: .92rem; background: var(--bg); color: var(--text); outline: none; font-family: inherit; }
+  .form-input:focus, .form-select:focus, .form-textarea:focus { border-color: var(--accent-light); background: var(--card-bg); }
+  .form-textarea { resize: vertical; min-height: 60px; }
+
+  .toast { position: fixed; bottom: calc(80px + var(--safe-bottom)); left: 50%; transform: translateX(-50%); background: rgba(60,40,20,.92); color: #fff; padding: 10px 20px; border-radius: 20px; font-size: .85rem; z-index: 400; opacity: 0; transition: opacity .3s; pointer-events: none; max-width: 90%; text-align: center; }
+  .toast.show { opacity: 1; }
+  .toast.error { background: rgba(192,57,43,.92); }
+  .toast.success { background: rgba(39,124,79,.92); }
+</style>
+</head>
+<body>
+
+<header class="header">
+  <h1>关系网</h1>
+  <p class="subtitle">角色之间的关系</p>
+</header>
+
+<div class="toolbar">
+  <span class="count">共 <strong id="relCount">0</strong> 条</span>
+  <div class="search-wrap" id="searchWrap">
+    <span class="search-icon">🔍</span>
+    <input type="text" class="search-input" id="searchInput" placeholder="搜索角色名…" oninput="onSearch()">
+    <button class="clear-btn" onclick="clearSearch()">✕</button>
+  </div>
+</div>
+
+<button class="btn-add" onclick="openCreateModal()">＋ 添加关系</button>
+
+<div class="card-list" id="relList"></div>
+<div class="no-result" id="noResult" style="display:none;">未找到匹配的关系</div>
+<div class="empty" id="emptyState" style="display:none;">
+  <div class="icon">🔗</div>
+  <p>还没有关系</p>
+</div>
+
+<!-- 添加/编辑 Modal -->
+<div class="modal-overlay" id="modalOverlay">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title" id="modalTitle">添加关系</span>
+      <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <form id="relForm" onsubmit="submitForm(event)">
+        <input type="hidden" id="editId">
+        <div class="form-group">
+          <label class="form-label">角色 A *</label>
+          <select class="form-select" id="fromChar" required></select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">角色 B *</label>
+          <select class="form-select" id="toChar" required></select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">关系类型</label>
+          <input type="text" class="form-input" id="relType" placeholder="如：好友、CP、师徒、对手" list="typeList">
+          <datalist id="typeList">
+            <option value="好友">
+            <option value="CP">
+            <option value="师徒">
+            <option value="对手">
+            <option value="继承记忆">
+            <option value="参与组建">
+            <option value="亲属">
+          </datalist>
+        </div>
+        <div class="form-group">
+          <label class="form-label">关系描述</label>
+          <textarea class="form-textarea" id="relDesc" rows="3" placeholder="关系详细说明…"></textarea>
+        </div>
+      </form>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-modal cancel" onclick="closeModal()">取消</button>
+      <button class="btn-modal primary" onclick="document.getElementById('relForm').requestSubmit()" id="submitBtn">确认添加</button>
+    </div>
+  </div>
+</div>
+
+<!-- 删除确认 -->
+<div class="modal-overlay" id="deleteOverlay">
+  <div class="modal" style="max-width:400px;">
+    <div class="modal-header">
+      <span class="modal-title">确认删除</span>
+      <button class="modal-close" onclick="closeDeleteModal()">✕</button>
+    </div>
+    <div class="modal-body" style="text-align:center;padding:24px 16px;">
+      <p style="margin-bottom:8px;">确定要删除</p>
+      <p style="font-size:1rem;font-weight:600;color:var(--danger);" id="deleteRelInfo"></p>
+      <p style="margin-top:8px;color:var(--text-light);font-size:.85rem;">此操作不可撤销</p>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-modal cancel" onclick="closeDeleteModal()">取消</button>
+      <button class="btn-modal danger" onclick="confirmDelete()">删除</button>
+    </div>
+  </div>
+</div>
+
+<nav class="bottom-nav">
+  <a href="/m" class="nav-item"><span class="nav-icon">📖</span><span class="nav-text">角色</span></a>
+  <a href="/m/worldview" class="nav-item"><span class="nav-icon">🌍</span><span class="nav-text">世界观</span></a>
+  <a href="/m/relations" class="nav-item active"><span class="nav-icon">🔗</span><span class="nav-text">关系网</span></a>
+  <a href="/m/documents" class="nav-item"><span class="nav-icon">📄</span><span class="nav-text">文档</span></a>
+</nav>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const API_REL = '/api/relations';
+const API_CHAR = '/api/characters';
+let allRelations = [];
+let allCharacters = [];
+let deleteTargetId = null;
+
+function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+
+document.addEventListener('DOMContentLoaded', () => { loadData(); });
+
+async function loadData() {
+  try {
+    const [relRes, charRes] = await Promise.all([fetch(API_REL), fetch(API_CHAR)]);
+    allRelations = await relRes.json();
+    allCharacters = await charRes.json();
+    renderRelList();
+  } catch(e) {
+    showToast('加载失败', 'error');
+  }
+}
+
+function renderRelList() {
+  const list = document.getElementById('relList');
+  const empty = document.getElementById('emptyState');
+  const noResult = document.getElementById('noResult');
+  const count = document.getElementById('relCount');
+  const searchVal = document.getElementById('searchInput').value.trim().toLowerCase();
+
+  let filtered = allRelations;
+  if (searchVal) {
+    filtered = allRelations.filter(r => {
+      const fromName = (r.from_name||'').toLowerCase();
+      const toName = (r.to_name||'').toLowerCase();
+      return fromName.includes(searchVal) || toName.includes(searchVal);
+    });
+  }
+
+  count.textContent = (searchVal ? `${filtered.length}/${allRelations.length}` : allRelations.length);
+
+  if (allRelations.length === 0) {
+    list.innerHTML = ''; empty.style.display='block'; noResult.style.display='none'; return;
+  }
+  empty.style.display = 'none';
+  if (filtered.length === 0 && searchVal) { list.innerHTML=''; noResult.style.display='block'; return; }
+  noResult.style.display = 'none';
+
+  list.innerHTML = filtered.map(r => {
+    const fromName = r.from_name || '角色#' + r.from_char_id;
+    const toName = r.to_name || '角色#' + r.to_char_id;
+    const typeClass = r.relation_type === 'CP' ? 'cp' : r.relation_type === '师生' ? '师生' : '';
+    const typeHtml = r.relation_type ? `<span class="rel-type ${typeClass}">${esc(r.relation_type)}</span>` : '';
+    return `
+      <div class="rel-card">
+        <div class="rel-names">
+          <span class="rel-name">${esc(fromName)}</span>
+          <span class="rel-arrow">→</span>
+          <span class="rel-name">${esc(toName)}</span>
+          ${typeHtml}
+        </div>
+        ${r.description ? `<div class="rel-desc">${esc(r.description)}</div>` : ''}
+        <div class="card-actions">
+          <button class="btn-action" onclick="openEditModal(${r.id})">编辑</button>
+          <button class="btn-action danger" onclick="openDeleteModal(${r.id},'${esc(fromName)} → ${esc(toName)}')">删除</button>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+function onSearch() {
+  const val = document.getElementById('searchInput').value.trim();
+  document.getElementById('searchWrap').classList.toggle('has-value', val.length>0);
+  renderRelList();
+}
+
+function clearSearch() {
+  document.getElementById('searchInput').value = '';
+  document.getElementById('searchWrap').classList.remove('has-value');
+  renderRelList();
+}
+
+function populateCharSelects() {
+  const fromSel = document.getElementById('fromChar');
+  const toSel = document.getElementById('toChar');
+  const options = allCharacters.map(c => `<option value="${c.id}">${esc(c.name)}${c.university?' ('+esc(c.university)+')':''}</option>`).join('');
+  fromSel.innerHTML = '<option value="">请选择</option>' + options;
+  toSel.innerHTML = '<option value="">请选择</option>' + options;
+}
+
+function openCreateModal() {
+  populateCharSelects();
+  document.getElementById('modalTitle').textContent = '添加关系';
+  document.getElementById('submitBtn').textContent = '确认添加';
+  document.getElementById('editId').value = '';
+  document.getElementById('relForm').reset();
+  document.getElementById('modalOverlay').classList.add('active');
+}
+
+async function openEditModal(id) {
+  try {
+    const res = await fetch(`${API_REL}/${id}`);
+    const r = await res.json();
+    populateCharSelects();
+    document.getElementById('modalTitle').textContent = '编辑关系';
+    document.getElementById('submitBtn').textContent = '保存修改';
+    document.getElementById('editId').value = r.id;
+    document.getElementById('fromChar').value = r.from_char_id;
+    document.getElementById('toChar').value = r.to_char_id;
+    document.getElementById('relType').value = r.relation_type || '';
+    document.getElementById('relDesc').value = r.description || '';
+    document.getElementById('modalOverlay').classList.add('active');
+  } catch(e) {
+    showToast('获取数据失败', 'error');
+  }
+}
+
+async function submitForm(e) {
+  e.preventDefault();
+  const form = document.getElementById('relForm');
+  if (!form.checkValidity()) { form.reportValidity(); return; }
+  const editId = document.getElementById('editId').value;
+  const fromId = parseInt(document.getElementById('fromChar').value);
+  const toId = parseInt(document.getElementById('toChar').value);
+  if (fromId === toId) { showToast('不能选择同一个角色', 'error'); return; }
+  const data = {
+    from_char_id: fromId,
+    to_char_id: toId,
+    relation_type: document.getElementById('relType').value.trim(),
+    description: document.getElementById('relDesc').value.trim(),
+  };
+  try {
+    const url = editId ? `${API_REL}/${editId}` : API_REL;
+    const method = editId ? 'PUT' : 'POST';
+    const res = await fetch(url, { method, headers:{'Content-Type':'application/json'}, body: JSON.stringify(data) });
+    if (!res.ok) { const err = await res.json(); throw new Error(err.detail || '操作失败'); }
+    closeModal();
+    loadData();
+    showToast(editId ? '已更新' : '已创建', 'success');
+  } catch(e) {
+    showToast(e.message || '操作失败', 'error');
+  }
+}
+
+function openDeleteModal(id, info) {
+  deleteTargetId = id;
+  document.getElementById('deleteRelInfo').textContent = info;
+  document.getElementById('deleteOverlay').classList.add('active');
+}
+function closeDeleteModal() { document.getElementById('deleteOverlay').classList.remove('active'); deleteTargetId = null; }
+async function confirmDelete() {
+  if (!deleteTargetId) return;
+  try {
+    await fetch(`${API_REL}/${deleteTargetId}`, { method: 'DELETE' });
+    closeDeleteModal(); loadData();
+    showToast('已删除', 'success');
+  } catch(e) { showToast('删除失败', 'error'); }
+}
+
+function closeModal() { document.getElementById('modalOverlay').classList.remove('active'); }
+document.getElementById('deleteOverlay').addEventListener('click', function(e) { if (e.target === this) closeDeleteModal(); });
+
+function showToast(msg, type) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast show' + (type ? ' '+type : '');
+  setTimeout(() => t.classList.remove('show'), 2200);
+}
+</script>
+</body>
+</html>

@@ -25,7 +25,7 @@
 
 ```bash
 # 1. 进入项目目录
-cd Settings
+cd SchoolHumanSettings
 
 # 2. 安装依赖
 pip install -r requirements.txt
@@ -39,7 +39,7 @@ python backend.py
 ## 项目结构
 
 ```
-Settings/
+SchoolHumanSettings/
 ├── backend.py              # FastAPI 后端（API + 静态页面托管）
 ├── index.html              # 角色管理页面
 ├── worldview.html          # 世界设定页面
@@ -77,7 +77,7 @@ Settings/
 ```powershell
 # 1. 设置环境变量（按实际路径调整）
 $env:JAVA_HOME = "D:\Java\jdk-21"
-$env:ANDROID_HOME = "d:\Settings\android-sdk"
+$env:ANDROID_HOME = "d:\SchoolHumanSettings\android-sdk"
 
 # 2. 首次构建：下载并安装 Android SDK 命令行工具
 #    跳过此步如果 android-sdk\cmdline-tools\latest\bin\sdkmanager.bat 已存在

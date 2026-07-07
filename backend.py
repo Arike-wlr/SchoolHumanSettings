@@ -832,6 +832,29 @@ def serve_index():
     return FileResponse("index.html")
 
 
+# ============================================================
+# 移动版页面（手机专用，路径前缀 /m）
+# ============================================================
+@app.get("/m")
+def serve_m_index():
+    return FileResponse("m-index.html")
+
+
+@app.get("/m/worldview")
+def serve_m_worldview():
+    return FileResponse("m-worldview.html")
+
+
+@app.get("/m/relations")
+def serve_m_relations():
+    return FileResponse("m-relations.html")
+
+
+@app.get("/m/documents")
+def serve_m_documents():
+    return FileResponse("m-documents.html")
+
+
 # 托管静态文件
 if os.path.exists("index.html"):
     app.mount("/static", StaticFiles(directory=".", html=True), name="static")
