@@ -812,6 +812,61 @@ def delete_file(fname: str):
     return {"message": f"已删除 {safe_name}"}
 
 
+# ============================================================
+# 数据同步 API（供手机端上传/下载全量数据）
+# ============================================================
+from pydantic import BaseModel as PydanticModel
+from typing import Any
+
+class SyncPayload(PydanticModel):
+    characters: list[dict[str, Any]] = []
+    worldBuildings: list[dict[str, Any]] = []
+    relations: list[dict[str, Any]] = []
+
+
+@app.post("/api/sync/replace-all")
+def sync_replace_all(payload: SyncPayload):
+    """全量替换服务器数据（手机上传用）"""
+    conn = get_db()
+    cursor = conn.cursor()
+
+    # 替换角色
+    cursor.execute("DELETE FROM characters")
+    for c in payload.characters:
+        cols = list(c.keys())
+        placeholders = ",".join(["?"] * len(cols))
+        col_names = ",".join(cols)
+        values = [c[col] for col in cols]
+        cursor.execute(f"INSERT INTO characters ({col_names}) VALUES ({placeholders})", values)
+
+    # 替换世界设定
+    cursor.execute("DELETE FROM world_buildings")
+    for w in payload.worldBuildings:
+        cols = list(w.keys())
+        placeholders = ",".join(["?"] * len(cols))
+        col_names = ",".join(cols)
+        values = [w[col] for col in cols]
+        cursor.execute(f"INSERT INTO world_buildings ({col_names}) VALUES ({placeholders})", values)
+
+    # 替换关系
+    cursor.execute("DELETE FROM relations")
+    for r in payload.relations:
+        cols = list(r.keys())
+        placeholders = ",".join(["?"] * len(cols))
+        col_names = ",".join(cols)
+        values = [r[col] for col in cols]
+        cursor.execute(f"INSERT INTO relations ({col_names}) VALUES ({placeholders})", values)
+
+    conn.commit()
+    conn.close()
+    return {
+        "message": "同步成功",
+        "characters": len(payload.characters),
+        "worldBuildings": len(payload.worldBuildings),
+        "relations": len(payload.relations),
+    }
+
+
 @app.get("/worldview")
 def serve_worldview():
     return FileResponse("worldview.html")
