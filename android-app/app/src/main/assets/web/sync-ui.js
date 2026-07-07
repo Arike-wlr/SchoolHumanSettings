@@ -82,6 +82,7 @@
           <div class="sync-stats-row"><span class="sync-stats-label">本地角色</span><span class="sync-stats-val" id="localCharCount">-</span></div>
           <div class="sync-stats-row"><span class="sync-stats-label">本地设定</span><span class="sync-stats-val" id="localWorldCount">-</span></div>
           <div class="sync-stats-row"><span class="sync-stats-label">本地关系</span><span class="sync-stats-val" id="localRelCount">-</span></div>
+          <div class="sync-stats-row"><span class="sync-stats-label">本地文档</span><span class="sync-stats-val" id="localDocCount">-</span></div>
           <div class="sync-stats-row"><span class="sync-stats-label">服务器</span><span class="sync-stats-val" id="serverStatus">未连接</span></div>
         </div>
         <div class="sync-status" id="syncStatus"></div>
@@ -113,6 +114,7 @@
       document.getElementById('localCharCount').textContent = stats.characters;
       document.getElementById('localWorldCount').textContent = stats.worldBuildings;
       document.getElementById('localRelCount').textContent = stats.relations;
+      document.getElementById('localDocCount').textContent = stats.documents;
     } catch (e) { /* ignore */ }
   }
 
@@ -156,7 +158,7 @@
     status.className = 'sync-status';
     try {
       const result = await downloadFromServer(msg => { status.textContent = msg; });
-      status.textContent = `下载完成：${result.characters} 角色、${result.worldBuildings} 设定、${result.relations} 关系`;
+      status.textContent = `下载完成：${result.characters} 角色、${result.worldBuildings} 设定、${result.relations} 关系、${result.documents} 文档`;
       status.className = 'sync-status success';
       loadLocalStats();
       // 刷新当前页面数据
@@ -182,7 +184,7 @@
     status.className = 'sync-status';
     try {
       const result = await uploadToServer(msg => { status.textContent = msg; });
-      status.textContent = `上传完成：${result.characters} 角色、${result.worldBuildings} 设定、${result.relations} 关系`;
+      status.textContent = `上传完成：${result.characters} 角色、${result.worldBuildings} 设定、${result.relations} 关系、${result.documents} 文档`;
       status.className = 'sync-status success';
     } catch (e) {
       status.textContent = '上传失败: ' + e.message;

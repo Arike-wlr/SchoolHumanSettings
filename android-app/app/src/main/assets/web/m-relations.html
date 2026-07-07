@@ -85,6 +85,12 @@ if (location.protocol === 'file:') {
   .btn-action:active { background: var(--accent-pale); }
   .btn-action.danger { color: var(--danger); border-color: var(--danger-bg); }
 
+  /* 触控拖拽排序 */
+  .drag-handle { display: flex; align-items: center; justify-content: center; width: 28px; min-width: 28px; height: 28px; color: var(--text-light); font-size: 1.1rem; cursor: grab; -webkit-user-select: none; user-select: none; touch-action: none; }
+  .drag-handle:active { cursor: grabbing; }
+  .rel-card.dragging { opacity: 0.3; transform: scale(0.96); }
+  .rel-card.drag-over { border-color: var(--accent); border-style: dashed; background: var(--accent-pale); }
+
   .empty { text-align: center; padding: 60px 20px; color: var(--text-light); }
   .empty .icon { font-size: 2.5rem; margin-bottom: 8px; opacity: .5; }
   .no-result { text-align: center; padding: 40px 20px; color: var(--text-light); font-size: .88rem; }
@@ -341,6 +347,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('familyOverlay').addEventListener('click', function(e) {
     if (e.target === this) closeFamilyModal();
   });
+  initTouchDrag();
   loadData();
 });
 
@@ -381,14 +388,16 @@ function renderRelList() {
   if (filtered.length === 0 && searchVal) { list.innerHTML=''; noResult.style.display='block'; return; }
   noResult.style.display = 'none';
 
-  list.innerHTML = filtered.map(r => {
+  const idxMap = filtered.map(r => allRelations.indexOf(r));
+  list.innerHTML = filtered.map((r, i) => {
     const fromName = r.from_name || '角色#' + r.from_char_id;
     const toName = r.to_name || '角色#' + r.to_char_id;
     const typeClass = r.relation_type === 'CP' ? 'cp' : r.relation_type === '师生' ? '师生' : '';
     const typeHtml = r.relation_type ? `<span class="rel-type ${typeClass}">${esc(r.relation_type)}</span>` : '';
     return `
-      <div class="rel-card">
+      <div class="rel-card" data-drag-id="${r.id}" data-drag-idx="${idxMap[i]}">
         <div class="rel-names">
+          <span class="drag-handle" title="长按拖动排序">⠿</span>
           <span class="rel-name">${esc(fromName)}</span>
           <span class="rel-arrow">→</span>
           <span class="rel-name">${esc(toName)}</span>
@@ -500,6 +509,130 @@ function showToast(msg, type) {
   t.textContent = msg;
   t.className = 'toast show' + (type ? ' '+type : '');
   setTimeout(() => t.classList.remove('show'), 2200);
+}
+
+// ============================================================
+// 触控拖拽排序
+// ============================================================
+let _tdEnabled = false, _tdEl = null, _tdGhost = null, _tdIdx = -1;
+let _tdStartY = 0, _tdStartX = 0, _tdCurY = 0, _tdTimer = null;
+let _tdListEl = null;
+
+function _tdGetItems() {
+  return [..._tdListEl.querySelectorAll('[data-drag-id]:not(.dragging)')];
+}
+
+function _tdFindTargetIdx(y) {
+  let bestIdx = _tdIdx, bestDist = Infinity;
+  _tdGetItems().forEach(item => {
+    const rect = item.getBoundingClientRect();
+    const mid = rect.top + rect.height / 2;
+    const dist = Math.abs(y - mid);
+    if (dist < bestDist) { bestDist = dist; bestIdx = parseInt(item.dataset.dragIdx); }
+  });
+  return bestDist < 40 ? bestIdx : _tdIdx;
+}
+
+function _tdCreateGhost() {
+  if (!_tdEl) return;
+  const rect = _tdEl.getBoundingClientRect();
+  _tdGhost = _tdEl.cloneNode(true);
+  Object.assign(_tdGhost.style, {
+    position:'fixed', zIndex:'9999', width:rect.width+'px', left:rect.left+'px',
+    top:(_tdCurY - rect.height/2)+'px', opacity:'0.94', transform:'scale(1.03)',
+    boxShadow:'0 8px 28px rgba(0,0,0,.2)', pointerEvents:'none', transition:'none',
+    borderRadius:'12px', background:'#fffef9'
+  });
+  document.body.appendChild(_tdGhost);
+  _tdEl.classList.add('dragging');
+}
+
+function _tdSwap(fromIdx, toIdx) {
+  if (fromIdx === toIdx) return;
+  const item = allRelations.splice(fromIdx, 1)[0];
+  allRelations.splice(toIdx, 0, item);
+}
+
+function initTouchDrag() {
+  _tdListEl = document.getElementById('relList');
+  if (!_tdListEl) return;
+
+  _tdListEl.addEventListener('touchstart', function(e) {
+    const handle = e.target.closest('.drag-handle');
+    if (!handle) return;
+    const card = handle.closest('[data-drag-id]');
+    if (!card) return;
+
+    _tdEl = card;
+    _tdIdx = parseInt(card.dataset.dragIdx);
+    _tdStartX = e.touches[0].clientX;
+    _tdStartY = e.touches[0].clientY;
+    _tdCurY = _tdStartY;
+
+    _tdTimer = setTimeout(() => {
+      _tdEnabled = true;
+      _tdCreateGhost();
+      if (navigator.vibrate) navigator.vibrate(10);
+    }, 400);
+  }, {passive: false});
+
+  _tdListEl.addEventListener('touchmove', function(e) {
+    if (!_tdEnabled) {
+      if (_tdTimer && (Math.abs(e.touches[0].clientY - _tdStartY) > 8 || Math.abs(e.touches[0].clientX - _tdStartX) > 8)) {
+        clearTimeout(_tdTimer); _tdTimer = null; _tdEl = null; _tdIdx = -1;
+      }
+      return;
+    }
+    e.preventDefault();
+    _tdCurY = e.touches[0].clientY;
+    if (_tdGhost) {
+      _tdGhost.style.top = (_tdCurY - _tdGhost.offsetHeight / 2) + 'px';
+    }
+
+    // 边缘自动滚动
+    const edge = 70;
+    if (_tdCurY < edge) window.scrollBy(0, -6);
+    else if (_tdCurY > window.innerHeight - edge) window.scrollBy(0, 6);
+
+    const newIdx = _tdFindTargetIdx(_tdCurY);
+    if (newIdx !== _tdIdx) {
+      _tdSwap(_tdIdx, newIdx);
+      _tdIdx = newIdx;
+      renderRelList();
+      // 重新找到拖拽卡片
+      const newCard = _tdListEl.querySelector(`[data-drag-idx="${_tdIdx}"]`);
+      if (newCard) {
+        _tdEl = newCard;
+        _tdEl.classList.add('dragging');
+      }
+      if (_tdGhost) { _tdGhost.remove(); _tdCreateGhost(); }
+    }
+  }, {passive: false});
+
+  _tdListEl.addEventListener('touchend', _tdEndDrag);
+  _tdListEl.addEventListener('touchcancel', _tdEndDrag);
+}
+
+function _tdEndDrag() {
+  clearTimeout(_tdTimer); _tdTimer = null;
+  if (_tdEnabled) {
+    _tdEnabled = false;
+    if (_tdGhost) { _tdGhost.remove(); _tdGhost = null; }
+    if (_tdEl) { _tdEl.classList.remove('dragging'); _tdEl = null; }
+    saveRelOrder();
+    renderRelList();
+  }
+  _tdEl = null; _tdIdx = -1;
+}
+
+async function saveRelOrder() {
+  try {
+    await fetch(`${API_REL}/reorder`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items: allRelations.map((r, i) => ({ id: r.id, sort_order: i })) }),
+    });
+  } catch(e) { /* 静默失败 */ }
 }
 
 // ============================================================

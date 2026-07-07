@@ -71,6 +71,12 @@ if (location.protocol === 'file:') {
   .btn-action:active { background: var(--accent-pale); }
   .btn-action.danger { color: var(--danger); border-color: var(--danger-bg); }
 
+  /* 触控拖拽排序 */
+  .drag-handle { display: flex; align-items: center; justify-content: center; width: 28px; min-width: 28px; height: 28px; color: var(--text-light); font-size: 1.1rem; cursor: grab; -webkit-user-select: none; user-select: none; touch-action: none; }
+  .drag-handle:active { cursor: grabbing; }
+  .card.dragging { opacity: 0.3; transform: scale(0.96); }
+  .card.drag-over { border-color: var(--accent); border-style: dashed; background: var(--accent-pale); }
+
   .empty { text-align: center; padding: 60px 20px; color: var(--text-light); }
   .empty .icon { font-size: 2.5rem; margin-bottom: 8px; opacity: .5; }
   .no-result { text-align: center; padding: 40px 20px; color: var(--text-light); font-size: .88rem; }
@@ -231,7 +237,10 @@ let detailEntryId = null;
 
 function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
 
-document.addEventListener('DOMContentLoaded', () => { loadEntries(); });
+document.addEventListener('DOMContentLoaded', () => {
+  initTouchDrag();
+  loadEntries();
+});
 
 async function loadEntries() {
   try {
@@ -317,16 +326,20 @@ function renderGrid(entries) {
   empty.style.display = 'none';
   if (entries.length === 0 && (searchVal || activeCategory !== '全部')) { grid.innerHTML=''; noResult.style.display='block'; return; }
   noResult.style.display = 'none';
-  grid.innerHTML = entries.map(e => cardHTML(e)).join('');
+  // 计算全局索引映射
+  const idxMap = {};
+  entries.forEach(e => { idxMap[e.id] = allEntries.indexOf(e); });
+  grid.innerHTML = entries.map(e => cardHTML(e, idxMap[e.id])).join('');
 }
 
-function cardHTML(e) {
+function cardHTML(e, globalIdx) {
   const contentText = e.content || '';
   const preview = contentText.length > 120 ? contentText.substring(0,120)+'…' : contentText;
   const showCat = activeMainCategory !== '人物背景故事' && e.category;
   return `
-    <div class="card" onclick="openDetailModal(${e.id})">
+    <div class="card" data-drag-id="${e.id}" data-drag-idx="${globalIdx !== undefined ? globalIdx : 0}" onclick="openDetailModal(${e.id})">
       <div class="card-header">
+        <span class="drag-handle" title="长按拖动排序" onclick="event.stopPropagation()" style="flex-shrink:0;">⠿</span>
         <span class="card-title">${esc(e.title)}</span>
         ${showCat?`<span class="cat-tag">${esc(e.category)}</span>`:''}
       </div>
@@ -429,6 +442,129 @@ function showToast(msg, type) {
   t.textContent = msg;
   t.className = 'toast show' + (type ? ' '+type : '');
   setTimeout(() => t.classList.remove('show'), 2200);
+}
+
+// ============================================================
+// 触控拖拽排序
+// ============================================================
+let _tdEnabled = false, _tdEl = null, _tdGhost = null, _tdIdx = -1;
+let _tdStartY = 0, _tdStartX = 0, _tdCurY = 0, _tdTimer = null;
+let _tdListEl = null;
+
+function _tdGetItems() {
+  return [..._tdListEl.querySelectorAll('[data-drag-id]:not(.dragging)')];
+}
+
+function _tdFindTargetIdx(y) {
+  let bestIdx = _tdIdx, bestDist = Infinity;
+  _tdGetItems().forEach(item => {
+    const rect = item.getBoundingClientRect();
+    const mid = rect.top + rect.height / 2;
+    const dist = Math.abs(y - mid);
+    if (dist < bestDist) { bestDist = dist; bestIdx = parseInt(item.dataset.dragIdx); }
+  });
+  return bestDist < 40 ? bestIdx : _tdIdx;
+}
+
+function _tdCreateGhost() {
+  if (!_tdEl) return;
+  const rect = _tdEl.getBoundingClientRect();
+  _tdGhost = _tdEl.cloneNode(true);
+  Object.assign(_tdGhost.style, {
+    position:'fixed', zIndex:'9999', width:rect.width+'px', left:rect.left+'px',
+    top:(_tdCurY - rect.height/2)+'px', opacity:'0.94', transform:'scale(1.03)',
+    boxShadow:'0 8px 28px rgba(0,0,0,.2)', pointerEvents:'none', transition:'none',
+    borderRadius:'12px', background:'#fffef9'
+  });
+  _tdGhost.querySelector('.drag-handle')?.remove();
+  document.body.appendChild(_tdGhost);
+  _tdEl.classList.add('dragging');
+}
+
+function _tdSwap(fromIdx, toIdx) {
+  if (fromIdx === toIdx) return;
+  const item = allEntries.splice(fromIdx, 1)[0];
+  allEntries.splice(toIdx, 0, item);
+}
+
+function initTouchDrag() {
+  _tdListEl = document.getElementById('entryGrid');
+  if (!_tdListEl) return;
+
+  _tdListEl.addEventListener('touchstart', function(e) {
+    const handle = e.target.closest('.drag-handle');
+    if (!handle) return;
+    const card = handle.closest('[data-drag-id]');
+    if (!card) return;
+
+    _tdEl = card;
+    _tdIdx = parseInt(card.dataset.dragIdx);
+    _tdStartX = e.touches[0].clientX;
+    _tdStartY = e.touches[0].clientY;
+    _tdCurY = _tdStartY;
+
+    _tdTimer = setTimeout(() => {
+      _tdEnabled = true;
+      _tdCreateGhost();
+      if (navigator.vibrate) navigator.vibrate(10);
+    }, 400);
+  }, {passive: false});
+
+  _tdListEl.addEventListener('touchmove', function(e) {
+    if (!_tdEnabled) {
+      if (_tdTimer && (Math.abs(e.touches[0].clientY - _tdStartY) > 8 || Math.abs(e.touches[0].clientX - _tdStartX) > 8)) {
+        clearTimeout(_tdTimer); _tdTimer = null; _tdEl = null; _tdIdx = -1;
+      }
+      return;
+    }
+    e.preventDefault();
+    _tdCurY = e.touches[0].clientY;
+    if (_tdGhost) {
+      _tdGhost.style.top = (_tdCurY - _tdGhost.offsetHeight / 2) + 'px';
+    }
+
+    const edge = 70;
+    if (_tdCurY < edge) window.scrollBy(0, -6);
+    else if (_tdCurY > window.innerHeight - edge) window.scrollBy(0, 6);
+
+    const newIdx = _tdFindTargetIdx(_tdCurY);
+    if (newIdx !== _tdIdx) {
+      _tdSwap(_tdIdx, newIdx);
+      _tdIdx = newIdx;
+      applyFilter();  // 重新渲染当前筛选视图
+      const newCard = _tdListEl.querySelector(`[data-drag-idx="${_tdIdx}"]`);
+      if (newCard) {
+        _tdEl = newCard;
+        _tdEl.classList.add('dragging');
+      }
+      if (_tdGhost) { _tdGhost.remove(); _tdCreateGhost(); }
+    }
+  }, {passive: false});
+
+  _tdListEl.addEventListener('touchend', _tdEndDrag);
+  _tdListEl.addEventListener('touchcancel', _tdEndDrag);
+}
+
+function _tdEndDrag() {
+  clearTimeout(_tdTimer); _tdTimer = null;
+  if (_tdEnabled) {
+    _tdEnabled = false;
+    if (_tdGhost) { _tdGhost.remove(); _tdGhost = null; }
+    if (_tdEl) { _tdEl.classList.remove('dragging'); _tdEl = null; }
+    saveWorldOrder();
+    applyFilter();
+  }
+  _tdEl = null; _tdIdx = -1;
+}
+
+async function saveWorldOrder() {
+  try {
+    await fetch(`${API}/reorder`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items: allEntries.map((e, i) => ({ id: e.id, sort_order: i })) }),
+    });
+  } catch(e) { /* 静默失败 */ }
 }
 </script>
 <!-- 离线模式脚本（仅 APK 环境 file:// 协议加载） -->
