@@ -141,7 +141,10 @@ async function bulkInsert(storeName, items) {
 
 // ----- 角色 -----
 const charDB = {
-  list: () => getAll(STORES.characters),
+  list: async () => {
+    const all = await getAll(STORES.characters);
+    return all.sort((a, b) => (a.sort_order ?? Infinity) - (b.sort_order ?? Infinity));
+  },
   get: (id) => getById(STORES.characters, id),
   create: (data) => add(STORES.characters, data),
   update: (data) => put(STORES.characters, data),
@@ -154,8 +157,9 @@ const charDB = {
 const worldDB = {
   list: async (mainCategory) => {
     const all = await getAll(STORES.worldBuildings);
-    if (mainCategory) return all.filter(e => e.main_category === mainCategory);
-    return all;
+    const sorted = all.sort((a, b) => (a.sort_order ?? Infinity) - (b.sort_order ?? Infinity));
+    if (mainCategory) return sorted.filter(e => e.main_category === mainCategory);
+    return sorted;
   },
   get: (id) => getById(STORES.worldBuildings, id),
   create: (data) => add(STORES.worldBuildings, data),
@@ -167,7 +171,10 @@ const worldDB = {
 
 // ----- 关系 -----
 const relDB = {
-  list: () => getAll(STORES.relations),
+  list: async () => {
+    const all = await getAll(STORES.relations);
+    return all.sort((a, b) => (a.sort_order ?? Infinity) - (b.sort_order ?? Infinity));
+  },
   get: (id) => getById(STORES.relations, id),
   create: (data) => add(STORES.relations, data),
   update: (data) => put(STORES.relations, data),

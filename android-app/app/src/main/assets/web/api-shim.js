@@ -57,7 +57,8 @@ async function handleApiRequest(url, init) {
       }
     }
     if (path === '/api/characters/reorder' && method === 'POST') {
-      // 离线模式不支持排序，静默成功
+      const data = JSON.parse(body);
+      await persistReorder(STORES.characters, data.items);
       return makeResponse({ message: 'ok' });
     }
 
@@ -89,6 +90,8 @@ async function handleApiRequest(url, init) {
         }
       }
       if (path === '/api/world-buildings/reorder' && method === 'POST') {
+        const data = JSON.parse(body);
+        await persistReorder(STORES.worldBuildings, data.items);
         return makeResponse({ message: 'ok' });
       }
     }
@@ -129,6 +132,8 @@ async function handleApiRequest(url, init) {
         }
       }
       if (path === '/api/relations/reorder' && method === 'POST') {
+        const data = JSON.parse(body);
+        await persistReorder(STORES.relations, data.items);
         return makeResponse({ message: 'ok' });
       }
     }
@@ -226,4 +231,26 @@ function makeResponse(data, status = 200, contentType) {
   }
 
   return new Response(bodyStr, { status, headers, ok });
+}
+
+// ============================================================
+// 排序持久化辅助函数
+// ============================================================
+async function persistReorder(storeName, items) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const t = db.transaction(storeName, 'readwrite');
+    const store = t.objectStore(storeName);
+    t.oncomplete = () => resolve();
+    t.onerror = () => reject(t.error);
+    for (const item of items) {
+      const getReq = store.get(item.id);
+      getReq.onsuccess = () => {
+        if (getReq.result) {
+          getReq.result.sort_order = item.sort_order;
+          store.put(getReq.result);
+        }
+      };
+    }
+  });
 }
