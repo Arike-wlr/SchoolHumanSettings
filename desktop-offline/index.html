@@ -1,0 +1,1505 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>高校拟人OC · 角色设定簿</title>
+<style>
+  /* ====== 全局 ====== */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #f5f0eb;
+    --card-bg: #fffef9;
+    --text: #3d322b;
+    --text-light: #8c7b6e;
+    --accent: #8b5e3c;
+    --accent-light: #c49a6c;
+    --accent-pale: #f0e4d4;
+    --danger: #c0392b;
+    --danger-bg: #fce4e4;
+    --border: #e0d5c7;
+    --shadow: 0 2px 16px rgba(60,40,20,.08);
+    --shadow-lg: 0 8px 40px rgba(60,40,20,.12);
+    --radius: 14px;
+    --radius-sm: 8px;
+    --font-serif: 'Georgia', 'Noto Serif SC', 'SimSun', serif;
+    --font-sans: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+    --transition: 0.25s cubic-bezier(.4,0,.2,1);
+  }
+
+  body {
+    font-family: var(--font-sans);
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    background-image:
+      radial-gradient(ellipse at 20% 10%, rgba(196,154,108,.08) 0%, transparent 60%),
+      radial-gradient(ellipse at 80% 90%, rgba(139,94,60,.06) 0%, transparent 60%);
+  }
+
+  /* ====== Header ====== */
+  .header {
+    background: linear-gradient(135deg, #3d2b1f 0%, #5a3e2b 40%, #7a5543 100%);
+    color: #f5ede4;
+    padding: 20px 24px;
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+  }
+  .header::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='0.03'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+    pointer-events: none;
+  }
+
+  .header h1 {
+    font-family: var(--font-serif);
+    font-size: 2rem;
+    font-weight: 400;
+    letter-spacing: 0.06em;
+  }
+  .header .subtitle {
+    margin-top: 6px;
+    font-size: .92rem;
+    opacity: .7;
+    letter-spacing: .08em;
+  }
+
+  /* ====== 侧边栏布局 ====== */
+  .app-layout {
+    display: flex;
+    min-height: 100vh;
+  }
+
+  .sidebar {
+    width: 180px;
+    background: linear-gradient(180deg, #2a1a12 0%, #1a0e08 100%);
+    color: #f5ede4;
+    display: flex;
+    flex-direction: column;
+    transition: width 0.3s cubic-bezier(.4,0,.2,1);
+    flex-shrink: 0;
+    overflow: hidden;
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    z-index: 10;
+    box-shadow: 2px 0 16px rgba(0,0,0,.15);
+  }
+  .sidebar.collapsed {
+    width: 54px;
+  }
+
+  .sidebar-toggle {
+    background: none;
+    border: none;
+    color: #b8a090;
+    font-size: 1.2rem;
+    padding: 14px 16px 6px;
+    cursor: pointer;
+    transition: var(--transition);
+    text-align: left;
+    letter-spacing: .04em;
+  }
+  .sidebar.collapsed .sidebar-toggle {
+    text-align: center;
+    padding-left: 0;
+    padding-right: 0;
+  }
+  .sidebar-toggle:hover { color: #fff; }
+
+  .sidebar-nav {
+    display: flex;
+    flex-direction: column;
+    padding: 8px;
+    gap: 3px;
+    flex: 1;
+  }
+
+  .sidebar-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    color: #c8b8a8;
+    text-decoration: none;
+    font-size: .88rem;
+    font-family: var(--font-sans);
+    transition: var(--transition);
+    white-space: nowrap;
+  }
+  .sidebar-item:hover { background: rgba(255,255,255,.06); color: #f5ede4; }
+  .sidebar-item.active { background: rgba(139,94,60,.3); color: #f5ede4; font-weight: 500; }
+
+  .sidebar-icon { font-size: 1.15rem; flex-shrink: 0; width: 22px; text-align: center; }
+  .sidebar-text { transition: opacity 0.2s, width 0.2s; overflow: hidden; }
+  .sidebar.collapsed .sidebar-text { opacity: 0; width: 0; }
+  .sidebar.collapsed .sidebar-item { gap: 0; justify-content: center; padding: 10px 0; }
+
+  .sidebar-footer {
+    padding: 12px;
+    border-top: 1px solid rgba(255,255,255,.08);
+    text-align: center;
+  }
+  .sidebar.collapsed .sidebar-footer { display: none; }
+
+  .main-content {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* ====== Container ====== */
+  .container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 24px 20px 60px;
+  }
+
+  /* ====== 工具栏 ====== */
+  .toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 14px;
+    margin-bottom: 28px;
+  }
+  .toolbar .count {
+    font-size: .9rem;
+    color: var(--text-light);
+  }
+  .toolbar .count strong { color: var(--accent); }
+
+  .search-wrap {
+    position: relative;
+    flex: 1;
+    max-width: 360px;
+    min-width: 200px;
+  }
+  .search-wrap input {
+    width: 100%;
+    padding: 9px 14px 9px 38px;
+    border: 1.5px solid var(--border);
+    border-radius: 24px;
+    font-size: .9rem;
+    font-family: var(--font-sans);
+    background: var(--card-bg);
+    color: var(--text);
+    transition: var(--transition);
+    outline: none;
+  }
+  .search-wrap input:focus {
+    border-color: var(--accent-light);
+    box-shadow: 0 0 0 3px rgba(196,154,108,.15);
+  }
+  .search-wrap input::placeholder { color: var(--text-light); opacity: .7; }
+  .search-wrap .search-icon {
+    position: absolute;
+    left: 13px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--text-light);
+    font-size: .95rem;
+    pointer-events: none;
+  }
+  .search-wrap .clear-btn {
+    position: absolute;
+    right: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: none;
+    border: none;
+    color: var(--text-light);
+    cursor: pointer;
+    font-size: 1rem;
+    padding: 2px 6px;
+    border-radius: 50%;
+    line-height: 1;
+    display: none;
+    transition: var(--transition);
+  }
+  .search-wrap .clear-btn:hover { color: var(--text); background: var(--accent-pale); }
+  .search-wrap.has-value .clear-btn { display: block; }
+
+  .no-result {
+    text-align: center;
+    padding: 40px 20px;
+    color: var(--text-light);
+    font-size: .95rem;
+  }
+
+  /* ====== 地区标签栏 ====== */
+  .region-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 24px;
+  }
+  .region-tab {
+    padding: 8px 18px;
+    border: 1.5px solid var(--border);
+    border-radius: 24px;
+    background: var(--card-bg);
+    color: var(--text-light);
+    font-size: .88rem;
+    font-family: var(--font-sans);
+    cursor: pointer;
+    transition: var(--transition);
+    white-space: nowrap;
+    font-weight: 500;
+    letter-spacing: .03em;
+    user-select: none;
+  }
+  .region-tab:hover {
+    border-color: var(--accent-light);
+    color: var(--accent);
+    background: var(--accent-pale);
+  }
+  .region-tab.active {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+  }
+  .region-tab .tab-count {
+    font-size: .75rem;
+    opacity: .7;
+    margin-left: 3px;
+  }
+
+  .region-divider {
+    grid-column: 1 / -1;
+    margin: 8px 0 6px;
+    font-family: var(--font-serif);
+    font-size: 1.1rem;
+    color: var(--accent);
+    letter-spacing: .06em;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 10px 22px;
+    border: none;
+    border-radius: var(--radius-sm);
+    font-size: .92rem;
+    font-family: var(--font-sans);
+    cursor: pointer;
+    transition: var(--transition);
+    font-weight: 500;
+    letter-spacing: .02em;
+  }
+  .btn-primary {
+    background: var(--accent);
+    color: #fff;
+  }
+  .btn-primary:hover { background: #6d4a2e; transform: translateY(-1px); box-shadow: 0 4px 14px rgba(139,94,60,.3); }
+  .btn-outline {
+    background: transparent;
+    color: var(--accent);
+    border: 1.5px solid var(--accent-light);
+  }
+  .btn-outline:hover { background: var(--accent-pale); }
+  .btn-sm { padding: 6px 14px; font-size: .82rem; }
+  .btn-danger { background: var(--danger); color: #fff; }
+  .btn-danger:hover { background: #a93226; }
+  .btn-ghost { background: transparent; color: var(--text-light); border: 1px solid var(--border); }
+  .btn-ghost:hover { background: #f0e4d4; }
+
+  /* ====== 卡片网格 ====== */
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+    gap: 22px;
+  }
+
+  /* ====== 角色卡片 ====== */
+  .card {
+    background: var(--card-bg);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    border: 1px solid var(--border);
+    overflow: hidden;
+    transition: var(--transition);
+    display: flex;
+    flex-direction: column;
+    cursor: pointer;
+    height: 320px;
+    position: relative;
+  }
+  .card:hover {
+    transform: translateY(-3px);
+    box-shadow: var(--shadow-lg);
+  }
+  .card .card-inner {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+  }
+  .card-header {
+    padding: 20px 22px 6px;
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+  }
+  .card-header {
+    flex-wrap: wrap;
+  }
+  .card-header .name {
+    font-family: var(--font-serif);
+    font-size: 1.35rem;
+    font-weight: 700;
+    color: #3d2b1f;
+    letter-spacing: .04em;
+  }
+  .card-header .uni-tag {
+    font-size: .75rem;
+    color: var(--accent);
+    background: var(--accent-pale);
+    padding: 2px 10px;
+    border-radius: 20px;
+    letter-spacing: .03em;
+    font-weight: 500;
+  }
+  .status-badge { font-size: .72rem; padding: 2px 10px; border-radius: 20px; font-weight: 600; letter-spacing: .06em; }
+  .status-badge.perished { background: #e0d5cc; color: #5a3e2b; }
+  .card.perished { opacity: 0.7; filter: grayscale(0.4); }
+  .card.perished:hover { opacity: 0.85; filter: grayscale(0.2); }
+  .card-header .gender-badge {
+    font-size: .78rem;
+    padding: 2px 10px;
+    border-radius: 20px;
+    font-weight: 500;
+    letter-spacing: .04em;
+  }
+  .card-check {
+    position: absolute;
+    top: 12px;
+    left: 14px;
+    width: 18px;
+    height: 18px;
+    cursor: pointer;
+    accent-color: var(--accent);
+    z-index: 2;
+    display: none;
+  }
+  .export-mode .card-check { display: block; }
+  .export-mode .card:hover { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(139,94,60,.12); }
+  .card.selected { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(139,94,60,.25); }
+  .gender-badge.male   { background: #dbeafe; color: #1e40af; }
+  .gender-badge.female { background: #fce7f3; color: #9d174d; }
+  .gender-badge.other  { background: #e9d5ff; color: #6b21a8; }
+
+  .card-body {
+    padding: 10px 22px 18px;
+    flex: 1;
+  }
+  .field {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    margin-bottom: 6px;
+    font-size: .9rem;
+    line-height: 1.55;
+  }
+  .field .label {
+    color: var(--accent);
+    font-weight: 600;
+    white-space: nowrap;
+    min-width: 56px;
+    font-size: .82rem;
+    padding-top: 1px;
+  }
+  .field .value {
+    color: var(--text);
+    word-break: break-word;
+  }
+  .field .value.muted { color: var(--text-light); font-style: italic; }
+
+  /* 卡片预览截断 */
+  .card-body { overflow: hidden; }
+  .setting-preview {
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: 1.55;
+    max-height: calc(1.55em * 3);
+  }
+  .appearance-preview {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: 1.55;
+    max-height: calc(1.55em * 2);
+  }
+  .field-preview {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 100%;
+  }
+  .card-more {
+    flex-shrink: 0;
+    text-align: center;
+    font-size: .8rem;
+    color: var(--accent-light);
+    padding: 8px 0 4px;
+    letter-spacing: .04em;
+    opacity: 0;
+    transition: opacity 0.2s;
+  }
+  .card:hover .card-more { opacity: 1; }
+
+  /* 拖拽排序 */
+  .card.dragging {
+    opacity: 0.4;
+    transform: scale(0.95);
+    border: 2px dashed var(--accent-light);
+  }
+  .card.drag-over {
+    border: 2px solid var(--accent);
+    box-shadow: 0 0 0 4px rgba(139,94,60,.15);
+  }
+  .card .drag-handle {
+    position: absolute;
+    top: 10px;
+    right: 12px;
+    color: var(--text-light);
+    font-size: 1rem;
+    cursor: grab;
+    opacity: 0;
+    transition: opacity 0.2s;
+    user-select: none;
+    line-height: 1;
+    letter-spacing: -2px;
+    z-index: 1;
+  }
+  .card:hover .drag-handle { opacity: 0.5; }
+  .card .drag-handle:hover { opacity: 1; cursor: grabbing; }
+  .card .drag-handle:active { cursor: grabbing; }
+
+  .card-footer {
+    display: flex;
+    gap: 8px;
+    padding: 12px 22px 18px;
+    border-top: 1px solid #f0e8dc;
+  }
+
+  /* ====== 空状态 ====== */
+  .empty {
+    text-align: center;
+    padding: 80px 20px;
+    color: var(--text-light);
+  }
+  .empty .icon { font-size: 3.5rem; margin-bottom: 14px; opacity: .5; }
+  .empty p { font-size: 1rem; margin-bottom: 20px; }
+
+  /* ====== Modal ====== */
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(30,18,8,.45);
+    backdrop-filter: blur(4px);
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    opacity: 0;
+    visibility: hidden;
+    transition: var(--transition);
+  }
+  .modal-overlay.active { opacity: 1; visibility: visible; }
+
+  .modal {
+    background: var(--card-bg);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-lg);
+    width: 100%;
+    max-width: 560px;
+    max-height: 90vh;
+    overflow-y: auto;
+    transform: translateY(20px);
+    transition: var(--transition);
+  }
+  .modal-overlay.active .modal { transform: translateY(0); }
+
+  .modal-header {
+    padding: 20px 24px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    position: sticky;
+    top: 0;
+    background: var(--card-bg);
+    z-index: 2;
+  }
+  .modal-header h2 {
+    font-family: var(--font-serif);
+    font-size: 1.3rem;
+    font-weight: 600;
+    color: #3d2b1f;
+  }
+  .modal-close {
+    width: 34px; height: 34px;
+    border: none; background: #f5f0eb;
+    border-radius: 50%;
+    cursor: pointer;
+    font-size: 1.1rem;
+    color: var(--text-light);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: var(--transition);
+  }
+  .modal-close:hover { background: #e8ddd0; color: var(--text); }
+
+  .modal-body { padding: 22px 24px; }
+
+  .form-group {
+    margin-bottom: 16px;
+  }
+  .form-group label {
+    display: block;
+    font-size: .85rem;
+    font-weight: 600;
+    color: var(--accent);
+    margin-bottom: 5px;
+    letter-spacing: .03em;
+  }
+  .form-group input,
+  .form-group textarea,
+  .form-group select {
+    width: 100%;
+    padding: 10px 14px;
+    border: 1.5px solid var(--border);
+    border-radius: var(--radius-sm);
+    font-size: .92rem;
+    font-family: var(--font-sans);
+    background: #fefdf9;
+    color: var(--text);
+    transition: var(--transition);
+    resize: vertical;
+  }
+  .form-group input:focus,
+  .form-group textarea:focus,
+  .form-group select:focus {
+    outline: none;
+    border-color: var(--accent-light);
+    box-shadow: 0 0 0 3px rgba(196,154,108,.15);
+  }
+  .form-group textarea { min-height: 90px; }
+  .form-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+  }
+
+  .modal-footer {
+    padding: 16px 24px 22px;
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+  }
+
+  /* ====== 详情 Modal ====== */
+  .detail-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(30,18,8,.45);
+    backdrop-filter: blur(4px);
+    z-index: 1001;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    opacity: 0;
+    visibility: hidden;
+    transition: var(--transition);
+  }
+  .detail-overlay.active { opacity: 1; visibility: visible; }
+
+  .detail-modal {
+    background: var(--card-bg);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-lg);
+    width: 100%;
+    max-width: 720px;
+    max-height: 90vh;
+    overflow-y: auto;
+    transform: translateY(20px);
+    transition: var(--transition);
+  }
+  .detail-overlay.active .detail-modal { transform: translateY(0); }
+
+  .detail-header {
+    padding: 20px 28px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    position: sticky;
+    top: 0;
+    background: var(--card-bg);
+    z-index: 2;
+  }
+  .detail-header h2 {
+    font-family: var(--font-serif);
+    font-size: 1.3rem;
+    font-weight: 600;
+    color: #3d2b1f;
+    letter-spacing: .04em;
+  }
+  .detail-header .detail-badges {
+    display: flex;
+    gap: 8px;
+    margin-left: 12px;
+    flex-wrap: wrap;
+  }
+  .detail-close {
+    width: 34px; height: 34px;
+    border: none; background: #f5f0eb;
+    border-radius: 50%;
+    cursor: pointer;
+    font-size: 1.1rem;
+    color: var(--text-light);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: var(--transition);
+    flex-shrink: 0;
+  }
+  .detail-close:hover { background: #e8ddd0; color: var(--text); }
+
+  .detail-body {
+    padding: 24px 28px;
+  }
+  .detail-section {
+    margin-bottom: 18px;
+  }
+  .detail-section:last-child { margin-bottom: 0; }
+  .detail-section .detail-label {
+    font-size: .82rem;
+    font-weight: 600;
+    color: var(--accent);
+    letter-spacing: .05em;
+    margin-bottom: 4px;
+  }
+  .detail-section .detail-value {
+    font-size: .93rem;
+    line-height: 1.7;
+    color: var(--text);
+    word-break: break-word;
+    white-space: pre-wrap;
+  }
+  .detail-section .detail-value.muted { color: var(--text-light); font-style: italic; }
+  .detail-info-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px 28px;
+  }
+  @media (max-width: 600px) {
+    .detail-info-row { grid-template-columns: 1fr; }
+  }
+
+  .detail-footer {
+    padding: 16px 28px 22px;
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    border-top: 1px solid #f0e8dc;
+  }
+
+  /* ====== Toast ====== */
+  .toast {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    z-index: 2000;
+    padding: 12px 24px;
+    border-radius: var(--radius-sm);
+    background: #2d2a26;
+    color: #f5ede4;
+    font-size: .9rem;
+    box-shadow: var(--shadow-lg);
+    transform: translateX(120%);
+    transition: var(--transition);
+    max-width: 380px;
+  }
+  .toast.show { transform: translateX(0); }
+  .toast.success { background: #2d5a27; }
+  .toast.error { background: var(--danger); }
+
+  /* ====== 响应式 ====== */
+  @media (max-width: 768px) {
+    .grid { grid-template-columns: 1fr; }
+    .header h1 { font-size: 1.5rem; }
+    .form-row { grid-template-columns: 1fr; }
+    .modal { max-width: 100%; }
+  }
+</style>
+</head>
+<body>
+<div class="app-layout">
+
+<!-- ====== 侧边栏 ====== -->
+<aside class="sidebar" id="sidebar">
+  <button class="sidebar-toggle" onclick="toggleSidebar()" title="展开/收起侧边栏">☰</button>
+  <nav class="sidebar-nav">
+    <a href="/" class="sidebar-item active">
+      <span class="sidebar-icon">📖</span><span class="sidebar-text">角色设定</span>
+    </a>
+    <a href="/worldview" class="sidebar-item">
+      <span class="sidebar-icon">🌍</span><span class="sidebar-text">世界观设定</span>
+    </a>
+    <a href="/documents" class="sidebar-item">
+      <span class="sidebar-icon">📄</span><span class="sidebar-text">文档管理</span>
+    </a>
+    <a href="/relations" class="sidebar-item">
+      <span class="sidebar-icon">🔗</span><span class="sidebar-text">关系网</span>
+    </a>
+  </nav>
+  <div class="sidebar-footer">
+    <span style="font-size:.75rem;opacity:.5;">高校拟人OC</span>
+  </div>
+</aside>
+
+<div class="main-content">
+
+<!-- ====== Header ====== -->
+<header class="header">
+  <h1>高校拟人OC 设定簿</h1>
+  <p class="subtitle">记录每一所高校的化身 · 角色设定管理</p>
+</header>
+
+<!-- ====== 主容器 ====== -->
+<div class="container">
+  <div class="toolbar">
+    <span class="count">共 <strong id="charCount">0</strong> 位角色</span>
+    <div class="search-wrap" id="searchWrap">
+      <span class="search-icon">🔍</span>
+      <input type="text" id="searchInput" placeholder="搜索校名或角色名…" oninput="onSearch()">
+      <button class="clear-btn" onclick="clearSearch()" title="清除">✕</button>
+    </div>
+    <button class="btn btn-primary" onclick="openCreateModal()">＋ 添加新角色</button>
+    <span id="exportActions" style="display:none;">
+      <button class="btn btn-outline btn-sm" onclick="toggleSelectAll()">全选</button>
+      <button class="btn btn-outline btn-sm" onclick="cancelExport()">放弃选择</button>
+      <button class="btn btn-primary" id="confirmExportBtn" onclick="confirmExport()" disabled>确认导出</button>
+    </span>
+    <button class="btn btn-outline btn-sm" id="exportBtn" onclick="enterExportMode()">📥 导出</button>
+  </div>
+
+  <div class="region-tabs" id="regionTabs"></div>
+
+  <div class="grid" id="charGrid"></div>
+  <div class="no-result" id="noResult" style="display:none;">未找到匹配的角色</div>
+
+  <div class="empty" id="emptyState">
+    <div class="icon">📖</div>
+    <p>还没有角色设定，点击上方按钮添加第一位吧</p>
+  </div>
+</div>
+
+<!-- ====== 添加/编辑 Modal ====== -->
+<div class="modal-overlay" id="modalOverlay">
+  <div class="modal">
+    <div class="modal-header">
+      <h2 id="modalTitle">添加新角色</h2>
+      <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <form id="charForm" onsubmit="submitForm(event)">
+        <input type="hidden" id="editId">
+
+        <div class="form-group">
+          <label for="name">姓名 *</label>
+          <input type="text" id="name" required placeholder="请输入角色姓名">
+        </div>
+
+        <div class="form-group">
+          <label for="university">代表高校</label>
+          <input type="text" id="university" placeholder="如：上海交通大学">
+        </div>
+
+        <div class="form-group">
+          <label for="region">地区</label>
+          <input type="text" id="region" placeholder="如：北京、江苏、上海">
+        </div>
+
+        <div class="form-group">
+          <label for="namingRationale">取名依据</label>
+          <textarea id="namingRationale" rows="2" placeholder="名字的来源、含义、取名者等…"></textarea>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label for="height">身高</label>
+            <input type="text" id="height" placeholder="如：178cm">
+          </div>
+          <div class="form-group">
+            <label for="gender">性别</label>
+            <select id="gender">
+              <option value="">请选择</option>
+              <option value="男">男</option>
+              <option value="女">女</option>
+              <option value="其他">其他</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="birthday">生日</label>
+          <input type="text" id="birthday" placeholder="如：5月20日 / 1905-05-20">
+        </div>
+
+        <div class="form-group">
+          <label for="appearance">外貌</label>
+          <textarea id="appearance" rows="2" placeholder="描述角色的外貌特征..."></textarea>
+        </div>
+
+        <div class="form-group">
+          <label for="identityPeriod">身份存在时间</label>
+          <input type="text" id="identityPeriod" placeholder="如：民国时期至今 / 1920年-至今">
+        </div>
+
+        <div class="form-group">
+          <label for="birthTime">诞生时间</label>
+          <input type="text" id="birthTime" placeholder="如：1905年建校 / 千禧年初具意识">
+        </div>
+
+        <div class="form-group">
+          <label for="birthplace">诞生地</label>
+          <input type="text" id="birthplace" placeholder="如：南京 / 江西井冈山 / 延安">
+        </div>
+
+        <div class="form-group">
+          <label for="status">存在状态</label>
+          <select id="status">
+            <option value="存在">存在</option>
+            <option value="已消逝">已消逝</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label for="setting">设定</label>
+          <textarea id="setting" rows="3" placeholder="详细描述角色的背景设定、性格、经历等..."></textarea>
+        </div>
+      </form>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" type="button" onclick="closeModal()">取消</button>
+      <button class="btn btn-primary" type="button" id="submitBtn" onclick="submitForm(event)">确认添加</button>
+    </div>
+  </div>
+</div>
+
+<!-- ====== 删除确认 Modal ====== -->
+<div class="modal-overlay" id="deleteOverlay" style="z-index:2000;">
+  <div class="modal" style="max-width:400px;">
+    <div class="modal-header">
+      <h2>确认删除</h2>
+      <button class="modal-close" onclick="closeDeleteModal()">✕</button>
+    </div>
+    <div class="modal-body" style="text-align:center; padding: 28px 24px;">
+      <p style="font-size:1rem; margin-bottom:4px;">确定要删除角色 <strong id="deleteName" style="color:var(--danger);"></strong> 吗？</p>
+      <p style="font-size:.85rem; color:var(--text-light);">此操作无法撤销</p>
+    </div>
+    <div class="modal-footer" style="justify-content:center;">
+      <button class="btn btn-ghost" onclick="closeDeleteModal()">取消</button>
+      <button class="btn btn-danger" id="confirmDeleteBtn" onclick="confirmDelete()">确认删除</button>
+    </div>
+  </div>
+</div>
+
+<!-- ====== 详情查看 Modal ====== -->
+<div class="detail-overlay" id="detailOverlay">
+  <div class="detail-modal">
+    <div class="detail-header">
+      <div style="display:flex;align-items:center;flex-wrap:wrap;gap:10px;">
+        <h2 id="detailName"></h2>
+        <div class="detail-badges">
+          <span class="uni-tag" id="detailUni" style="display:none;"></span>
+          <span class="gender-badge" id="detailGender" style="display:none;"></span>
+          <span id="detailStatus"></span>
+        </div>
+      </div>
+      <button class="detail-close" onclick="closeDetailModal()">✕</button>
+    </div>
+    <div class="detail-body" id="detailBody"></div>
+    <div class="detail-footer">
+      <button class="btn btn-primary btn-sm" onclick="closeDetailModal()">关闭</button>
+    </div>
+  </div>
+</div>
+
+<!-- ====== Toast ====== -->
+<div class="toast" id="toast"></div>
+
+<script>
+// ====== 配置 ======
+const API = '/api/characters';
+let deleteTargetId = null;
+let allCharacters = [];
+let activeRegion = '全部';
+let selectedIds = new Set();
+let visibleCharacters = [];
+
+function getRegionsByCount(groups) {
+  return Object.entries(groups)
+    .filter(([_, list]) => list.length > 0)
+    .sort((a, b) => b[1].length - a[1].length)
+    .map(([r]) => r);
+}
+
+// ====== 页面加载 ======
+document.addEventListener('DOMContentLoaded', () => { loadCharacters(); });
+
+// ====== 加载角色列表 ======
+async function loadCharacters() {
+  try {
+    const res = await fetch(API);
+    allCharacters = await res.json();
+    // 清理已不存在的选中 ID
+    const currentIds = new Set(allCharacters.map(c => c.id));
+    for (const id of selectedIds) { if (!currentIds.has(id)) selectedIds.delete(id); }
+    if (exportMode) updateExportButtons();
+    buildRegionTabs();
+    applyFilter();
+  } catch (e) {
+    showToast('加载失败，请确认后端已启动', 'error');
+  }
+}
+
+// ====== 构建地区标签 ======
+function buildRegionTabs() {
+  const container = document.getElementById('regionTabs');
+  const groups = groupByRegion(allCharacters);
+
+  // 全部标签
+  let html = `<button class="region-tab${activeRegion === '全部' ? ' active' : ''}" data-region="全部" onclick="selectRegion('全部')">全部<span class="tab-count">${allCharacters.length}</span></button>`;
+
+  // 按人数倒序排列地区标签
+  const orderedRegions = getRegionsByCount(groups);
+  for (const r of orderedRegions) {
+    html += `<button class="region-tab${activeRegion === r ? ' active' : ''}" data-region="${r}" onclick="selectRegion('${r}')">${r}<span class="tab-count">${groups[r].length}</span></button>`;
+  }
+
+  container.innerHTML = html;
+}
+
+function groupByRegion(chars) {
+  const groups = {};
+  for (const c of chars) {
+    const region = c.region || '未分类';
+    if (!groups[region]) groups[region] = [];
+    groups[region].push(c);
+  }
+  return groups;
+}
+
+function selectRegion(region) {
+  activeRegion = region;
+  document.querySelectorAll('.region-tab').forEach(t => t.classList.remove('active'));
+  const tab = document.querySelector(`.region-tab[data-region="${region}"]`);
+  if (tab) tab.classList.add('active');
+  applyFilter();
+}
+
+// ====== 搜索 ======
+function onSearch() {
+  const val = document.getElementById('searchInput').value.trim();
+  const wrap = document.getElementById('searchWrap');
+  wrap.classList.toggle('has-value', val.length > 0);
+  applyFilter();
+}
+
+function clearSearch() {
+  document.getElementById('searchInput').value = '';
+  document.getElementById('searchWrap').classList.remove('has-value');
+  applyFilter();
+}
+
+function applyFilter() {
+  const searchVal = document.getElementById('searchInput').value.trim().toLowerCase();
+
+  let filtered = allCharacters;
+  if (activeRegion !== '全部') {
+    filtered = filtered.filter(c => c.region === activeRegion);
+  }
+  if (searchVal) {
+    filtered = filtered.filter(c =>
+      (c.university || '').toLowerCase().includes(searchVal) ||
+      (c.name || '').toLowerCase().includes(searchVal)
+    );
+  }
+
+  renderGrid(filtered);
+}
+
+function renderGrid(chars) {
+  visibleCharacters = chars;
+  const grid = document.getElementById('charGrid');
+  const empty = document.getElementById('emptyState');
+  const noResult = document.getElementById('noResult');
+  const count = document.getElementById('charCount');
+  const searchVal = document.getElementById('searchInput').value.trim();
+
+  count.textContent = (searchVal || activeRegion !== '全部') ? `${chars.length} / ${allCharacters.length}` : allCharacters.length;
+
+  if (allCharacters.length === 0) {
+    grid.innerHTML = '';
+    empty.style.display = 'block';
+    noResult.style.display = 'none';
+    return;
+  }
+  empty.style.display = 'none';
+
+  if (chars.length === 0 && (searchVal || activeRegion !== '全部')) {
+    grid.innerHTML = '';
+    noResult.style.display = 'block';
+    return;
+  }
+  noResult.style.display = 'none';
+
+  // 按人数倒序分组展示
+  if (activeRegion === '全部' && !searchVal) {
+    const groups = groupByRegion(chars);
+    let html = '';
+    const orderedRegions = getRegionsByCount(groups);
+    for (const r of orderedRegions) {
+      html += `<div class="region-divider">${r} · ${groups[r].length}位</div>`;
+      html += groups[r].map(c => cardHTML(c)).join('');
+    }
+    grid.innerHTML = html;
+  } else {
+    grid.innerHTML = chars.map(c => cardHTML(c)).join('');
+  }
+  if (exportMode) updateExportButtons();
+}
+
+function cardHTML(c) {
+  const genderClass = c.gender === '男' ? 'male' : c.gender === '女' ? 'female' : 'other';
+  const statusText = c.status || '存在';
+  const statusBadge = statusText !== '存在' ? `<span class="status-badge perished">已消逝</span>` : '';
+  const cardExtraClass = (statusText === '已消逝' ? ' perished' : '') + (selectedIds.has(c.id) ? ' selected' : '');
+  const settingText = c.setting || '';
+  const settingTruncated = settingText.length > 120 ? settingText.substring(0, 120) + '…' : settingText;
+  return `
+    <div class="card${cardExtraClass}" draggable="true" data-id="${c.id}"
+         ondragstart="onDragStart(event)" ondragend="onDragEnd(event)"
+         ondragover="onDragOver(event)" ondragenter="onDragEnter(event)"
+         ondragleave="onDragLeave(event)" ondrop="onDrop(event)"
+         onclick="openDetailModal(${c.id})">
+      <input type="checkbox" class="card-check" ${selectedIds.has(c.id) ? 'checked' : ''} onclick="event.stopPropagation();toggleCardSelect(${c.id}, this.checked)" title="选择导出">
+      <span class="drag-handle" title="拖动排序">⋮⋮</span>
+      <div class="card-header">
+        <span class="name">${esc(c.name)}</span>
+        ${c.university ? `<span class="uni-tag">${esc(c.university)}</span>` : ''}
+        ${c.gender ? `<span class="gender-badge ${genderClass}">${esc(c.gender)}</span>` : ''}
+        ${statusBadge}
+      </div>
+      <div class="card-body">
+        ${c.region ? fieldRowShort('地区', c.region) : ''}
+        ${c.birthplace ? fieldRowShort('诞生地', c.birthplace) : ''}
+        ${c.height ? fieldRowShort('身高', c.height) : ''}
+        ${c.birthday ? fieldRowShort('生日', c.birthday) : ''}
+        ${settingTruncated ? `<div class="field"><span class="label">设定</span><span class="value setting-preview">${esc(settingTruncated)}</span></div>` : ''}
+        <div class="card-more">点击查看完整设定 →</div>
+      </div>
+      <div class="card-footer" onclick="event.stopPropagation()">
+        <button class="btn btn-outline btn-sm" onclick="event.stopPropagation();openEditModal(${c.id})">编辑</button>
+        <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openDeleteModal(${c.id},'${esc(c.name)}')">删除</button>
+      </div>
+    </div>`;
+}
+
+function fieldRowShort(label, value) {
+  if (!value || value.trim() === '') return '';
+  return `<div class="field"><span class="label">${label}</span><span class="value field-preview">${esc(value)}</span></div>`;
+}
+
+function fieldRow(label, value) {
+  if (!value || value.trim() === '') return '';
+  return `<div class="field"><span class="label">${label}</span><span class="value">${esc(value)}</span></div>`;
+}
+
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+// ====== 创建 ======
+function openCreateModal() {
+  document.getElementById('modalTitle').textContent = '添加新角色';
+  document.getElementById('submitBtn').textContent = '确认添加';
+  document.getElementById('editId').value = '';
+  document.getElementById('charForm').reset();
+  document.getElementById('modalOverlay').classList.add('active');
+}
+
+// ====== 编辑 ======
+async function openEditModal(id) {
+  try {
+    const res = await fetch(`${API}/${id}`);
+    const c = await res.json();
+
+    document.getElementById('modalTitle').textContent = '编辑角色';
+    document.getElementById('submitBtn').textContent = '保存修改';
+    document.getElementById('editId').value = c.id;
+    document.getElementById('name').value = c.name;
+    document.getElementById('university').value = c.university || '';
+    document.getElementById('region').value = c.region || '';
+    document.getElementById('namingRationale').value = c.naming_rationale || '';
+    document.getElementById('height').value = c.height;
+    document.getElementById('gender').value = c.gender;
+    document.getElementById('birthday').value = c.birthday;
+    document.getElementById('appearance').value = c.appearance;
+    document.getElementById('identityPeriod').value = c.identity_period;
+    document.getElementById('birthTime').value = c.birth_time;
+    document.getElementById('birthplace').value = c.birthplace || '';
+    document.getElementById('status').value = c.status || '存在';
+    document.getElementById('setting').value = c.setting;
+    document.getElementById('modalOverlay').classList.add('active');
+  } catch (e) {
+    showToast('获取角色数据失败', 'error');
+  }
+}
+
+// ====== 提交表单 ======
+async function submitForm(e) {
+  e.preventDefault();
+  const form = document.getElementById('charForm');
+  if (!form.checkValidity()) { form.reportValidity(); return; }
+
+  const editId = document.getElementById('editId').value;
+  const data = {
+    name: document.getElementById('name').value.trim(),
+    university: document.getElementById('university').value.trim(),
+    region: document.getElementById('region').value.trim(),
+    naming_rationale: document.getElementById('namingRationale').value.trim(),
+    height: document.getElementById('height').value.trim(),
+    gender: document.getElementById('gender').value,
+    birthday: document.getElementById('birthday').value.trim(),
+    appearance: document.getElementById('appearance').value.trim(),
+    identity_period: document.getElementById('identityPeriod').value.trim(),
+    birth_time: document.getElementById('birthTime').value.trim(),
+    birthplace: document.getElementById('birthplace').value.trim(),
+    status: document.getElementById('status').value,
+    setting: document.getElementById('setting').value.trim(),
+  };
+
+  try {
+    const url = editId ? `${API}/${editId}` : API;
+    const method = editId ? 'PUT' : 'POST';
+    const res = await fetch(url, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) throw new Error();
+    closeModal();
+    loadCharacters();
+    showToast(editId ? '角色已更新' : '角色已创建', 'success');
+  } catch (e) {
+    showToast('操作失败，请重试', 'error');
+  }
+}
+
+// ====== 删除 ======
+function openDeleteModal(id, name) {
+  deleteTargetId = id;
+  document.getElementById('deleteName').textContent = name;
+  document.getElementById('deleteOverlay').classList.add('active');
+}
+
+function closeDeleteModal() {
+  document.getElementById('deleteOverlay').classList.remove('active');
+  deleteTargetId = null;
+}
+
+async function confirmDelete() {
+  if (!deleteTargetId) return;
+  try {
+    await fetch(`${API}/${deleteTargetId}`, { method: 'DELETE' });
+    closeDeleteModal();
+    loadCharacters();
+    showToast('角色已删除', 'success');
+  } catch (e) {
+    showToast('删除失败', 'error');
+  }
+}
+
+// ====== Modal ======
+function closeModal() {
+  document.getElementById('modalOverlay').classList.remove('active');
+}
+
+// 编辑 Modal 不再点击遮罩关闭，避免编辑中途误触丢失内容
+document.getElementById('deleteOverlay').addEventListener('click', function(e) {
+  if (e.target === this) closeDeleteModal();
+});
+
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') {
+    closeModal();
+    closeDeleteModal();
+    closeDetailModal();
+  }
+});
+
+// ====== 详情查看 ======
+let detailCharId = null;
+
+async function openDetailModal(id) {
+  try {
+    const res = await fetch(`${API}/${id}`);
+    const c = await res.json();
+    detailCharId = c.id;
+    const genderClass = c.gender === '男' ? 'male' : c.gender === '女' ? 'female' : 'other';
+
+    document.getElementById('detailName').textContent = c.name;
+
+    const uniEl = document.getElementById('detailUni');
+    if (c.university) { uniEl.textContent = c.university; uniEl.style.display = ''; }
+    else { uniEl.style.display = 'none'; }
+
+    const genderEl = document.getElementById('detailGender');
+    if (c.gender) { genderEl.textContent = c.gender; genderEl.className = 'gender-badge ' + genderClass; genderEl.style.display = ''; }
+    else { genderEl.style.display = 'none'; }
+
+    // 状态徽章
+    const statusText = c.status || '存在';
+    const statusBadgeHTML = statusText !== '存在' ? '<span class="status-badge perished">已消逝</span>' : '';
+    document.getElementById('detailStatus').innerHTML = statusBadgeHTML;
+
+    let body = '';
+    if (c.university)        body += detailSection('代表高校', c.university);
+    if (c.region)            body += detailSection('地区', c.region);
+    if (c.birthplace)        body += detailSection('诞生地', c.birthplace);
+    if (statusText !== '存在') body += detailSection('存在状态', statusText);
+    body += `<div class="detail-info-row">`;
+    if (c.height)            body += detailSection('身高', c.height);
+    if (c.gender)            body += detailSection('性别', c.gender);
+    if (c.birthday)          body += detailSection('生日', c.birthday);
+    body += `</div>`;
+    if (c.appearance)        body += detailSection('外貌', c.appearance);
+    if (c.identity_period)   body += detailSection('身份存在时间', c.identity_period);
+    if (c.birth_time)        body += detailSection('诞生时间', c.birth_time);
+    if (c.naming_rationale)  body += detailSection('取名依据', c.naming_rationale);
+    if (c.setting)           body += detailSection('设定', c.setting);
+
+    document.getElementById('detailBody').innerHTML = body;
+    document.getElementById('detailOverlay').classList.add('active');
+  } catch (e) {
+    showToast('获取角色详情失败', 'error');
+  }
+}
+
+function detailSection(label, value) {
+  const cls = (!value || value.trim() === '') ? ' muted' : '';
+  return `<div class="detail-section"><div class="detail-label">${label}</div><div class="detail-value${cls}">${esc(value || '（未填写）')}</div></div>`;
+}
+
+function closeDetailModal() {
+  document.getElementById('detailOverlay').classList.remove('active');
+  detailCharId = null;
+}
+
+function detailEdit() {
+  if (detailCharId) {
+    closeDetailModal();
+    openEditModal(detailCharId);
+  }
+}
+
+
+
+document.getElementById('detailOverlay').addEventListener('click', function(e) {
+  if (e.target === this) closeDetailModal();
+});
+
+// ====== 拖拽排序 ======
+let draggedCardId = null;
+
+function onDragStart(e) {
+  draggedCardId = parseInt(e.currentTarget.dataset.id);
+  e.currentTarget.classList.add('dragging');
+  e.dataTransfer.effectAllowed = 'move';
+  e.dataTransfer.setData('text/plain', draggedCardId);
+}
+
+function onDragEnd(e) {
+  e.currentTarget.classList.remove('dragging');
+  document.querySelectorAll('.card.drag-over').forEach(c => c.classList.remove('drag-over'));
+  draggedCardId = null;
+}
+
+function onDragOver(e) {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+}
+
+function onDragEnter(e) {
+  e.preventDefault();
+  const targetId = parseInt(e.currentTarget.dataset.id);
+  if (targetId !== draggedCardId) {
+    e.currentTarget.classList.add('drag-over');
+  }
+}
+
+function onDragLeave(e) {
+  e.currentTarget.classList.remove('drag-over');
+}
+
+function onDrop(e) {
+  e.preventDefault();
+  e.currentTarget.classList.remove('drag-over');
+  const targetId = parseInt(e.currentTarget.dataset.id);
+  if (!draggedCardId || draggedCardId === targetId) return;
+
+  // 在 allCharacters 中重新排序
+  const fromIdx = allCharacters.findIndex(c => c.id === draggedCardId);
+  const toIdx = allCharacters.findIndex(c => c.id === targetId);
+  if (fromIdx === -1 || toIdx === -1) return;
+
+  const [moved] = allCharacters.splice(fromIdx, 1);
+  allCharacters.splice(toIdx, 0, moved);
+
+  // 更新 sort_order（从 1 开始编号）
+  allCharacters.forEach((c, i) => { c.sort_order = i + 1; });
+
+  // 重新渲染
+  applyFilter();
+
+  // 保存到后端
+  saveOrder(allCharacters.map((c, i) => ({ id: c.id, sort_order: i + 1 })));
+}
+
+async function saveOrder(items) {
+  try {
+    await fetch(API + '/reorder', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items }),
+    });
+  } catch (e) {
+    showToast('排序保存失败', 'error');
+  }
+}
+
+// ====== 选择导出 ======
+let exportMode = false;
+
+function enterExportMode() {
+  exportMode = true;
+  selectedIds.clear();
+  document.body.classList.add('export-mode');
+  document.getElementById('exportBtn').style.display = 'none';
+  document.getElementById('exportActions').style.display = '';
+  updateExportButtons();
+}
+
+function cancelExport() {
+  exportMode = false;
+  selectedIds.clear();
+  document.body.classList.remove('export-mode');
+  document.getElementById('exportBtn').style.display = '';
+  document.getElementById('exportActions').style.display = 'none';
+}
+
+function toggleCardSelect(id, checked) {
+  if (checked) selectedIds.add(id);
+  else selectedIds.delete(id);
+  const card = document.querySelector(`.card[data-id="${id}"]`);
+  if (card) card.classList.toggle('selected', checked);
+  updateExportButtons();
+}
+
+function toggleSelectAll() {
+  const visibleIds = new Set(visibleCharacters.map(c => c.id));
+  const selectedInView = visibleCharacters.filter(c => selectedIds.has(c.id)).length;
+  if (selectedInView < visibleCharacters.length) {
+    visibleCharacters.forEach(c => selectedIds.add(c.id));
+  } else {
+    visibleCharacters.forEach(c => selectedIds.delete(c.id));
+  }
+  applyFilter();
+}
+
+function updateExportButtons() {
+  const confirmBtn = document.getElementById('confirmExportBtn');
+  confirmBtn.disabled = selectedIds.size === 0;
+  confirmBtn.textContent = selectedIds.size > 0 ? `确认导出 (${selectedIds.size})` : '确认导出';
+}
+
+function confirmExport() {
+  if (selectedIds.size === 0) return;
+  const selected = allCharacters.filter(c => selectedIds.has(c.id));
+  const exportData = selected.map(c => ({
+    姓名: c.name,
+    代表高校: c.university || '',
+    地区: c.region || '',
+    诞生地: c.birthplace || '',
+    存在状态: c.status || '存在',
+    性别: c.gender || '',
+    身高: c.height || '',
+    生日: c.birthday || '',
+    外貌: c.appearance || '',
+    身份存在时间: c.identity_period || '',
+    诞生时间: c.birth_time || '',
+    取名依据: c.naming_rationale || '',
+    设定: c.setting || '',
+  }));
+  const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `高校拟人OC_${selected.length}位角色_${new Date().toISOString().slice(0,10)}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+  showToast(`已导出 ${selected.length} 位角色`, 'success');
+  cancelExport();
+}
+
+// ====== Toast ======
+let toastTimer;
+function showToast(msg, type) {
+  const toast = document.getElementById('toast');
+  toast.textContent = msg;
+  toast.className = 'toast ' + type + ' show';
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { toast.classList.remove('show'); }, 2500);
+}
+</script>
+
+</div><!-- /main-content -->
+</div><!-- /app-layout -->
+
+<script>
+function toggleSidebar() {
+  document.getElementById('sidebar').classList.toggle('collapsed');
+}
+</script>
+
+<!-- 离线模式脚本 -->
+<script>
+document.write('<script src="db.js"><\/script>');
+document.write('<script src="api-shim.js"><\/script>');
+document.write('<script src="sync.js"><\/script>');
+document.write('<script src="sync-ui.js"><\/script>');
+</script>
+</body>
+</html>

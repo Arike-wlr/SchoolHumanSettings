@@ -1,0 +1,690 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>文档管理 · 高校拟人OC</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #faf8f5;
+    --card-bg: #fffef9;
+    --text: #3d322b;
+    --text-light: #8c7b6e;
+    --accent: #6b5a4e;
+    --accent-light: #a8947e;
+    --accent-pale: #f0e8dc;
+    --danger: #c0392b;
+    --danger-bg: #fce4e4;
+    --border: #e0d5c7;
+    --shadow: 0 2px 16px rgba(60,40,20,.08);
+    --shadow-lg: 0 8px 40px rgba(60,40,20,.12);
+    --radius: 14px;
+    --radius-sm: 8px;
+    --font-serif: 'Georgia', 'Noto Serif SC', 'SimSun', serif;
+    --font-sans: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+    --transition: 0.25s cubic-bezier(.4,0,.2,1);
+  }
+
+  body {
+    font-family: var(--font-sans);
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    background-image:
+      radial-gradient(ellipse at 20% 10%, rgba(168,148,126,.06) 0%, transparent 60%),
+      radial-gradient(ellipse at 80% 90%, rgba(107,90,78,.04) 0%, transparent 60%);
+  }
+
+  /* ====== Header ====== */
+  .header {
+    background: linear-gradient(135deg, #3d322b 0%, #5a4a3e 40%, #7a6654 100%);
+    color: #f5ede4;
+    padding: 20px 24px;
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+  }
+  .header::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='0.025'%3E%3Cpath d='M30 30L36 24M30 30L36 36M30 30L24 36M30 30L24 24' stroke='%23ffffff' stroke-opacity='0.06' stroke-width='1'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+    pointer-events: none;
+  }
+  .header h1 {
+    font-family: var(--font-serif);
+    font-size: 1.8rem;
+    font-weight: 400;
+    letter-spacing: 0.06em;
+  }
+  .header .subtitle {
+    margin-top: 4px; font-size: .88rem;
+    opacity: .65; letter-spacing: .08em;
+  }
+
+  /* ====== 侧边栏布局 ====== */
+  .app-layout { display: flex; min-height: 100vh; }
+  .sidebar {
+    width: 180px;
+    background: linear-gradient(180deg, #2a1a12 0%, #1a0e08 100%);
+    color: #f5ede4;
+    display: flex; flex-direction: column;
+    transition: width 0.3s cubic-bezier(.4,0,.2,1);
+    flex-shrink: 0; overflow: hidden;
+    position: sticky; top: 0; height: 100vh; z-index: 10;
+    box-shadow: 2px 0 16px rgba(0,0,0,.15);
+  }
+  .sidebar.collapsed { width: 54px; }
+  .sidebar-toggle {
+    background: none; border: none; color: #b8a090; font-size: 1.2rem;
+    padding: 14px 16px 6px; cursor: pointer; transition: var(--transition);
+    text-align: left; letter-spacing: .04em;
+  }
+  .sidebar.collapsed .sidebar-toggle { text-align: center; padding-left: 0; padding-right: 0; }
+  .sidebar-toggle:hover { color: #fff; }
+  .sidebar-nav { display: flex; flex-direction: column; padding: 8px; gap: 3px; flex: 1; }
+  .sidebar-item {
+    display: flex; align-items: center; gap: 10px; padding: 10px 12px;
+    border-radius: 8px; color: #c8b8a8; text-decoration: none;
+    font-size: .88rem; font-family: var(--font-sans); transition: var(--transition); white-space: nowrap;
+  }
+  .sidebar-item:hover { background: rgba(255,255,255,.06); color: #f5ede4; }
+  .sidebar-item.active { background: rgba(139,94,60,.3); color: #f5ede4; font-weight: 500; }
+  .sidebar-icon { font-size: 1.15rem; flex-shrink: 0; width: 22px; text-align: center; }
+  .sidebar-text { transition: opacity 0.2s, width 0.2s; overflow: hidden; }
+  .sidebar.collapsed .sidebar-text { opacity: 0; width: 0; }
+  .sidebar.collapsed .sidebar-item { gap: 0; justify-content: center; padding: 10px 0; }
+  .sidebar-footer {
+    padding: 12px; border-top: 1px solid rgba(255,255,255,.08); text-align: center;
+  }
+  .sidebar.collapsed .sidebar-footer { display: none; }
+  .main-content { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+
+  /* ====== Container ====== */
+  .container {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 24px 20px 60px;
+  }
+
+  /* ====== 上传区域 ====== */
+  .upload-zone {
+    border: 2px dashed var(--border);
+    border-radius: var(--radius);
+    padding: 40px 20px;
+    text-align: center;
+    cursor: pointer;
+    transition: var(--transition);
+    background: var(--card-bg);
+    margin-bottom: 28px;
+  }
+  .upload-zone:hover, .upload-zone.drag-over {
+    border-color: var(--accent-light);
+    background: var(--accent-pale);
+  }
+  .upload-zone .icon { font-size: 2.8rem; margin-bottom: 10px; opacity: .6; }
+  .upload-zone .tip { color: var(--text-light); font-size: .9rem; margin-top: 6px; }
+
+  /* ====== 文件列表 ====== */
+  .file-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .file-item {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 14px 18px;
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    transition: var(--transition);
+  }
+  .file-item:hover { border-color: var(--accent-light); box-shadow: var(--shadow); }
+
+  .file-icon {
+    font-size: 1.6rem;
+    flex-shrink: 0;
+  }
+  .file-info {
+    flex: 1;
+    min-width: 0;
+  }
+  .file-name {
+    font-weight: 600;
+    font-size: .95rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .file-meta {
+    font-size: .8rem;
+    color: var(--text-light);
+    margin-top: 2px;
+  }
+  .file-actions {
+    display: flex;
+    gap: 6px;
+    flex-shrink: 0;
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 16px;
+    border: none;
+    border-radius: var(--radius-sm);
+    font-size: .85rem;
+    font-family: var(--font-sans);
+    cursor: pointer;
+    transition: var(--transition);
+    font-weight: 500;
+  }
+  .btn-primary { background: var(--accent); color: #fff; }
+  .btn-primary:hover { background: #5a4a3e; transform: translateY(-1px); box-shadow: 0 4px 14px rgba(107,90,78,.3); }
+  .btn-outline { background: transparent; color: var(--accent); border: 1.5px solid var(--accent-light); }
+  .btn-outline:hover { background: var(--accent-pale); }
+  .btn-sm { padding: 5px 12px; font-size: .8rem; }
+  .btn-danger { background: var(--danger); color: #fff; }
+  .btn-danger:hover { background: #a93226; }
+  .btn-ghost { background: transparent; color: var(--text-light); border: 1px solid var(--border); }
+  .btn-ghost:hover { background: var(--accent-pale); }
+  .btn-view { background: #4a7c59; color: #fff; }
+  .btn-view:hover { background: #3a6348; }
+
+  /* ====== 空状态 ====== */
+  .empty {
+    text-align: center; padding: 60px 20px; color: var(--text-light);
+  }
+  .empty .icon { font-size: 3.5rem; margin-bottom: 14px; opacity: .5; }
+  .empty p { font-size: 1rem; }
+
+  /* ====== 统计 ====== */
+  .toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 20px;
+  }
+  .toolbar .count {
+    font-size: .9rem;
+    color: var(--text-light);
+  }
+  .toolbar .count strong { color: var(--accent); }
+
+  /* ====== Modal ====== */
+  .modal-overlay {
+    position: fixed; inset: 0; background: rgba(30,18,8,.45);
+    backdrop-filter: blur(4px); z-index: 1100;
+    display: flex; align-items: center; justify-content: center; padding: 20px;
+    opacity: 0; visibility: hidden; transition: var(--transition);
+  }
+  .modal-overlay.active { opacity: 1; visibility: visible; }
+
+  .modal {
+    background: var(--card-bg); border-radius: var(--radius); box-shadow: var(--shadow-lg);
+    width: 100%; max-width: 400px; text-align: center;
+    transform: translateY(20px); transition: var(--transition);
+  }
+  .modal-overlay.active .modal { transform: translateY(0); }
+
+  .modal-header {
+    padding: 20px 24px 0;
+  }
+  .modal-header h2 {
+    font-family: var(--font-serif); font-size: 1.25rem; font-weight: 600; color: #3d2b1f;
+  }
+  .modal-body { padding: 20px 24px; font-size: .95rem; }
+  .modal-body strong { color: var(--danger); }
+  .modal-footer {
+    padding: 0 24px 20px;
+    display: flex; justify-content: center; gap: 10px;
+  }
+
+  /* ====== Toast ====== */
+  .toast {
+    position: fixed; top: 20px; right: 20px; z-index: 2000;
+    padding: 12px 24px; border-radius: var(--radius-sm);
+    background: #2d2a26; color: #f5ede4; font-size: .9rem;
+    box-shadow: var(--shadow-lg); transform: translateX(120%);
+    transition: var(--transition); max-width: 380px;
+  }
+  .toast.show { transform: translateX(0); }
+  .toast.success { background: #2d5a27; }
+  .toast.error { background: var(--danger); }
+
+  /* ====== 查看文档 Modal ====== */
+  .viewer-overlay {
+    position: fixed; inset: 0; background: rgba(30,18,8,.55);
+    backdrop-filter: blur(6px); z-index: 1000;
+    display: flex; align-items: center; justify-content: center; padding: 20px;
+    opacity: 0; visibility: hidden; transition: var(--transition);
+  }
+  .viewer-overlay.active { opacity: 1; visibility: visible; }
+
+  .viewer-modal {
+    background: var(--card-bg); border-radius: var(--radius);
+    box-shadow: var(--shadow-lg); width: 100%; max-width: 860px;
+    max-height: 88vh; overflow-y: auto;
+    transform: translateY(20px); transition: var(--transition);
+    display: flex; flex-direction: column;
+  }
+  .viewer-overlay.active .viewer-modal { transform: translateY(0); }
+
+  .viewer-header {
+    padding: 16px 24px; border-bottom: 1px solid var(--border);
+    display: flex; justify-content: space-between; align-items: center;
+    position: sticky; top: 0; background: var(--card-bg); z-index: 2;
+  }
+  .viewer-header h2 {
+    font-family: var(--font-serif); font-size: 1.15rem; font-weight: 600;
+    color: #3d2b1f; margin: 0;
+  }
+  .viewer-header .header-info {
+    display: flex; align-items: center; gap: 10px;
+  }
+  .viewer-header .doc-tag {
+    font-size: .7rem; padding: 2px 8px; border-radius: 12px;
+    background: var(--accent-pale); color: var(--accent);
+    font-weight: 500; letter-spacing: .03em;
+  }
+  .viewer-close {
+    width: 32px; height: 32px; border: none; background: #f5f0eb;
+    border-radius: 50%; cursor: pointer; font-size: 1rem;
+    color: var(--text-light); display: flex; align-items: center;
+    justify-content: center; transition: var(--transition); flex-shrink: 0;
+  }
+  .viewer-close:hover { background: #e8ddd0; color: var(--text); }
+
+  .viewer-body {
+    padding: 28px 32px 36px; flex: 1; overflow-y: auto;
+    font-family: var(--font-serif); font-size: 1rem; line-height: 1.9;
+    color: var(--text);
+  }
+  .viewer-body .doc-heading {
+    font-size: 1.25rem; font-weight: 700; color: #3d2b1f;
+    margin: 1.5em 0 .5em; line-height: 1.5;
+  }
+  .viewer-body .doc-heading:first-child { margin-top: 0; }
+  .viewer-body .doc-paragraph {
+    margin: 0 0 .8em; text-indent: 2em;
+  }
+  .viewer-body .doc-paragraph:first-of-type { text-indent: 0; }
+  .viewer-body .doc-empty {
+    height: .6em;
+  }
+  .viewer-body .doc-text {
+    white-space: pre-wrap;
+  }
+
+  .viewer-loading {
+    padding: 60px; text-align: center; color: var(--text-light);
+  }
+  .viewer-loading .spinner {
+    width: 32px; height: 32px; border: 3px solid var(--accent-pale);
+    border-top-color: var(--accent); border-radius: 50%;
+    animation: spin .7s linear infinite; margin: 0 auto 16px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .viewer-footer {
+    padding: 12px 24px 18px; display: flex; justify-content: flex-end;
+    gap: 10px; border-top: 1px solid #f0e8dc;
+  }
+
+  #fileInput { display: none; }
+
+  @media (max-width: 768px) {
+    .header h1 { font-size: 1.4rem; }
+    .file-actions { flex-direction: column; }
+    .nav-links { flex-direction: column; gap: 4px; }
+    .viewer-body { padding: 20px; }
+  }
+</style>
+</head>
+<body>
+<div class="app-layout">
+
+<aside class="sidebar" id="sidebar">
+  <button class="sidebar-toggle" onclick="toggleSidebar()" title="展开/收起侧边栏">☰</button>
+  <nav class="sidebar-nav">
+    <a href="/" class="sidebar-item">
+      <span class="sidebar-icon">📖</span><span class="sidebar-text">角色设定</span>
+    </a>
+    <a href="/worldview" class="sidebar-item">
+      <span class="sidebar-icon">🌍</span><span class="sidebar-text">世界观设定</span>
+    </a>
+    <a href="/documents" class="sidebar-item active">
+      <span class="sidebar-icon">📄</span><span class="sidebar-text">文档管理</span>
+    </a>
+    <a href="/relations" class="sidebar-item">
+      <span class="sidebar-icon">🔗</span><span class="sidebar-text">关系网</span>
+    </a>
+  </nav>
+  <div class="sidebar-footer">
+    <span style="font-size:.75rem;opacity:.5;">高校拟人OC</span>
+  </div>
+</aside>
+
+<div class="main-content">
+
+<header class="header">
+  <h1>文档管理</h1>
+  <p class="subtitle">上传和管理原始设定文档</p>
+</header>
+
+<div class="container">
+  <div class="upload-zone" id="uploadZone" onclick="document.getElementById('fileInput').click()">
+    <div class="icon">📄</div>
+    <div class="btn btn-primary">选择文件上传</div>
+    <div class="tip">支持 .docx、.doc、.pdf、.txt、.md 格式，也可拖拽文件到此处</div>
+  </div>
+  <input type="file" id="fileInput" accept=".docx,.doc,.pdf,.txt,.md" multiple onchange="onFileSelect(event)">
+
+  <div class="toolbar">
+    <span class="count">共 <strong id="fileCount">0</strong> 个文档</span>
+  </div>
+
+  <div class="file-list" id="fileList"></div>
+
+  <div class="empty" id="emptyState">
+    <div class="icon">📂</div>
+    <p>还没有上传文档，点击上方区域选择文件开始上传</p>
+  </div>
+</div>
+
+
+<div class="toast" id="toast"></div>
+<div class="viewer-overlay" id="viewerOverlay">
+  <div class="viewer-modal" id="viewerModalBox">
+    <div class="viewer-header">
+      <div class="header-info">
+        <h2 id="viewerTitle">文档预览</h2>
+        <span class="doc-tag" id="viewerTag"></span>
+      </div>
+      <button class="viewer-close" id="viewerCloseBtn">✕</button>
+    </div>
+    <div class="viewer-body" id="viewerBody">
+      <div class="viewer-loading"><div class="spinner"></div>加载中…</div>
+    </div>
+    <div class="viewer-footer">
+      <a class="btn btn-outline btn-sm" id="viewerDownload" href="#" download>下载原文件</a>
+      <button class="btn btn-primary btn-sm" id="viewerCloseBtn2">关闭</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const API = '/api/files';
+let deleteTarget = null;
+
+// ====== 初始化 ======
+window.addEventListener('DOMContentLoaded', () => {
+  loadFiles();
+
+  // 查看弹窗按钮
+  document.getElementById('viewerCloseBtn').addEventListener('click', closeViewer);
+  document.getElementById('viewerCloseBtn2').addEventListener('click', closeViewer);
+
+  // 弹窗背景点击关闭
+  document.getElementById('viewerOverlay').addEventListener('click', function(e) {
+    if (e.target === this) closeViewer();
+  });
+});
+
+// 键盘 ESC 关闭
+window.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') { closeViewer(); }
+});
+
+// ====== 拖拽上传 ======
+const uploadZone = document.getElementById('uploadZone');
+uploadZone.addEventListener('dragover', e => {
+  e.preventDefault();
+  uploadZone.classList.add('drag-over');
+});
+uploadZone.addEventListener('dragleave', () => {
+  uploadZone.classList.remove('drag-over');
+});
+uploadZone.addEventListener('drop', e => {
+  e.preventDefault();
+  uploadZone.classList.remove('drag-over');
+  if (e.dataTransfer.files.length > 0) {
+    uploadFiles(e.dataTransfer.files);
+  }
+});
+
+// ====== 文件选择 ======
+function onFileSelect(e) {
+  if (e.target.files.length > 0) {
+    uploadFiles(e.target.files);
+  }
+  e.target.value = '';
+}
+
+// ====== 上传文件 ======
+async function uploadFiles(fileList) {
+  const formData = new FormData();
+  for (const f of fileList) {
+    formData.append('files', f);
+  }
+  try {
+    const res = await fetch(API + '/upload', { method: 'POST', body: formData });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.detail || '上传失败');
+    }
+    const data = await res.json();
+    showToast(data.message, 'success');
+    loadFiles();
+  } catch (e) {
+    showToast(e.message || '上传失败', 'error');
+  }
+}
+
+// ====== 加载文件列表 ======
+async function loadFiles() {
+  try {
+    const res = await fetch(API);
+    const files = await res.json();
+    renderFiles(files);
+  } catch (e) {
+    showToast('加载失败', 'error');
+  }
+}
+
+function renderFiles(files) {
+  const list = document.getElementById('fileList');
+  const empty = document.getElementById('emptyState');
+  const count = document.getElementById('fileCount');
+
+  count.textContent = files.length;
+
+  if (files.length === 0) {
+    list.innerHTML = '';
+    empty.style.display = 'block';
+    return;
+  }
+  empty.style.display = 'none';
+
+  list.innerHTML = files.map(f => {
+    const icon = getFileIcon(f.name);
+    const ext = f.name.split('.').pop().toLowerCase();
+    const canView = ['docx', 'txt', 'md'].includes(ext);
+    const safeName = escAttr(f.name);
+    return `
+      <div class="file-item">
+        <span class="file-icon">${icon}</span>
+        <div class="file-info">
+          <div class="file-name" title="${esc(f.name)}">${esc(f.name)}</div>
+          <div class="file-meta">${f.size_display} · ${f.modified}</div>
+        </div>
+        <div class="file-actions">
+          ${canView ? `<button class="btn btn-view btn-sm" onclick="openViewer('${safeName}')">查看</button>` : ''}
+          <a class="btn btn-outline btn-sm" href="${API}/${encodeURIComponent(f.name)}" download>下载</a>
+          <button class="btn btn-ghost btn-sm" onclick="openDeleteModal('${safeName}')">删除</button>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+function getFileIcon(name) {
+  const ext = name.split('.').pop().toLowerCase();
+  const map = { docx: '📝', doc: '📝', pdf: '📕', txt: '📄', md: '📋' };
+  return map[ext] || '📎';
+}
+
+// ====== 删除 ======
+function openDeleteModal(name) {
+  if (confirm('确定要删除文档 "' + name + '" 吗？\n此操作无法撤销。')) {
+    deleteTarget = name;
+    doDelete();
+  }
+}
+
+function doDelete() {
+  if (!deleteTarget) { console.log('doDelete: no target'); return; }
+  var name = deleteTarget;
+  console.log('doDelete: deleting', name);
+  var xhr = new XMLHttpRequest();
+  xhr.open('DELETE', API + '/' + encodeURIComponent(name));
+  xhr.onload = function() {
+    console.log('doDelete: response', xhr.status);
+    if (currentViewFile === name) closeViewer();
+    loadFiles();
+    showToast('已删除 ' + name, 'success');
+    deleteTarget = null;
+  };
+  xhr.onerror = function(e) {
+    console.log('doDelete: error', e);
+    showToast('删除失败', 'error');
+    deleteTarget = null;
+  };
+  xhr.send();
+}
+
+// ====== 文档查看 ======
+let currentViewFile = '';
+
+async function openViewer(fname) {
+  currentViewFile = fname;
+  const overlay = document.getElementById('viewerOverlay');
+  const body = document.getElementById('viewerBody');
+  const title = document.getElementById('viewerTitle');
+  const tag = document.getElementById('viewerTag');
+  const dl = document.getElementById('viewerDownload');
+
+  title.textContent = fname;
+  const ext = fname.split('.').pop().toLowerCase();
+  tag.textContent = ext.toUpperCase();
+  tag.style.display = '';
+  dl.href = `${API}/${encodeURIComponent(fname)}`;
+  body.innerHTML = '<div class="viewer-loading"><div class="spinner"></div>加载中…</div>';
+  overlay.classList.add('active');
+
+  try {
+    const res = await fetch(`${API}/${encodeURIComponent(fname)}/view`);
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.detail || '加载失败');
+    }
+    const data = await res.json();
+    renderViewerContent(data);
+  } catch (e) {
+    body.innerHTML = `<div class="viewer-loading" style="color:var(--danger);">
+      <p style="font-size:1.2rem;margin-bottom:8px;">⚠️</p>
+      <p>${esc(e.message || '加载文档失败')}</p></div>`;
+  }
+}
+
+function renderViewerContent(data) {
+  const body = document.getElementById('viewerBody');
+
+  if (data.type === 'docx') {
+    // docx 段落+图片渲染（兼容新旧两种格式）
+    let html = '';
+    const content = data.content;
+    const cacheKey = data.cache_key || '';
+    const isNewFormat = Array.isArray(content) && content.length > 0 && content[0].type !== undefined;
+
+    if (Array.isArray(content)) {
+      for (const item of content) {
+        if (isNewFormat && item.type === 'image') {
+          const imgUrl = cacheKey
+            ? `/api/files/images/${encodeURIComponent(cacheKey)}/${encodeURIComponent(item.src)}`
+            : '';
+          html += `<div style="text-align:center;margin:1.2em 0;">
+            <img src="${imgUrl}" style="max-width:100%;height:auto;border-radius:8px;box-shadow:0 2px 12px rgba(0,0,0,.1);" alt="${esc(item.caption || '')}" loading="lazy" onerror="this.style.display='none'">
+            ${item.caption ? `<div style="font-size:.85rem;color:var(--text-light);margin-top:6px;">${esc(item.caption)}</div>` : ''}
+          </div>`;
+        } else if (isNewFormat && item.type === 'text') {
+          if (!item.text.trim()) {
+            html += '<div class="doc-empty"></div>';
+          } else if (item.is_heading) {
+            html += `<div class="doc-heading">${esc(item.text)}</div>`;
+          } else {
+            html += `<div class="doc-paragraph">${esc(item.text)}</div>`;
+          }
+        } else if (!isNewFormat) {
+          // 旧格式兼容：直接是 {text, style, is_heading}
+          if (!item.text.trim()) {
+            html += '<div class="doc-empty"></div>';
+          } else if (item.is_heading) {
+            html += `<div class="doc-heading">${esc(item.text)}</div>`;
+          } else {
+            html += `<div class="doc-paragraph">${esc(item.text)}</div>`;
+          }
+        }
+      }
+    }
+    body.innerHTML = html || '<div class="viewer-loading">文档内容为空</div>';
+  } else {
+    // txt/md 纯文本渲染
+    body.innerHTML = `<div class="doc-text">${esc(data.content)}</div>`;
+  }
+}
+
+function closeViewer() {
+  document.getElementById('viewerOverlay').classList.remove('active');
+  currentViewFile = '';
+}
+
+// ====== Toast ======
+let toastTimer;
+function showToast(msg, type) {
+  const toast = document.getElementById('toast');
+  toast.textContent = msg;
+  toast.className = 'toast ' + (type || '') + ' show';
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { toast.classList.remove('show'); }, 2500);
+}
+
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+// HTML 属性中用于 onclick 的转义——转义反斜杠和引号
+function escAttr(s) {
+  return String(s).replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/"/g,'\\"');
+}
+</script>
+
+</div><!-- /main-content -->
+</div><!-- /app-layout -->
+
+<script>function toggleSidebar(){document.getElementById('sidebar').classList.toggle('collapsed');}</script>
+
+<!-- 离线模式脚本 -->
+<script>
+document.write('<script src="db.js"><\/script>');
+document.write('<script src="api-shim.js"><\/script>');
+document.write('<script src="sync.js"><\/script>');
+document.write('<script src="sync-ui.js"><\/script>');
+</script>
+</body>
+</html>
