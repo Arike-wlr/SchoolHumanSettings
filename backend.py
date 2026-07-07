@@ -53,7 +53,7 @@ def init_db():
     # 兼容旧表：如果缺少列则自动添加
     cursor.execute("PRAGMA table_info(characters)")
     cols = [col[1] for col in cursor.fetchall()]
-    for col_name in ["university", "region", "naming_rationale", "family"]:
+    for col_name in ["university", "region", "naming_rationale", "family", "birthplace", "status"]:
         if col_name not in cols:
             cursor.execute(f"ALTER TABLE characters ADD COLUMN {col_name} TEXT DEFAULT ''")
     if "sort_order" not in cols:
@@ -130,6 +130,8 @@ class CharacterCreate(BaseModel):
     birth_time: str = Field(default="", description="诞生时间")
     setting: str = Field(default="", description="设定")
     family: str = Field(default="", description="家族")
+    birthplace: str = Field(default="", description="诞生地")
+    status: str = Field(default="存在", description="存在状态")
 
 
 class CharacterUpdate(BaseModel):
@@ -145,6 +147,8 @@ class CharacterUpdate(BaseModel):
     birth_time: Optional[str] = None
     setting: Optional[str] = None
     family: Optional[str] = None
+    birthplace: Optional[str] = None
+    status: Optional[str] = None
 
 
 class CharacterResponse(BaseModel):
@@ -161,6 +165,8 @@ class CharacterResponse(BaseModel):
     birth_time: str
     setting: str
     family: str = ""
+    birthplace: str = ""
+    status: str = "存在"
     sort_order: int = 0
     created_at: str
     updated_at: str
@@ -291,12 +297,12 @@ def create_character(data: CharacterCreate):
     cursor.execute(
         """INSERT INTO characters
            (name, university, region, naming_rationale, height, gender, birthday, appearance,
-            identity_period, birth_time, setting, family, sort_order, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            identity_period, birth_time, setting, family, birthplace, status, sort_order, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (data.name, data.university, data.region, data.naming_rationale,
          data.height, data.gender, data.birthday,
          data.appearance, data.identity_period, data.birth_time,
-         data.setting, data.family, next_order, now, now)
+         data.setting, data.family, data.birthplace, data.status, next_order, now, now)
     )
     conn.commit()
     char_id = cursor.lastrowid
@@ -319,7 +325,7 @@ def update_character(char_id: int, data: CharacterUpdate):
 
     updates = {}
     for field in ["name", "university", "region", "naming_rationale", "height", "gender", "birthday", "appearance",
-                  "identity_period", "birth_time", "setting", "family"]:
+                  "identity_period", "birth_time", "setting", "family", "birthplace", "status"]:
         val = getattr(data, field)
         if val is not None:
             updates[field] = val

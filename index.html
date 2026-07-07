@@ -369,6 +369,10 @@
     letter-spacing: .03em;
     font-weight: 500;
   }
+  .status-badge { font-size: .72rem; padding: 2px 10px; border-radius: 20px; font-weight: 600; letter-spacing: .06em; }
+  .status-badge.perished { background: #e0d5cc; color: #5a3e2b; }
+  .card.perished { opacity: 0.7; filter: grayscale(0.4); }
+  .card.perished:hover { opacity: 0.85; filter: grayscale(0.2); }
   .card-header .gender-badge {
     font-size: .78rem;
     padding: 2px 10px;
@@ -858,6 +862,19 @@
         </div>
 
         <div class="form-group">
+          <label for="birthplace">诞生地</label>
+          <input type="text" id="birthplace" placeholder="如：南京 / 江西井冈山 / 延安">
+        </div>
+
+        <div class="form-group">
+          <label for="status">存在状态</label>
+          <select id="status">
+            <option value="存在">存在</option>
+            <option value="已消逝">已消逝</option>
+          </select>
+        </div>
+
+        <div class="form-group">
           <label for="setting">设定</label>
           <textarea id="setting" rows="3" placeholder="详细描述角色的背景设定、性格、经历等..."></textarea>
         </div>
@@ -897,6 +914,7 @@
         <div class="detail-badges">
           <span class="uni-tag" id="detailUni" style="display:none;"></span>
           <span class="gender-badge" id="detailGender" style="display:none;"></span>
+          <span id="detailStatus"></span>
         </div>
       </div>
       <button class="detail-close" onclick="closeDetailModal()">✕</button>
@@ -946,12 +964,12 @@ function buildRegionTabs() {
   const groups = groupByRegion(allCharacters);
 
   // 全部标签
-  let html = `<button class="region-tab active" data-region="全部" onclick="selectRegion('全部')">全部<span class="tab-count">${allCharacters.length}</span></button>`;
+  let html = `<button class="region-tab${activeRegion === '全部' ? ' active' : ''}" data-region="全部" onclick="selectRegion('全部')">全部<span class="tab-count">${allCharacters.length}</span></button>`;
 
   // 按人数倒序排列地区标签
   const orderedRegions = getRegionsByCount(groups);
   for (const r of orderedRegions) {
-    html += `<button class="region-tab" data-region="${r}" onclick="selectRegion('${r}')">${r}<span class="tab-count">${groups[r].length}</span></button>`;
+    html += `<button class="region-tab${activeRegion === r ? ' active' : ''}" data-region="${r}" onclick="selectRegion('${r}')">${r}<span class="tab-count">${groups[r].length}</span></button>`;
   }
 
   container.innerHTML = html;
@@ -1047,10 +1065,13 @@ function renderGrid(chars) {
 
 function cardHTML(c) {
   const genderClass = c.gender === '男' ? 'male' : c.gender === '女' ? 'female' : 'other';
+  const statusText = c.status || '存在';
+  const statusBadge = statusText !== '存在' ? `<span class="status-badge perished">已消逝</span>` : '';
+  const cardExtraClass = statusText === '已消逝' ? ' perished' : '';
   const settingText = c.setting || '';
   const settingTruncated = settingText.length > 120 ? settingText.substring(0, 120) + '…' : settingText;
   return `
-    <div class="card" draggable="true" data-id="${c.id}" onclick="openDetailModal(${c.id})"
+    <div class="card${cardExtraClass}" draggable="true" data-id="${c.id}" onclick="openDetailModal(${c.id})"
          ondragstart="onDragStart(event)" ondragend="onDragEnd(event)"
          ondragover="onDragOver(event)" ondragenter="onDragEnter(event)"
          ondragleave="onDragLeave(event)" ondrop="onDrop(event)">
@@ -1059,9 +1080,11 @@ function cardHTML(c) {
         <span class="name">${esc(c.name)}</span>
         ${c.university ? `<span class="uni-tag">${esc(c.university)}</span>` : ''}
         ${c.gender ? `<span class="gender-badge ${genderClass}">${esc(c.gender)}</span>` : ''}
+        ${statusBadge}
       </div>
       <div class="card-body">
         ${c.region ? fieldRowShort('地区', c.region) : ''}
+        ${c.birthplace ? fieldRowShort('诞生地', c.birthplace) : ''}
         ${c.height ? fieldRowShort('身高', c.height) : ''}
         ${c.birthday ? fieldRowShort('生日', c.birthday) : ''}
         ${settingTruncated ? `<div class="field"><span class="label">设定</span><span class="value setting-preview">${esc(settingTruncated)}</span></div>` : ''}
@@ -1116,6 +1139,8 @@ async function openEditModal(id) {
     document.getElementById('appearance').value = c.appearance;
     document.getElementById('identityPeriod').value = c.identity_period;
     document.getElementById('birthTime').value = c.birth_time;
+    document.getElementById('birthplace').value = c.birthplace || '';
+    document.getElementById('status').value = c.status || '存在';
     document.getElementById('setting').value = c.setting;
     document.getElementById('modalOverlay').classList.add('active');
   } catch (e) {
@@ -1141,6 +1166,8 @@ async function submitForm(e) {
     appearance: document.getElementById('appearance').value.trim(),
     identity_period: document.getElementById('identityPeriod').value.trim(),
     birth_time: document.getElementById('birthTime').value.trim(),
+    birthplace: document.getElementById('birthplace').value.trim(),
+    status: document.getElementById('status').value,
     setting: document.getElementById('setting').value.trim(),
   };
 
@@ -1223,9 +1250,16 @@ async function openDetailModal(id) {
     if (c.gender) { genderEl.textContent = c.gender; genderEl.className = 'gender-badge ' + genderClass; genderEl.style.display = ''; }
     else { genderEl.style.display = 'none'; }
 
+    // 状态徽章
+    const statusText = c.status || '存在';
+    const statusBadgeHTML = statusText !== '存在' ? '<span class="status-badge perished">已消逝</span>' : '';
+    document.getElementById('detailStatus').innerHTML = statusBadgeHTML;
+
     let body = '';
     if (c.university)        body += detailSection('代表高校', c.university);
     if (c.region)            body += detailSection('地区', c.region);
+    if (c.birthplace)        body += detailSection('诞生地', c.birthplace);
+    if (statusText !== '存在') body += detailSection('存在状态', statusText);
     body += `<div class="detail-info-row">`;
     if (c.height)            body += detailSection('身高', c.height);
     if (c.gender)            body += detailSection('性别', c.gender);
