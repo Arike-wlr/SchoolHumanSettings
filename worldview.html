@@ -246,6 +246,17 @@
   .card:hover .drag-handle { opacity: 0.4; }
   .card .drag-handle:hover { opacity: 1; cursor: grabbing; }
 
+  .card-check {
+    position: absolute; top: 12px; left: 14px;
+    width: 18px; height: 18px;
+    cursor: pointer; accent-color: var(--accent);
+    z-index: 2; display: none;
+  }
+  .export-mode .card-check { display: block; }
+  .export-mode .card:hover { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(61,107,88,.12); }
+  .card.selected { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(61,107,88,.25); }
+  .export-mode .card .drag-handle { display: none; }
+
   .card-header {
     padding: 20px 22px 8px;
     display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
@@ -457,6 +468,12 @@
       <button class="clear-btn" onclick="clearSearch()" title="清除">✕</button>
     </div>
     <button class="btn btn-primary" onclick="openCreateModal()">＋ 添加新设定</button>
+    <span id="exportActions" style="display:none;">
+      <button class="btn btn-outline btn-sm" onclick="toggleSelectAll()">全选</button>
+      <button class="btn btn-outline btn-sm" onclick="cancelExport()">放弃选择</button>
+      <button class="btn btn-primary" id="confirmExportBtn" onclick="confirmExport()" disabled>确认导出</button>
+    </span>
+    <button class="btn btn-outline btn-sm" id="exportBtn" onclick="enterExportMode()">📥 导出</button>
   </div>
 
   <div class="main-cat-tabs" id="mainCatTabs">
@@ -553,6 +570,9 @@ let allEntries = [];
 let activeMainCategory = '意识体世界设定';
 let activeCategory = '全部';
 let deleteTargetId = null;
+let selectedIds = new Set();
+let visibleEntries = [];
+let exportMode = false;
 
 // ====== 页面加载 ======
 document.addEventListener('DOMContentLoaded', () => { loadEntries(); });
@@ -562,6 +582,8 @@ async function loadEntries() {
     const q = activeMainCategory ? `?main_category=${encodeURIComponent(activeMainCategory)}` : '';
     const res = await fetch(API + q);
     allEntries = await res.json();
+    const currentIds = new Set(allEntries.map(e => e.id));
+    for (const id of selectedIds) { if (!currentIds.has(id)) selectedIds.delete(id); }
     buildCatTabs();
     applyFilter();
     updateEmptyText();
@@ -651,6 +673,7 @@ function applyFilter() {
 }
 
 function renderGrid(entries) {
+  visibleEntries = entries;
   const grid = document.getElementById('entryGrid');
   const empty = document.getElementById('emptyState');
   const noResult = document.getElementById('noResult');
@@ -670,17 +693,21 @@ function renderGrid(entries) {
   noResult.style.display = 'none';
 
   grid.innerHTML = entries.map(e => cardHTML(e)).join('');
+  if (exportMode) updateExportButtons();
 }
 
 function cardHTML(e) {
   const contentText = e.content || '';
   const preview = contentText.length > 180 ? contentText.substring(0, 180) + '…' : contentText;
   const showCat = activeMainCategory !== '人物背景故事' && e.category;
+  const cardExtraClass = selectedIds.has(e.id) ? ' selected' : '';
   return `
-    <div class="card" draggable="true" data-id="${e.id}" onclick="openDetailModal(${e.id})"
+    <div class="card${cardExtraClass}" draggable="true" data-id="${e.id}"
          ondragstart="onDragStart(event)" ondragend="onDragEnd(event)"
          ondragover="onDragOver(event)" ondragenter="onDragEnter(event)"
-         ondragleave="onDragLeave(event)" ondrop="onDrop(event)">
+         ondragleave="onDragLeave(event)" ondrop="onDrop(event)"
+         onclick="openDetailModal(${e.id})">
+      <input type="checkbox" class="card-check" ${selectedIds.has(e.id) ? 'checked' : ''} onclick="event.stopPropagation();toggleCardSelect(${e.id}, this.checked)" title="选择导出">
       <span class="drag-handle" title="拖动排序">⋮⋮</span>
       <div class="card-header">
         <span class="title">${esc(e.title)}</span>
@@ -897,6 +924,69 @@ async function saveOrder(items) {
       body: JSON.stringify({ items }),
     });
   } catch (e) { showToast('排序保存失败', 'error'); }
+}
+
+// ====== 选择导出 ======
+function enterExportMode() {
+  exportMode = true;
+  selectedIds.clear();
+  document.body.classList.add('export-mode');
+  document.getElementById('exportBtn').style.display = 'none';
+  document.getElementById('exportActions').style.display = '';
+  applyFilter();
+}
+
+function cancelExport() {
+  exportMode = false;
+  selectedIds.clear();
+  document.body.classList.remove('export-mode');
+  document.getElementById('exportBtn').style.display = '';
+  document.getElementById('exportActions').style.display = 'none';
+  applyFilter();
+}
+
+function toggleCardSelect(id, checked) {
+  if (checked) selectedIds.add(id);
+  else selectedIds.delete(id);
+  const card = document.querySelector(`.card[data-id="${id}"]`);
+  if (card) card.classList.toggle('selected', checked);
+  updateExportButtons();
+}
+
+function toggleSelectAll() {
+  const selectedInView = visibleEntries.filter(e => selectedIds.has(e.id)).length;
+  if (selectedInView < visibleEntries.length) {
+    visibleEntries.forEach(e => selectedIds.add(e.id));
+  } else {
+    visibleEntries.forEach(e => selectedIds.delete(e.id));
+  }
+  applyFilter();
+}
+
+function updateExportButtons() {
+  const confirmBtn = document.getElementById('confirmExportBtn');
+  confirmBtn.disabled = selectedIds.size === 0;
+  confirmBtn.textContent = selectedIds.size > 0 ? `确认导出 (${selectedIds.size})` : '确认导出';
+}
+
+function confirmExport() {
+  if (selectedIds.size === 0) return;
+  const selected = allEntries.filter(e => selectedIds.has(e.id));
+  const exportData = selected.map(e => ({
+    标题: e.title,
+    大类: e.main_category || '',
+    分类: e.category || '',
+    内容: e.content || '',
+  }));
+  const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `世界观设定_${selected.length}条_${new Date().toISOString().slice(0,10)}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+  showToast(`已导出 ${selected.length} 条设定`, 'success');
+  cancelExport();
 }
 
 // ====== Toast ======
