@@ -365,7 +365,12 @@
   <!-- 工具栏 -->
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:10px;">
     <h2 class="section-title" style="margin-bottom:0;">所有关系</h2>
-    <button class="btn btn-primary" onclick="openCreateModal()">＋ 添加关系</button>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+      <input type="text" id="relSearchInput" class="char-search" style="width:220px;"
+             placeholder="🔍 搜索关系（角色名/类型/描述）…"
+             oninput="renderRelList()" autocomplete="off">
+      <button class="btn btn-primary" onclick="openCreateModal()">＋ 添加关系</button>
+    </div>
   </div>
 
   <div class="rel-list" id="relList"></div>
@@ -1327,9 +1332,30 @@ function renderRelList() {
     empty.style.display = 'block';
     return;
   }
+
+  // 搜索过滤
+  const q = (document.getElementById('relSearchInput')?.value || '').trim().toLowerCase();
+  let filtered = allRelations;
+  if (q) {
+    filtered = allRelations.filter(r => {
+      const fromName = (r.from_name || '').toLowerCase();
+      const toName = (r.to_name || '').toLowerCase();
+      const type = (r.relation_type || '').toLowerCase();
+      const desc = (r.description || '').toLowerCase();
+      return fromName.includes(q) || toName.includes(q) ||
+             type.includes(q) || desc.includes(q);
+    });
+  }
+
+  if (filtered.length === 0) {
+    list.innerHTML = '';
+    empty.style.display = 'block';
+    empty.querySelector('p').textContent = '没有匹配的关系';
+    return;
+  }
   empty.style.display = 'none';
 
-  list.innerHTML = allRelations.map((r, i) => {
+  list.innerHTML = filtered.map((r, i) => {
     const fromName = r.from_name || '角色#' + r.from_char_id;
     const toName = r.to_name || '角色#' + r.to_char_id;
     const typeHtml = r.relation_type ? `<span class="rel-type ${r.relation_type === 'CP' ? 'rel-type-cp' : r.relation_type === '继承记忆' ? 'rel-type-memory' : r.relation_type === '参与组建' ? 'rel-type-formation' : r.relation_type === '师生' ? 'rel-type-teacher' : ''}">${esc(r.relation_type)}</span>` : '';

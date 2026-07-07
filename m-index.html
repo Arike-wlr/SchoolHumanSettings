@@ -23,6 +23,7 @@
     --font-serif: 'Georgia', 'Noto Serif SC', serif;
     --font-sans: -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif;
     --safe-bottom: env(safe-area-inset-bottom, 0px);
+    --safe-top: env(safe-area-inset-top, 0px);
   }
 
   * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
@@ -324,33 +325,33 @@
   .modal-overlay {
     position: fixed;
     inset: 0;
-    background: rgba(0,0,0,.5);
+    background: var(--card-bg);
     z-index: 300;
     display: none;
-    align-items: flex-end;
-    justify-content: center;
+    flex-direction: column;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
   }
   .modal-overlay.active { display: flex; }
   .modal {
     background: var(--card-bg);
     width: 100%;
-    max-height: 92vh;
-    border-radius: 16px 16px 0 0;
+    min-height: 100vh;
     display: flex;
     flex-direction: column;
-    animation: slideUp .25s ease-out;
-  }
-  @keyframes slideUp {
-    from { transform: translateY(100%); }
-    to { transform: translateY(0); }
   }
   .modal-header {
+    /* 顶部多留 32px，避开手机状态栏 */
     padding: 14px 16px;
+    padding-top: calc(32px + var(--safe-top));
     border-bottom: 1px solid var(--border);
     display: flex;
     justify-content: space-between;
     align-items: center;
-    flex-shrink: 0;
+    position: sticky;
+    top: 0;
+    background: var(--card-bg);
+    z-index: 2;
   }
   .modal-title {
     font-size: 1rem;
@@ -365,16 +366,19 @@
     cursor: pointer;
   }
   .modal-body {
-    padding: 14px 16px;
-    overflow-y: auto;
-    -webkit-overflow-scrolling: touch;
+    padding: 14px 16px 24px;
+    /* 关键：底部留出大空间，键盘弹出时也能滚到设定框 */
+    padding-bottom: 60vh;
   }
   .modal-footer {
     padding: 12px 16px calc(12px + var(--safe-bottom));
     border-top: 1px solid var(--border);
     display: flex;
     gap: 10px;
-    flex-shrink: 0;
+    position: sticky;
+    bottom: 0;
+    background: var(--card-bg);
+    z-index: 2;
   }
   .btn-modal {
     flex: 1;
@@ -412,7 +416,8 @@
     border-color: var(--accent-light);
     background: var(--card-bg);
   }
-  .form-textarea { resize: vertical; min-height: 60px; }
+  .form-textarea { resize: vertical; min-height: 80px; }
+  .form-textarea.large { min-height: 200px; }
   .form-row {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -517,7 +522,7 @@
         </div>
         <div class="form-group">
           <label class="form-label">取名依据</label>
-          <textarea class="form-textarea" id="namingRationale" rows="2" placeholder="名字来源、含义…"></textarea>
+          <textarea class="form-textarea" id="namingRationale" rows="3" placeholder="名字来源、含义…"></textarea>
         </div>
         <div class="form-row">
           <div class="form-group">
@@ -540,7 +545,7 @@
         </div>
         <div class="form-group">
           <label class="form-label">外貌</label>
-          <textarea class="form-textarea" id="appearance" rows="2" placeholder="外貌特征…"></textarea>
+          <textarea class="form-textarea" id="appearance" rows="4" placeholder="外貌特征…"></textarea>
         </div>
         <div class="form-group">
           <label class="form-label">身份存在时间</label>
@@ -563,7 +568,7 @@
         </div>
         <div class="form-group">
           <label class="form-label">设定</label>
-          <textarea class="form-textarea" id="setting" rows="4" placeholder="角色详细设定…"></textarea>
+          <textarea class="form-textarea large" id="setting" rows="10" placeholder="角色详细设定…"></textarea>
         </div>
       </form>
     </div>
@@ -632,6 +637,7 @@
 
 <script>
 const API = '/api/characters';
+
 let deleteTargetId = null;
 let allCharacters = [];
 let activeRegion = '全部';
