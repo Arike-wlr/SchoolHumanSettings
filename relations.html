@@ -201,6 +201,10 @@
   }
   .rel-item:hover { border-color: var(--accent-light); box-shadow: var(--shadow); }
   .rel-item.highlight { border-color: var(--accent); background: var(--accent-pale); }
+  .rel-item.dragging { opacity: 0.4; }
+  .rel-item.drag-over { border-color: var(--accent); border-style: dashed; background: var(--accent-pale); }
+  .drag-handle { cursor: grab; color: var(--text-light); font-size: 1.2rem; user-select: none; flex-shrink: 0; }
+  .drag-handle:active { cursor: grabbing; }
   .rel-info { flex: 1; min-width: 0; }
   .rel-names { font-weight: 600; font-size: .93rem; }
   .rel-names .arrow { color: var(--accent-light); margin: 0 6px; }
@@ -216,6 +220,8 @@
   }
   .rel-type-cp { background: #fce4ec; color: #c44b7a; }
   .rel-type-memory { background: #e0f2f1; color: #2e8b8a; }
+  .rel-type-formation { background: #fdf0e0; color: #d4842a; }
+  .rel-type-teacher { background: #e3edf7; color: #4a7db0; }
   .info-label { width: 90px; font-weight: 500; color: var(--text-light); vertical-align: top; padding: 3px 12px 3px 0; white-space: nowrap; font-size: .85rem; }
   .info-label + td { padding: 3px 0; }
   .rel-desc { font-size: .82rem; color: var(--text-light); margin-top: 2px; }
@@ -350,6 +356,8 @@
       <div class="legend-item"><span style="color:#c44b7a;">⇄</span> CP</div>
       <div class="legend-item"><span style="color:#6b4c8a;margin-left:8px;">━━</span> 单箭头</div>
       <div class="legend-item"><span style="color:#2e8b8a;margin-left:4px;">┅┅</span> 继承记忆</div>
+      <div class="legend-item"><span style="color:#d4842a;margin-left:8px;">━━</span> 参与组建</div>
+      <div class="legend-item"><span style="color:#4a7db0;margin-left:8px;">━━</span> 师生</div>
       <div class="legend-item" style="margin-left:16px;color:var(--text-light);">|</div>
     </div>
   </div>
@@ -397,6 +405,8 @@
             <option value="CP">CP</option>
             <option value="单箭头">单箭头</option>
             <option value="继承记忆">继承记忆</option>
+            <option value="参与组建">参与组建</option>
+            <option value="师生">师生</option>
           </select>
         </div>
         <div class="form-group">
@@ -965,7 +975,7 @@ function drawFamilyClusters() {
   });
 }
 
-// CP / 单箭头 / 继承记忆 边线渲染
+// CP / 单箭头 / 继承记忆 / 参与组建 / 师生 边线渲染
 function drawEdge(fromX, fromY, toX, toY, type, hl) {
   const dx = toX - fromX, dy = toY - fromY;
   const len = Math.sqrt(dx * dx + dy * dy) || 1;
@@ -982,6 +992,8 @@ function drawEdge(fromX, fromY, toX, toY, type, hl) {
   let color;
   if (type === 'CP') color = '#c44b7a';
   else if (type === '继承记忆') color = '#2e8b8a';
+  else if (type === '参与组建') color = '#d4842a';
+  else if (type === '师生') color = '#4a7db0';
   else color = '#6b4c8a';
   const alpha = hl ? 'b3' : '55';
   const isDashed = type === '继承记忆';
@@ -1052,6 +1064,8 @@ function drawGraph() {
     let labelColor;
     if (edge.type === 'CP') labelColor = '#c44b7a';
     else if (edge.type === '继承记忆') labelColor = '#2e8b8a';
+    else if (edge.type === '参与组建') labelColor = '#d4842a';
+    else if (edge.type === '师生') labelColor = '#4a7db0';
     else labelColor = '#6b4c8a';
     ctx.font = '12px "PingFang SC","Microsoft YaHei",sans-serif';
     const tw = ctx.measureText(label).width + 8;
@@ -1302,6 +1316,8 @@ document.getElementById('infoOverlay').addEventListener('click', function(e) {
 });
 
 // --- 关系列表 ---
+let draggedRelIndex = null;
+
 function renderRelList() {
   const list = document.getElementById('relList');
   const empty = document.getElementById('emptyState');
@@ -1313,14 +1329,21 @@ function renderRelList() {
   }
   empty.style.display = 'none';
 
-  list.innerHTML = allRelations.map(r => {
+  list.innerHTML = allRelations.map((r, i) => {
     const fromName = r.from_name || '角色#' + r.from_char_id;
     const toName = r.to_name || '角色#' + r.to_char_id;
-    const typeHtml = r.relation_type ? `<span class="rel-type ${r.relation_type === 'CP' ? 'rel-type-cp' : r.relation_type === '继承记忆' ? 'rel-type-memory' : ''}">${esc(r.relation_type)}</span>` : '';
+    const typeHtml = r.relation_type ? `<span class="rel-type ${r.relation_type === 'CP' ? 'rel-type-cp' : r.relation_type === '继承记忆' ? 'rel-type-memory' : r.relation_type === '参与组建' ? 'rel-type-formation' : r.relation_type === '师生' ? 'rel-type-teacher' : ''}">${esc(r.relation_type)}</span>` : '';
     return `
-      <div class="rel-item" id="rel-${r.id}" 
+      <div class="rel-item" id="rel-${r.id}" draggable="true" data-index="${i}"
            onmouseenter="highlightRelation(${r.id}, true)"
-           onmouseleave="highlightRelation(${r.id}, false)">
+           onmouseleave="highlightRelation(${r.id}, false)"
+           ondragstart="onRelDragStart(event, ${i})"
+           ondragover="onRelDragOver(event)"
+           ondragend="onRelDragEnd(event)"
+           ondragenter="onRelDragEnter(event, this)"
+           ondragleave="onRelDragLeave(event, this)"
+           ondrop="onRelDrop(event, ${i})">
+        <span class="drag-handle" title="拖动排序">⠿</span>
         <div class="rel-info" onclick="openEditModal(${r.id})">
           <div class="rel-names">
             ${esc(fromName)} <span class="arrow">→</span> ${esc(toName)}
@@ -1334,6 +1357,55 @@ function renderRelList() {
         </div>
       </div>`;
   }).join('');
+}
+
+function onRelDragStart(e, idx) {
+  draggedRelIndex = idx;
+  e.target.classList.add('dragging');
+  e.dataTransfer.effectAllowed = 'move';
+  e.dataTransfer.setData('text/plain', '');
+}
+
+function onRelDragOver(e) {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+}
+
+function onRelDragEnter(e, el) {
+  e.preventDefault();
+  if (!el.classList.contains('dragging')) el.classList.add('drag-over');
+}
+
+function onRelDragLeave(e, el) {
+  el.classList.remove('drag-over');
+}
+
+function onRelDrop(e, toIdx) {
+  e.preventDefault();
+  e.target.closest('.rel-item')?.classList.remove('drag-over');
+  if (draggedRelIndex === null || draggedRelIndex === toIdx) return;
+  const item = allRelations.splice(draggedRelIndex, 1)[0];
+  allRelations.splice(toIdx, 0, item);
+  saveRelOrder();
+  renderRelList();
+  draggedRelIndex = null;
+}
+
+function onRelDragEnd(e) {
+  e.target.classList.remove('dragging');
+  document.querySelectorAll('.rel-item').forEach(el => el.classList.remove('drag-over'));
+  draggedRelIndex = null;
+}
+
+async function saveRelOrder() {
+  const items = allRelations.map((r, i) => ({ id: r.id, sort_order: i }));
+  try {
+    await fetch(`${API_REL}/reorder`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items }),
+    });
+  } catch(e) { /* 静默失败 */ }
 }
 
 function highlightRelation(relId, on) {
@@ -1374,6 +1446,8 @@ function drawGraphWithHighlight() {
     let labelColor;
     if (edge.type === 'CP') labelColor = '#c44b7a';
     else if (edge.type === '继承记忆') labelColor = '#2e8b8a';
+    else if (edge.type === '参与组建') labelColor = '#d4842a';
+    else if (edge.type === '师生') labelColor = '#4a7db0';
     else labelColor = '#6b4c8a';
     const tw = ctx.measureText(label).width + 8;
     ctx.fillStyle = hl ? '#f0e8f8' : '#fff';

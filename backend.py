@@ -88,12 +88,19 @@ def init_db():
             to_char_id INTEGER NOT NULL,
             relation_type TEXT DEFAULT '',
             description TEXT DEFAULT '',
+            sort_order INTEGER DEFAULT 0,
             created_at TEXT DEFAULT (datetime('now','localtime')),
             updated_at TEXT DEFAULT (datetime('now','localtime')),
             FOREIGN KEY (from_char_id) REFERENCES characters(id) ON DELETE CASCADE,
             FOREIGN KEY (to_char_id) REFERENCES characters(id) ON DELETE CASCADE
         )
     """)
+    # 兼容旧表：如果缺少列则自动添加
+    cursor.execute("PRAGMA table_info(relations)")
+    rel_cols = [col[1] for col in cursor.fetchall()]
+    if "sort_order" not in rel_cols:
+        cursor.execute("ALTER TABLE relations ADD COLUMN sort_order INTEGER DEFAULT 0")
+        cursor.execute("UPDATE relations SET sort_order = id")
 
     conn.commit()
     conn.close()
@@ -484,7 +491,7 @@ def list_relations():
         FROM relations r
         LEFT JOIN characters c1 ON r.from_char_id = c1.id
         LEFT JOIN characters c2 ON r.to_char_id = c2.id
-        ORDER BY r.id
+        ORDER BY r.sort_order ASC, r.id ASC
     """)
     rows = cursor.fetchall()
     conn.close()
@@ -508,10 +515,12 @@ def create_relation(data: RelationCreate):
         conn.close()
         raise HTTPException(status_code=404, detail="目标角色不存在")
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    cursor.execute("SELECT COALESCE(MAX(sort_order), 0) + 1 FROM relations")
+    next_order = cursor.fetchone()[0]
     cursor.execute(
-        """INSERT INTO relations (from_char_id, to_char_id, relation_type, description, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?)""",
-        (data.from_char_id, data.to_char_id, data.relation_type, data.description, now, now)
+        """INSERT INTO relations (from_char_id, to_char_id, relation_type, description, sort_order, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        (data.from_char_id, data.to_char_id, data.relation_type, data.description, next_order, now, now)
     )
     conn.commit()
     rel_id = cursor.lastrowid
@@ -525,6 +534,21 @@ def create_relation(data: RelationCreate):
     row = cursor.fetchone()
     conn.close()
     return row_to_dict(row)
+
+
+@app.post("/api/relations/reorder")
+def reorder_relations(data: ReorderRequest):
+    """批量更新关系排序"""
+    conn = get_db()
+    cursor = conn.cursor()
+    for item in data.items:
+        cursor.execute(
+            "UPDATE relations SET sort_order = ? WHERE id = ?",
+            (item.sort_order, item.id)
+        )
+    conn.commit()
+    conn.close()
+    return {"message": "排序已保存"}
 
 
 @app.put("/api/relations/{rel_id}")
