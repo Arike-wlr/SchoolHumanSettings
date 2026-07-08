@@ -142,6 +142,22 @@ if (location.protocol === 'file:') {
   }
   .btn-add:active { transform: scale(.98); }
 
+  /* ====== 导出模式（模仿 m-documents 风格） ====== */
+  .card { position: relative; }
+  .card-check { display: none; position: absolute; top: 14px; left: 12px; width: 28px; height: 28px; cursor: pointer; accent-color: var(--accent); z-index: 2; }
+  .export-mode .card-check { display: block; }
+  .export-mode .card { cursor: default; }
+  .export-mode .card:active { transform: none; }
+  .card.selected { border-color: var(--accent); background: var(--accent-pale); }
+  .export-bar { display: none; gap: 8px; margin: 6px 14px 0; align-items: center; }
+  .export-mode .export-bar { display: flex; }
+  .btn-export-outline { padding: 8px 14px; background: var(--card-bg); color: var(--text); border: 1px solid var(--border); border-radius: 8px; font-size: .82rem; cursor: pointer; }
+  .btn-export-primary { flex: 1; padding: 12px; background: var(--accent); color: #fff; border: none; border-radius: var(--radius); font-size: .95rem; font-weight: 500; cursor: pointer; margin: 0; box-shadow: 0 2px 8px rgba(139,94,60,.25); }
+  .btn-export-primary:disabled { opacity: .5; cursor: default; }
+  .btn-export-trigger { display: block; width: calc(100% - 28px); margin: 6px 14px 8px; padding: 12px; background: var(--card-bg); color: var(--accent); border: 1.5px solid var(--accent); border-radius: var(--radius); font-size: .95rem; font-weight: 500; cursor: pointer; box-shadow: none; }
+  .btn-export-trigger:active { background: var(--accent-pale); }
+  .export-mode .btn-export-trigger { display: none; }
+
   /* ====== 地区标签 ====== */
   .region-tabs {
     display: flex;
@@ -298,6 +314,11 @@ if (location.protocol === 'file:') {
   /* 触控拖拽排序 */
   .drag-handle { display: flex; align-items: center; justify-content: center; width: 28px; min-width: 28px; height: 28px; color: var(--text-light); font-size: 1.1rem; cursor: grab; -webkit-user-select: none; user-select: none; touch-action: none; flex-shrink: 0; }
   .drag-handle:active { cursor: grabbing; }
+
+  /* 上移/下移按钮 */
+  .sort-btn { display: flex; align-items: center; justify-content: center; width: 34px; min-width: 34px; height: 34px; background: none; border: 1.5px solid var(--border); border-radius: 8px; color: var(--text-light); font-size: 1.05rem; cursor: pointer; flex-shrink: 0; -webkit-tap-highlight-color: transparent; touch-action: manipulation; padding: 0; line-height: 1; }
+  .sort-btn:active { background: var(--accent-pale); color: var(--accent); border-color: var(--accent); }
+  .export-mode .sort-btn { display: none; }
   .card.dragging { opacity: 0.3; transform: scale(0.96); }
   .card.drag-over { border-color: var(--accent); border-style: dashed; background: var(--accent-pale); }
 
@@ -504,6 +525,12 @@ if (location.protocol === 'file:') {
     </div>
   </div>
   <button class="btn-add" onclick="openCreateModal()">＋ 添加新角色</button>
+  <div class="export-bar" id="exportActions">
+    <button class="btn-export-outline" onclick="toggleSelectAll()" id="selectAllBtn">全选</button>
+    <button class="btn-export-outline" onclick="cancelExport()" style="color:var(--text-light);">放弃</button>
+    <button class="btn-export-primary" id="confirmExportBtn" onclick="confirmExport()" disabled>确认导出</button>
+  </div>
+  <button class="btn-export-trigger" id="exportBtn" onclick="enterExportMode()">📥 选择导出</button>
 </div>
 
 <div class="region-tabs" id="regionTabs"></div>
@@ -862,6 +889,7 @@ function applyFilter() {
   if (activeRegion !== '全部') filtered = filtered.filter(c => c.region === activeRegion);
   if (searchVal) filtered = filtered.filter(c => (c.university||'').toLowerCase().includes(searchVal) || (c.name||'').toLowerCase().includes(searchVal));
   renderGrid(filtered);
+  if (exportMode) updateExportButtons();
 }
 
 function renderGrid(chars) {
@@ -930,12 +958,16 @@ function cardHTML(c, globalIdx) {
   if (c.height) topFields += `<div class="field-row"><span class="field-label">身高</span><span class="field-value">${esc(c.height)}</span></div>`;
   if (c.birthday) topFields += `<div class="field-row"><span class="field-label">生日</span><span class="field-value">${esc(c.birthday)}</span></div>`;
   
+  const exportChecked = selectedIds.has(c.id) ? 'checked' : '';
+  const exportSelected = selectedIds.has(c.id) ? ' selected' : '';
   return `
-    <div class="card${cardExtraClass}" data-drag-id="${c.id}" data-drag-idx="${globalIdx !== undefined ? globalIdx : 0}" onclick="openDetailModal(${c.id})">
+    <div class="card${cardExtraClass}${exportSelected}" data-drag-id="${c.id}" data-drag-idx="${globalIdx !== undefined ? globalIdx : 0}" onclick="handleCardClick(${c.id})">
+      <input type="checkbox" class="card-check" ${exportChecked} onclick="event.stopPropagation();toggleCardSelect(${c.id}, this.checked)" title="选择导出">
       <div style="display:flex; gap:10px; align-items:stretch;">
         <div style="flex:1; min-width:0;">
           <div class="card-header">
-            <span class="drag-handle" title="长按拖动排序" onclick="event.stopPropagation()">⠿</span>
+            <button class="sort-btn" title="上移" onclick="event.stopPropagation();moveCharUp(${c.id});return false;">↑</button>
+            <button class="sort-btn" title="下移" onclick="event.stopPropagation();moveCharDown(${c.id});return false;">↓</button>
             <span class="card-name">${esc(c.name)}</span>
             ${c.university?`<span class="uni-tag">${esc(c.university)}</span>`:''}
             ${c.gender?`<span class="gender-badge ${genderClass}">${esc(c.gender)}</span>`:''}
@@ -1149,6 +1181,101 @@ function showToast(msg, type) {
   setTimeout(() => t.classList.remove('show'), 2200);
 }
 
+// ====== 选择导出 ======
+let exportMode = false;
+const selectedIds = new Set();
+
+function updateExportButtons() {
+  var btn = document.getElementById('confirmExportBtn');
+  if (!btn) return;
+  btn.disabled = selectedIds.size === 0;
+  btn.textContent = selectedIds.size > 0 ? '确认导出 (' + selectedIds.size + ')' : '确认导出';
+}
+
+function enterExportMode() {
+  exportMode = true;
+  selectedIds.clear();
+  document.body.classList.add('export-mode');
+  applyFilter();
+}
+
+function cancelExport() {
+  exportMode = false;
+  selectedIds.clear();
+  document.body.classList.remove('export-mode');
+  applyFilter();
+}
+
+function handleCardClick(id) {
+  if (exportMode) {
+    var checkbox = document.querySelector('.card[data-drag-id="' + id + '"] .card-check');
+    if (checkbox) {
+      checkbox.checked = !checkbox.checked;
+      toggleCardSelect(id, checkbox.checked);
+    }
+    return;
+  }
+  openDetailModal(id);
+}
+
+function toggleCardSelect(id, checked) {
+  if (checked) selectedIds.add(id);
+  else selectedIds.delete(id);
+  const card = document.querySelector('.card[data-drag-id="' + id + '"]');
+  if (card) card.classList.toggle('selected', checked);
+  updateExportButtons();
+}
+
+function toggleSelectAll() {
+  const cards = document.querySelectorAll('#charGrid .card[data-drag-id]');
+  if (cards.length === 0) return;
+  const visibleIds = [];
+  cards.forEach(function(c) { visibleIds.push(parseInt(c.dataset.dragId)); });
+  const allSelected = visibleIds.every(function(id) { return selectedIds.has(id); });
+  if (allSelected) {
+    visibleIds.forEach(function(id) { selectedIds.delete(id); });
+  } else {
+    visibleIds.forEach(function(id) { selectedIds.add(id); });
+  }
+  applyFilter();
+}
+
+function confirmExport() {
+  if (selectedIds.size === 0) return;
+  var selected = allCharacters.filter(function(c) { return selectedIds.has(c.id); });
+  // 导出时剔除图片字段
+  var exportData = selected.map(function(c) {
+    var rest = Object.assign({}, c);
+    delete rest.image_url;
+    delete rest.images;
+    return rest;
+  });
+  var jsonStr = JSON.stringify(exportData, null, 2);
+  var fileName = '高校拟人OC_' + selected.length + '位角色_' + new Date().toISOString().slice(0,10) + '.json';
+  saveExportFile(jsonStr, fileName, '已导出 ' + selected.length + ' 位角色');
+  cancelExport();
+}
+
+function saveExportFile(jsonStr, fileName, msg) {
+  if (typeof Android !== 'undefined' && Android.saveFile) {
+    var blob = new Blob([jsonStr], {type: 'application/json'});
+    var reader = new FileReader();
+    reader.onloadend = function() { Android.saveFile(reader.result, fileName); };
+    reader.readAsDataURL(blob);
+    showToast('请选择保存位置', 'success');
+  } else {
+    var blob = new Blob([jsonStr], {type: 'application/json'});
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(a.href);
+    showToast(msg, 'success');
+  }
+}
+
 // ============================================================
 // 触控拖拽排序
 // ============================================================
@@ -1266,6 +1393,22 @@ async function saveCharOrder() {
       body: JSON.stringify({ items: allCharacters.map((c, i) => ({ id: c.id, sort_order: i })) }),
     });
   } catch(e) { /* 静默失败 */ }
+}
+
+function moveCharUp(id) {
+  const idx = allCharacters.findIndex(c => c.id === id);
+  if (idx <= 0) return;
+  [allCharacters[idx - 1], allCharacters[idx]] = [allCharacters[idx], allCharacters[idx - 1]];
+  saveCharOrder();
+  applyFilter();
+}
+
+function moveCharDown(id) {
+  const idx = allCharacters.findIndex(c => c.id === id);
+  if (idx < 0 || idx >= allCharacters.length - 1) return;
+  [allCharacters[idx + 1], allCharacters[idx]] = [allCharacters[idx], allCharacters[idx + 1]];
+  saveCharOrder();
+  applyFilter();
 }
 </script>
 <!-- 离线模式脚本（仅 APK 环境 file:// 协议加载） -->

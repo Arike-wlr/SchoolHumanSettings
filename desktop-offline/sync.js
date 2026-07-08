@@ -29,7 +29,7 @@ function isServerUrl(u) {
   return u && !u.startsWith('data:') && !u.startsWith('blob:');
 }
 
-// 把服务器URL图片转成 base64 data URL（下载时用）
+// 把服务器URL图片转成 base64 data URL（下载时用，跳过已缓存的）
 async function convertServerImagesToDataUrl(characters, serverUrl, onProgress) {
   const urlSet = new Set();
   for (const c of characters) {
@@ -41,9 +41,17 @@ async function convertServerImagesToDataUrl(characters, serverUrl, onProgress) {
   if (urlSet.size === 0) return;
   const cache = new Map();
   let i = 0;
+  let skipped = 0;
   for (const imgPath of urlSet) {
     i++;
-    onProgress && onProgress(`正在下载图片 (${i}/${urlSet.size})...`);
+    // 先查本地缓存
+    const cached = await imageCacheDB.getByServerUrl(imgPath);
+    if (cached && cached.dataUrl) {
+      cache.set(imgPath, cached.dataUrl);
+      skipped++;
+      continue;
+    }
+    onProgress && onProgress(`正在下载图片 (${i-skipped}/${urlSet.size-skipped})...`);
     try {
       const fullUrl = imgPath.startsWith('http') ? imgPath : (serverUrl + imgPath);
       const res = await fetch(fullUrl);
@@ -51,11 +59,14 @@ async function convertServerImagesToDataUrl(characters, serverUrl, onProgress) {
         const blob = await res.blob();
         const dataUrl = await blobToDataUrl(blob);
         cache.set(imgPath, dataUrl);
+        // 存入缓存
+        await imageCacheDB.set(dataUrl, imgPath);
       }
     } catch (e) {
       console.warn('图片下载失败:', imgPath, e);
     }
   }
+  if (skipped > 0) onProgress && onProgress(`图片同步：${skipped} 张已缓存，${urlSet.size - skipped} 张需下载`);
   // 替换角色数据中的URL
   for (const c of characters) {
     if (Array.isArray(c.images)) {
@@ -67,7 +78,7 @@ async function convertServerImagesToDataUrl(characters, serverUrl, onProgress) {
   }
 }
 
-// 把 base64 data URL 图片上传到服务器换为 URL（上传时用）
+// 把 base64 data URL 图片上传到服务器换为 URL（上传时用，跳过已缓存的）
 async function convertDataUrlImagesToServerUrl(characters, serverUrl, onProgress) {
   const dataUrlSet = new Set();
   for (const c of characters) {
@@ -79,9 +90,17 @@ async function convertDataUrlImagesToServerUrl(characters, serverUrl, onProgress
   if (dataUrlSet.size === 0) return;
   const cache = new Map();
   let i = 0;
+  let skipped = 0;
   for (const dataUrl of dataUrlSet) {
     i++;
-    onProgress && onProgress(`正在上传图片 (${i}/${dataUrlSet.size})...`);
+    // 先查本地缓存：该 dataUrl 是否已上传过
+    const cached = await imageCacheDB.getByDataUrl(dataUrl);
+    if (cached && cached.serverUrl) {
+      cache.set(dataUrl, cached.serverUrl);
+      skipped++;
+      continue;
+    }
+    onProgress && onProgress(`正在上传图片 (${i-skipped}/${dataUrlSet.size-skipped})...`);
     try {
       const blob = dataUrlToBlob(dataUrl);
       const formData = new FormData();
@@ -90,11 +109,14 @@ async function convertDataUrlImagesToServerUrl(characters, serverUrl, onProgress
       if (res.ok) {
         const r = await res.json();
         cache.set(dataUrl, r.image_url);
+        // 存入缓存
+        await imageCacheDB.set(dataUrl, r.image_url);
       }
     } catch (e) {
       console.warn('图片上传失败:', e);
     }
   }
+  if (skipped > 0) onProgress && onProgress(`图片同步：${skipped} 张已缓存，${dataUrlSet.size - skipped} 张需上传`);
   // 替换角色数据中的data URL
   for (const c of characters) {
     if (Array.isArray(c.images)) {

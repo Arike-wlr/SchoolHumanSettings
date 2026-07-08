@@ -4,12 +4,13 @@
 // ============================================================
 
 const DB_NAME = 'oc_characters_db';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORES = {
   characters: 'characters',       // 角色
   worldBuildings: 'worldBuildings', // 世界设定
   relations: 'relations',         // 关系
   documents: 'documents',         // 文档（存 Blob）
+  imageCache: 'imageCache',       // 图片缓存（增量同步用）
 };
 const SERVER_KEY = 'sync_server_url';  // 服务器地址存储 key
 
@@ -35,6 +36,9 @@ function openDB() {
       }
       if (!db.objectStoreNames.contains(STORES.documents)) {
         db.createObjectStore(STORES.documents, { keyPath: 'name' }); // 用文件名作 key
+      }
+      if (!db.objectStoreNames.contains(STORES.imageCache)) {
+        db.createObjectStore(STORES.imageCache, { keyPath: 'hash' }); // 用 dataUrl hash 作 key
       }
     };
   });
@@ -227,3 +231,39 @@ function setServerUrl(url) {
 function hasServer() {
   return !!getServerUrl();
 }
+
+// ============= 图片缓存（增量同步用） =============
+// 缓存 dataUrl → serverUrl 的映射，避免重复上传/下载同一张图片
+
+// 计算 dataUrl 的简易 hash（长度 + 头尾片段）
+function imageHash(dataUrl) {
+  if (!dataUrl) return '';
+  return dataUrl.length + '|' + dataUrl.slice(0, 100) + dataUrl.slice(-50);
+}
+
+const imageCacheDB = {
+  // 通过 dataUrl 查找已缓存的服务器URL
+  async getByDataUrl(dataUrl) {
+    const all = await getAll(STORES.imageCache);
+    const h = imageHash(dataUrl);
+    return all.find(c => c.hash === h);
+  },
+  // 通过 serverUrl 查找已缓存的 dataUrl
+  async getByServerUrl(serverUrl) {
+    const all = await getAll(STORES.imageCache);
+    return all.find(c => c.serverUrl === serverUrl);
+  },
+  // 存入缓存
+  async set(dataUrl, serverUrl) {
+    if (!dataUrl || !serverUrl) return;
+    const existing = await this.getByDataUrl(dataUrl);
+    if (existing) {
+      existing.serverUrl = serverUrl;
+      await put(STORES.imageCache, existing);
+    } else {
+      await put(STORES.imageCache, { hash: imageHash(dataUrl), dataUrl, serverUrl });
+    }
+  },
+  // 清空缓存
+  clear: () => clearStore(STORES.imageCache),
+};

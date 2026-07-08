@@ -826,6 +826,7 @@ def _delete_unused_images(cursor, image_urls: list):
 @app.post("/api/images/upload")
 async def upload_image(file: UploadFile = File(...)):
     """通用图片上传（无需角色ID），返回 image_url，由后续创建/更新角色时保存"""
+    print(f"[images/upload] 收到图片: {file.filename}, 大小: {file.size} bytes")
     image_url, filename = await _save_image_file(file)
     return {"message": "图片上传成功", "image_url": image_url, "filename": filename}
 
@@ -1123,6 +1124,7 @@ class SyncPayload(PydanticModel):
 @app.post("/api/sync/replace-all")
 def sync_replace_all(payload: SyncPayload):
     """全量替换服务器数据（手机上传用）"""
+    print(f"[sync/replace-all] 收到请求: {len(payload.characters)} 角色, {len(payload.worldBuildings)} 设定, {len(payload.relations)} 关系")
     conn = get_db()
     cursor = conn.cursor()
 
