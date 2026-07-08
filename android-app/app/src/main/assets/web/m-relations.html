@@ -85,17 +85,10 @@ if (location.protocol === 'file:') {
   .btn-action:active { background: var(--accent-pale); }
   .btn-action.danger { color: var(--danger); border-color: var(--danger-bg); }
 
-  /* 触控拖拽排序 */
-  .drag-handle { display: flex; align-items: center; justify-content: center; width: 28px; min-width: 28px; height: 28px; color: var(--text-light); font-size: 1.1rem; cursor: grab; -webkit-user-select: none; user-select: none; touch-action: none; }
-  .drag-handle:active { cursor: grabbing; }
-  .rel-card.dragging { opacity: 0.3; transform: scale(0.96); }
-  .rel-card.drag-over { border-color: var(--accent); border-style: dashed; background: var(--accent-pale); }
-
-  /* 上移/下移排序按钮 */
-  .sort-arrows { display: flex; flex-direction: column; gap: 1px; margin-left: 0; flex-shrink: 0; }
-  .sort-arrow { display: flex; align-items: center; justify-content: center; width: 26px; height: 14px; background: none; border: none; color: var(--text-light); font-size: .65rem; cursor: pointer; padding: 0; line-height: 1; border-radius: 3px; -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
-  .sort-arrow:active { background: var(--accent-pale); color: var(--accent); }
-  .export-mode .sort-arrows { display: none; }
+  /* 上移/下移按钮 */
+  .sort-btn { display: flex; align-items: center; justify-content: center; width: 34px; min-width: 34px; height: 34px; background: none; border: 1.5px solid var(--border); border-radius: 8px; color: var(--text-light); font-size: 1.05rem; cursor: pointer; flex-shrink: 0; -webkit-tap-highlight-color: transparent; touch-action: manipulation; padding: 0; line-height: 1; }
+  .sort-btn:active { background: var(--accent-pale); color: var(--accent); border-color: var(--accent); }
+  .export-mode .sort-btn { display: none; }
 
   .empty { text-align: center; padding: 60px 20px; color: var(--text-light); }
   .empty .icon { font-size: 2.5rem; margin-bottom: 8px; opacity: .5; }
@@ -135,7 +128,6 @@ if (location.protocol === 'file:') {
   /* ====== 导出模式 ====== */
   .card-check { display: none; position: absolute; top:12px; left:12px; width:28px; height:28px; cursor:pointer; accent-color:var(--accent); z-index:2; }
   .export-mode .card-check { display: block; }
-  .export-mode .card .drag-handle, .export-mode .rel-card .drag-handle { display: none; }
   .export-mode .card, .export-mode .rel-card { cursor: default; }
   .export-mode .card:active, .export-mode .rel-card:active { transform: none; }
   .card.selected, .rel-card.selected { border-color: var(--accent); background: var(--accent-pale); }
@@ -431,11 +423,8 @@ function renderRelList() {
       <div class="rel-card${selectedIds.has(r.id)?' selected':''}" data-drag-id="${r.id}" data-drag-idx="${idxMap[i]}">
         <input type="checkbox" class="card-check" ${selectedIds.has(r.id) ? 'checked' : ''} onclick="event.stopPropagation();toggleCardSelect(${r.id}, this.checked)" title="选择导出">
         <div class="rel-names">
-          <span class="drag-handle" title="长按拖动排序">⠿</span>
-          <div class="sort-arrows" onclick="event.stopPropagation()">
-            <button class="sort-arrow" title="上移" onclick="event.stopPropagation();moveRelUp(${r.id});return false;">▲</button>
-            <button class="sort-arrow" title="下移" onclick="event.stopPropagation();moveRelDown(${r.id});return false;">▼</button>
-          </div>
+          <button class="sort-btn" title="上移" onclick="event.stopPropagation();moveRelUp(${r.id});return false;">↑</button>
+          <button class="sort-btn" title="下移" onclick="event.stopPropagation();moveRelDown(${r.id});return false;">↓</button>
           <span class="rel-name">${esc(fromName)}</span>
           <span class="rel-arrow">→</span>
           <span class="rel-name">${esc(toName)}</span>
