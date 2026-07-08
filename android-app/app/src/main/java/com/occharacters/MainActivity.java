@@ -79,9 +79,9 @@ public class MainActivity extends AppCompatActivity {
                 MainActivity.this.filePathCallback = filePathCallback;
                 Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
                 intent.addCategory(Intent.CATEGORY_OPENABLE);
-                intent.setType("*/*");
+                intent.setType("image/*");
                 intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
-                startActivityForResult(Intent.createChooser(intent, "选择文件"), FILE_CHOOSER_REQUEST);
+                startActivityForResult(Intent.createChooser(intent, "选择图片"), FILE_CHOOSER_REQUEST);
                 return true;
             }
         });
@@ -158,9 +158,8 @@ public class MainActivity extends AppCompatActivity {
         if (requestCode == FILE_CHOOSER_REQUEST) {
             if (filePathCallback != null) {
                 Uri[] results = null;
-                if (resultCode == Activity.RESULT_OK && data != null) {
-                    String dataString = data.getDataString();
-                    if (dataString != null) {
+                if (resultCode == Activity.RESULT_OK) {
+                    if (data != null) {
                         if (data.getClipData() != null) {
                             int count = data.getClipData().getItemCount();
                             results = new Uri[count];
@@ -170,6 +169,9 @@ public class MainActivity extends AppCompatActivity {
                         } else if (data.getData() != null) {
                             results = new Uri[]{data.getData()};
                         }
+                    } else {
+                        // 某些机型直接返回 null data
+                        results = new Uri[]{};
                     }
                 }
                 filePathCallback.onReceiveValue(results);
