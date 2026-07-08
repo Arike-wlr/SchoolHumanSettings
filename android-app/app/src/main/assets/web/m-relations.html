@@ -79,7 +79,7 @@ if (location.protocol === 'file:') {
   .rel-type { font-size: .72rem; padding: 2px 8px; border-radius: 10px; background: var(--accent-pale); color: var(--accent); font-weight: 500; }
   .rel-type.cp { background: #fce4ec; color: #c2185b; }
   .rel-type.师生 { background: #e3f2fd; color: #1565c0; }
-  .rel-desc { font-size: .85rem; color: var(--text-light); line-height: 1.5; margin-top: 4px; }
+  .rel-desc { font-size: .85rem; color: var(--text-light); line-height: 1.5; margin-top: 4px; white-space: pre-wrap; }
   .card-actions { display: flex; gap: 8px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
   .btn-action { flex: 1; padding: 7px; border: 1px solid var(--border); border-radius: 8px; background: var(--card-bg); color: var(--text); font-size: .82rem; cursor: pointer; }
   .btn-action:active { background: var(--accent-pale); }
@@ -90,6 +90,12 @@ if (location.protocol === 'file:') {
   .drag-handle:active { cursor: grabbing; }
   .rel-card.dragging { opacity: 0.3; transform: scale(0.96); }
   .rel-card.drag-over { border-color: var(--accent); border-style: dashed; background: var(--accent-pale); }
+
+  /* 上移/下移排序按钮 */
+  .sort-arrows { display: flex; flex-direction: column; gap: 1px; margin-left: 0; flex-shrink: 0; }
+  .sort-arrow { display: flex; align-items: center; justify-content: center; width: 26px; height: 14px; background: none; border: none; color: var(--text-light); font-size: .65rem; cursor: pointer; padding: 0; line-height: 1; border-radius: 3px; -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+  .sort-arrow:active { background: var(--accent-pale); color: var(--accent); }
+  .export-mode .sort-arrows { display: none; }
 
   .empty { text-align: center; padding: 60px 20px; color: var(--text-light); }
   .empty .icon { font-size: 2.5rem; margin-bottom: 8px; opacity: .5; }
@@ -426,6 +432,10 @@ function renderRelList() {
         <input type="checkbox" class="card-check" ${selectedIds.has(r.id) ? 'checked' : ''} onclick="event.stopPropagation();toggleCardSelect(${r.id}, this.checked)" title="选择导出">
         <div class="rel-names">
           <span class="drag-handle" title="长按拖动排序">⠿</span>
+          <div class="sort-arrows" onclick="event.stopPropagation()">
+            <button class="sort-arrow" title="上移" onclick="event.stopPropagation();moveRelUp(${r.id});return false;">▲</button>
+            <button class="sort-arrow" title="下移" onclick="event.stopPropagation();moveRelDown(${r.id});return false;">▼</button>
+          </div>
           <span class="rel-name">${esc(fromName)}</span>
           <span class="rel-arrow">→</span>
           <span class="rel-name">${esc(toName)}</span>
@@ -740,6 +750,22 @@ async function saveRelOrder() {
       body: JSON.stringify({ items: allRelations.map((r, i) => ({ id: r.id, sort_order: i })) }),
     });
   } catch(e) { /* 静默失败 */ }
+}
+
+function moveRelUp(id) {
+  const idx = allRelations.findIndex(r => r.id === id);
+  if (idx <= 0) return;
+  [allRelations[idx - 1], allRelations[idx]] = [allRelations[idx], allRelations[idx - 1]];
+  saveRelOrder();
+  renderRelList();
+}
+
+function moveRelDown(id) {
+  const idx = allRelations.findIndex(r => r.id === id);
+  if (idx < 0 || idx >= allRelations.length - 1) return;
+  [allRelations[idx + 1], allRelations[idx]] = [allRelations[idx], allRelations[idx + 1]];
+  saveRelOrder();
+  renderRelList();
 }
 
 // ============================================================

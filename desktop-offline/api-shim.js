@@ -48,8 +48,11 @@ async function handleApiRequest(url, init) {
       if (method === 'PUT') {
         const data = JSON.parse(body);
         data.id = id;
-        await charDB.update(data);
-        return makeResponse({ ...data, id });
+        // 合并旧数据，保留 sort_order/family 等未传字段
+        const old = await charDB.get(id);
+        const merged = { ...(old || {}), ...data, id };
+        await charDB.update(merged);
+        return makeResponse(merged);
       }
       if (method === 'DELETE') {
         await charDB.delete(id);
@@ -81,8 +84,10 @@ async function handleApiRequest(url, init) {
         if (method === 'PUT') {
           const data = JSON.parse(body);
           data.id = id;
-          await worldDB.update(data);
-          return makeResponse({ ...data, id });
+          const old = await worldDB.get(id);
+          const merged = { ...(old || {}), ...data, id };
+          await worldDB.update(merged);
+          return makeResponse(merged);
         }
         if (method === 'DELETE') {
           await worldDB.delete(id);
@@ -123,8 +128,10 @@ async function handleApiRequest(url, init) {
         if (method === 'PUT') {
           const data = JSON.parse(body);
           data.id = id;
-          await relDB.update(data);
-          return makeResponse({ ...data, id });
+          const old = await relDB.get(id);
+          const merged = { ...(old || {}), ...data, id };
+          await relDB.update(merged);
+          return makeResponse(merged);
         }
         if (method === 'DELETE') {
           await relDB.delete(id);

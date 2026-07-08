@@ -301,6 +301,12 @@ if (location.protocol === 'file:') {
   .card.dragging { opacity: 0.3; transform: scale(0.96); }
   .card.drag-over { border-color: var(--accent); border-style: dashed; background: var(--accent-pale); }
 
+  /* 上移/下移排序按钮 */
+  .sort-arrows { display: flex; flex-direction: column; gap: 1px; margin-left: 0; flex-shrink: 0; }
+  .sort-arrow { display: flex; align-items: center; justify-content: center; width: 26px; height: 14px; background: none; border: none; color: var(--text-light); font-size: .65rem; cursor: pointer; padding: 0; line-height: 1; border-radius: 3px; -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+  .sort-arrow:active { background: var(--accent-pale); color: var(--accent); }
+  .export-mode .sort-arrows { display: none; }
+
   /* ====== 空状态 ====== */
   .empty {
     text-align: center;
@@ -455,6 +461,7 @@ if (location.protocol === 'file:') {
     font-size: .92rem;
     line-height: 1.5;
     word-break: break-word;
+    white-space: pre-wrap;
   }
   .detail-value.muted { color: var(--text-light); font-style: italic; }
   .detail-info-row {
@@ -809,6 +816,10 @@ function cardHTML(c, globalIdx) {
       <input type="checkbox" class="card-check" ${selectedIds.has(c.id) ? 'checked' : ''} onclick="event.stopPropagation();toggleCardSelect(${c.id}, this.checked)" title="选择导出">
       <div class="card-header">
         <span class="drag-handle" title="长按拖动排序" onclick="event.stopPropagation()">⠿</span>
+        <div class="sort-arrows" onclick="event.stopPropagation()">
+          <button class="sort-arrow" title="上移" onclick="event.stopPropagation();moveCharUp(${c.id});return false;">▲</button>
+          <button class="sort-arrow" title="下移" onclick="event.stopPropagation();moveCharDown(${c.id});return false;">▼</button>
+        </div>
         <span class="card-name">${esc(c.name)}</span>
         ${c.university?`<span class="uni-tag">${esc(c.university)}</span>`:''}
         ${c.gender?`<span class="gender-badge ${genderClass}">${esc(c.gender)}</span>`:''}
@@ -933,6 +944,7 @@ async function openDetailModal(id) {
     if (c.university) body += detailSection('代表高校', c.university);
     if (c.region) body += detailSection('地区', c.region);
     if (c.birthplace) body += detailSection('诞生地', c.birthplace);
+    if (c.family) body += detailSection('家族/团体', c.family);
     const statusText = c.status || '存在';
     if (statusText !== '存在') body += detailSection('存在状态', statusText);
     body += `<div class="detail-info-row">`;
@@ -1197,6 +1209,22 @@ async function saveCharOrder() {
       body: JSON.stringify({ items: allCharacters.map((c, i) => ({ id: c.id, sort_order: i })) }),
     });
   } catch(e) { /* 静默失败 */ }
+}
+
+function moveCharUp(id) {
+  const idx = allCharacters.findIndex(c => c.id === id);
+  if (idx <= 0) return;
+  [allCharacters[idx - 1], allCharacters[idx]] = [allCharacters[idx], allCharacters[idx - 1]];
+  saveCharOrder();
+  applyFilter();
+}
+
+function moveCharDown(id) {
+  const idx = allCharacters.findIndex(c => c.id === id);
+  if (idx < 0 || idx >= allCharacters.length - 1) return;
+  [allCharacters[idx + 1], allCharacters[idx]] = [allCharacters[idx], allCharacters[idx + 1]];
+  saveCharOrder();
+  applyFilter();
 }
 </script>
 <!-- 离线模式脚本（仅 APK 环境 file:// 协议加载） -->

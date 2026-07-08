@@ -77,6 +77,12 @@ if (location.protocol === 'file:') {
   .card.dragging { opacity: 0.3; transform: scale(0.96); }
   .card.drag-over { border-color: var(--accent); border-style: dashed; background: var(--accent-pale); }
 
+  /* 上移/下移排序按钮 */
+  .sort-arrows { display: flex; flex-direction: column; gap: 1px; margin-left: 0; flex-shrink: 0; }
+  .sort-arrow { display: flex; align-items: center; justify-content: center; width: 26px; height: 14px; background: none; border: none; color: var(--text-light); font-size: .65rem; cursor: pointer; padding: 0; line-height: 1; border-radius: 3px; -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+  .sort-arrow:active { background: var(--accent-pale); color: var(--accent); }
+  .export-mode .sort-arrows { display: none; }
+
   .empty { text-align: center; padding: 60px 20px; color: var(--text-light); }
   .empty .icon { font-size: 2.5rem; margin-bottom: 8px; opacity: .5; }
   .no-result { text-align: center; padding: 40px 20px; color: var(--text-light); font-size: .88rem; }
@@ -370,6 +376,10 @@ function cardHTML(e, globalIdx) {
       <input type="checkbox" class="card-check" ${selectedIds.has(e.id) ? 'checked' : ''} onclick="event.stopPropagation();toggleCardSelect(${e.id}, this.checked)" title="选择导出">
       <div class="card-header">
         <span class="drag-handle" title="长按拖动排序" onclick="event.stopPropagation()" style="flex-shrink:0;">⠿</span>
+        <div class="sort-arrows" onclick="event.stopPropagation()">
+          <button class="sort-arrow" title="上移" onclick="event.stopPropagation();moveWorldUp(${e.id});return false;">▲</button>
+          <button class="sort-arrow" title="下移" onclick="event.stopPropagation();moveWorldDown(${e.id});return false;">▼</button>
+        </div>
         <span class="card-title">${esc(e.title)}</span>
         ${showCat?`<span class="cat-tag">${esc(e.category)}</span>`:''}
       </div>
@@ -686,6 +696,22 @@ async function saveWorldOrder() {
       body: JSON.stringify({ items: allEntries.map((e, i) => ({ id: e.id, sort_order: i })) }),
     });
   } catch(e) { /* 静默失败 */ }
+}
+
+function moveWorldUp(id) {
+  const idx = allEntries.findIndex(e => e.id === id);
+  if (idx <= 0) return;
+  [allEntries[idx - 1], allEntries[idx]] = [allEntries[idx], allEntries[idx - 1]];
+  saveWorldOrder();
+  applyFilter();
+}
+
+function moveWorldDown(id) {
+  const idx = allEntries.findIndex(e => e.id === id);
+  if (idx < 0 || idx >= allEntries.length - 1) return;
+  [allEntries[idx + 1], allEntries[idx]] = [allEntries[idx], allEntries[idx + 1]];
+  saveWorldOrder();
+  applyFilter();
 }
 </script>
 <!-- 离线模式脚本（仅 APK 环境 file:// 协议加载） -->
