@@ -158,7 +158,8 @@
     status.className = 'sync-status';
     try {
       const result = await downloadFromServer(msg => { status.textContent = msg; });
-      status.textContent = `下载完成：${result.characters} 角色、${result.worldBuildings} 设定、${result.relations} 关系、${result.documents} 文档`;
+      const docSync = result.documentsSynced != null ? `（同步 ${result.documentsSynced} 个）` : '';
+      status.textContent = `下载完成：${result.characters} 角色、${result.worldBuildings} 设定、${result.relations} 关系、${result.documents} 文档${docSync}`;
       status.className = 'sync-status success';
       loadLocalStats();
       // 刷新当前页面数据
@@ -184,7 +185,8 @@
     status.className = 'sync-status';
     try {
       const result = await uploadToServer(msg => { status.textContent = msg; });
-      status.textContent = `上传完成：${result.characters} 角色、${result.worldBuildings} 设定、${result.relations} 关系、${result.documents} 文档`;
+      const docSync = result.documentsSynced != null ? `（同步 ${result.documentsSynced} 个）` : '';
+      status.textContent = `上传完成：${result.characters} 角色、${result.worldBuildings} 设定、${result.relations} 关系、${result.documents} 文档${docSync}`;
       status.className = 'sync-status success';
     } catch (e) {
       status.textContent = '上传失败: ' + e.message;

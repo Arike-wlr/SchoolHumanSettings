@@ -615,6 +615,28 @@
     gap: 10px;
   }
 
+  /* ====== 图片上传和预览 ====== */
+  .image-upload-container {
+    border: 2px dashed var(--border);
+    border-radius: var(--radius-sm);
+    padding: 20px;
+    background: #fefdf9;
+    text-align: center;
+  }
+  .image-upload-container:hover {
+    border-color: var(--accent-light);
+    background: var(--accent-pale);
+  }
+  .image-preview {
+    margin-bottom: 15px;
+  }
+  .image-preview img {
+    max-width: 100%;
+    max-height: 200px;
+    border-radius: var(--radius-sm);
+    box-shadow: 0 2px 8px rgba(0,0,0,.1);
+  }
+
   /* ====== 详情 Modal ====== */
   .detail-overlay {
     position: fixed;
@@ -895,6 +917,20 @@
         </div>
 
         <div class="form-group">
+          <label for="image">角色图片（可多选）</label>
+          <input type="file" id="image" accept="image/*" multiple style="display: none;" onchange="handleImageUpload(event)">
+          <div class="image-upload-container">
+            <div id="imagePreviewGrid" style="display: none; display: grid; grid-template-columns: repeat(auto-fill, minmax(80px, 1fr)); gap: 8px; margin-bottom: 8px;"></div>
+            <button type="button" class="btn btn-outline" onclick="document.getElementById('image').click()" style="width: 100%; padding: 12px;">
+              <span style="font-size: 1.2rem; margin-right: 8px;">📷</span> 选择图片文件（可多选）
+            </button>
+            <div class="image-upload-hint" style="font-size: 0.8rem; color: var(--text-light); margin-top: 6px; text-align: center;">
+              支持 JPG、PNG、GIF 格式，可一次选择多张，建议尺寸 300×400
+            </div>
+          </div>
+        </div>
+
+        <div class="form-group">
           <label for="setting">设定</label>
           <textarea id="setting" rows="3" placeholder="详细描述角色的背景设定、性格、经历等..."></textarea>
         </div>
@@ -939,6 +975,7 @@
       </div>
       <button class="detail-close" onclick="closeDetailModal()">✕</button>
     </div>
+    <div class="detail-image" id="detailImage" style="display: none; padding: 0 20px; margin-bottom: 16px;"></div>
     <div class="detail-body" id="detailBody"></div>
     <div class="detail-footer">
       <button class="btn btn-primary btn-sm" onclick="closeDetailModal()">关闭</button>
@@ -1098,6 +1135,31 @@ function cardHTML(c) {
   const cardExtraClass = (statusText === '已消逝' ? ' perished' : '') + (selectedIds.has(c.id) ? ' selected' : '');
   const settingText = c.setting || '';
   const settingTruncated = settingText.length > 120 ? settingText.substring(0, 120) + '…' : settingText;
+  
+  // 图片预览（证件照样式，放右侧，顶部与名字齐平、底部与生日齐平）
+  const normImgs = normalizeImages(c);
+  const imgCount = normImgs.length;
+  const coverUrl = normImgs[0] || '';
+  let photoHTML = '';
+  if (coverUrl && coverUrl.trim() !== '') {
+    const badge = imgCount > 1 ? `<span style="position:absolute;right:2px;bottom:2px;background:rgba(0,0,0,0.65);color:#fff;font-size:11px;padding:1px 5px;border-radius:8px;line-height:1.4;">共${imgCount}张</span>` : '';
+    photoHTML = `
+      <div style="flex-shrink:0; width:108px; position:relative; align-self:stretch; margin-right:6px; margin-top:6px; min-height:84px;">
+        <div style="width:108px; height:100%; border-radius:4px; overflow:hidden; border:1px solid var(--border); background:#f8f9fa;">
+          <img src="${coverUrl}" alt="${esc(c.name)}" style="width:100%; height:100%; object-fit:cover;">
+        </div>
+        ${badge}
+      </div>`;
+  }
+
+  // 前4个字段（地区/诞生地/身高/生日）与图片并排，设定和"点击查看"放下方
+  const topFields = `
+    ${c.region ? fieldRowShort('地区', c.region) : ''}
+    ${c.birthplace ? fieldRowShort('诞生地', c.birthplace) : ''}
+    ${c.height ? fieldRowShort('身高', c.height) : ''}
+    ${c.birthday ? fieldRowShort('生日', c.birthday) : ''}
+  `;
+
   return `
     <div class="card${cardExtraClass}" draggable="true" data-id="${c.id}"
          ondragstart="onDragStart(event)" ondragend="onDragEnd(event)"
@@ -1106,17 +1168,19 @@ function cardHTML(c) {
          onclick="openDetailModal(${c.id})">
       <input type="checkbox" class="card-check" ${selectedIds.has(c.id) ? 'checked' : ''} onclick="event.stopPropagation();toggleCardSelect(${c.id}, this.checked)" title="选择导出">
       <span class="drag-handle" title="拖动排序">⋮⋮</span>
-      <div class="card-header">
-        <span class="name">${esc(c.name)}</span>
-        ${c.university ? `<span class="uni-tag">${esc(c.university)}</span>` : ''}
-        ${c.gender ? `<span class="gender-badge ${genderClass}">${esc(c.gender)}</span>` : ''}
-        ${statusBadge}
+      <div style="display:flex; gap:12px; align-items:stretch;">
+        <div style="flex:1; min-width:0;">
+          <div class="card-header">
+            <span class="name">${esc(c.name)}</span>
+            ${c.university ? `<span class="uni-tag">${esc(c.university)}</span>` : ''}
+            ${c.gender ? `<span class="gender-badge ${genderClass}">${esc(c.gender)}</span>` : ''}
+            ${statusBadge}
+          </div>
+          <div class="card-body">${topFields}</div>
+        </div>
+        ${photoHTML}
       </div>
-      <div class="card-body">
-        ${c.region ? fieldRowShort('地区', c.region) : ''}
-        ${c.birthplace ? fieldRowShort('诞生地', c.birthplace) : ''}
-        ${c.height ? fieldRowShort('身高', c.height) : ''}
-        ${c.birthday ? fieldRowShort('生日', c.birthday) : ''}
+      <div class="card-body" style="margin-top:4px;">
         ${settingTruncated ? `<div class="field"><span class="label">设定</span><span class="value setting-preview">${esc(settingTruncated)}</span></div>` : ''}
         <div class="card-more">点击查看完整设定 →</div>
       </div>
@@ -1132,6 +1196,17 @@ function fieldRowShort(label, value) {
   return `<div class="field"><span class="label">${label}</span><span class="value field-preview">${esc(value)}</span></div>`;
 }
 
+// 归一化 images 字段：兼容后端返回数组或 JSON 字符串，回退到 image_url
+function normalizeImages(c) {
+  let imgs = c.images;
+  if (typeof imgs === 'string') {
+    try { imgs = JSON.parse(imgs); } catch (e) { imgs = []; }
+  }
+  if (!Array.isArray(imgs)) imgs = [];
+  if (imgs.length === 0 && c.image_url) imgs = [c.image_url];
+  return imgs;
+}
+
 function fieldRow(label, value) {
   if (!value || value.trim() === '') return '';
   return `<div class="field"><span class="label">${label}</span><span class="value">${esc(value)}</span></div>`;
@@ -1141,12 +1216,125 @@ function esc(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
 
+// ====== 图片上传处理（多图） ======
+// currentImageUrls: 已上传的图片URL数组（编辑时从服务器加载）
+// currentImageFiles: 待上传的新文件数组 [{file, previewUrl}]
+let currentImageUrls = [];
+let currentImageFiles = [];
+
+function handleImageUpload(event) {
+  const files = Array.from(event.target.files || []);
+  if (files.length === 0) return;
+
+  for (const file of files) {
+    if (!file.type.startsWith('image/')) {
+      showToast(`文件 ${file.name} 不是图片，已跳过`, 'error');
+      continue;
+    }
+    if (file.size > 5 * 1024 * 1024) { // 5MB
+      showToast(`图片 ${file.name} 超过5MB，已跳过`, 'error');
+      continue;
+    }
+    currentImageFiles.push({ file, previewUrl: URL.createObjectURL(file) });
+  }
+  renderImagePreview();
+  // 重置文件输入，允许再次选择同一文件
+  event.target.value = '';
+}
+
+function renderImagePreview() {
+  const grid = document.getElementById('imagePreviewGrid');
+  const items = [
+    ...currentImageUrls.map((url, i) => ({ url, index: i, isNew: false })),
+    ...currentImageFiles.map((item, i) => ({ url: item.previewUrl, index: currentImageUrls.length + i, isNew: true })),
+  ];
+  if (items.length === 0) {
+    grid.style.display = 'none';
+    grid.innerHTML = '';
+    return;
+  }
+  grid.style.display = 'grid';
+  grid.innerHTML = items.map(it => `
+    <div style="position: relative; aspect-ratio: 1; border-radius: 6px; overflow: hidden; border: 1px solid var(--border);">
+      <img src="${it.url}" alt="预览" style="width: 100%; height: 100%; object-fit: cover;">
+      <button type="button" onclick="removeImageItem(${it.index})" title="删除"
+        style="position: absolute; top: 2px; right: 2px; width: 20px; height: 20px; border-radius: 50%; border: none; background: rgba(0,0,0,0.6); color: #fff; cursor: pointer; font-size: 12px; line-height: 1; display: flex; align-items: center; justify-content: center;">✕</button>
+    </div>
+  `).join('');
+}
+
+function removeImageItem(index) {
+  const urlCount = currentImageUrls.length;
+  if (index < urlCount) {
+    currentImageUrls.splice(index, 1);
+  } else {
+    const fileIdx = index - urlCount;
+    URL.revokeObjectURL(currentImageFiles[fileIdx].previewUrl);
+    currentImageFiles.splice(fileIdx, 1);
+  }
+  renderImagePreview();
+}
+
+function resetImageUpload() {
+  currentImageFiles.forEach(item => URL.revokeObjectURL(item.previewUrl));
+  currentImageUrls = [];
+  currentImageFiles = [];
+  const grid = document.getElementById('imagePreviewGrid');
+  grid.style.display = 'none';
+  grid.innerHTML = '';
+  document.getElementById('image').value = '';
+}
+
+// ====== 详情页图片翻页 ======
+let detailImages = [];
+let detailImageIdx = 0;
+
+function renderDetailImage() {
+  const imgs = detailImages;
+  const wrap = document.getElementById('detailImage');
+  if (!imgs || imgs.length === 0) {
+    wrap.style.display = 'none';
+    wrap.innerHTML = '';
+    return;
+  }
+  const btnStyle = 'width:36px; height:36px; border-radius:50%; border:1px solid var(--border); background:var(--bg); cursor:pointer; font-size:20px; line-height:1; color:var(--text); flex-shrink:0;';
+  const spacer = '<span style="display:inline-block; width:36px; flex-shrink:0;"></span>';
+  const prevBtn = detailImageIdx > 0
+    ? `<button onclick="detailImageGo(${detailImageIdx - 1})" style="${btnStyle}" title="上一张">‹</button>`
+    : spacer;
+  const nextBtn = detailImageIdx < imgs.length - 1
+    ? `<button onclick="detailImageGo(${detailImageIdx + 1})" style="${btnStyle}" title="下一张">›</button>`
+    : spacer;
+  const counter = imgs.length > 1 ? `<div style="font-size:0.8rem; color:var(--text-light); margin-top:4px;">${detailImageIdx + 1} / ${imgs.length}</div>` : '';
+  const thumbs = imgs.length > 1 ? imgs.map((url, i) => `
+    <img src="${url}" onclick="detailImageGo(${i})" style="width:48px; height:48px; object-fit:cover; border-radius:4px; cursor:pointer; border:2px solid ${i === detailImageIdx ? 'var(--primary)' : 'transparent'};">`).join('') : '';
+  wrap.innerHTML = `
+    <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
+      ${prevBtn}
+      <div style="flex:1; text-align:center; min-width:0;">
+        <img src="${imgs[detailImageIdx]}" alt="角色图片" style="max-width:100%; max-height:320px; border-radius:8px; object-fit:contain;">
+        ${counter}
+      </div>
+      ${nextBtn}
+    </div>
+    ${thumbs ? `<div style="display:flex; gap:6px; justify-content:center; flex-wrap:wrap;">${thumbs}</div>` : ''}
+  `;
+  wrap.style.display = 'block';
+}
+
+function detailImageGo(idx) {
+  if (idx < 0 || idx >= detailImages.length) return;
+  detailImageIdx = idx;
+  renderDetailImage();
+}
+
 // ====== 创建 ======
 function openCreateModal() {
   document.getElementById('modalTitle').textContent = '添加新角色';
   document.getElementById('submitBtn').textContent = '确认添加';
   document.getElementById('editId').value = '';
   document.getElementById('charForm').reset();
+  resetImageUpload();
   document.getElementById('modalOverlay').classList.add('active');
 }
 
@@ -1172,6 +1360,12 @@ async function openEditModal(id) {
     document.getElementById('birthplace').value = c.birthplace || '';
     document.getElementById('status').value = c.status || '存在';
     document.getElementById('setting').value = c.setting;
+    
+    // 处理图片预览（多图：用 images 数组，兼容旧 image_url）
+    resetImageUpload();
+    currentImageUrls = normalizeImages(c);
+    renderImagePreview();
+    
     document.getElementById('modalOverlay').classList.add('active');
   } catch (e) {
     showToast('获取角色数据失败', 'error');
@@ -1202,6 +1396,31 @@ async function submitForm(e) {
   };
 
   try {
+    // 上传新选择的图片文件（统一用通用接口拿URL，随表单提交 images 数组）
+    const newUrls = [];
+    for (const item of currentImageFiles) {
+      const formData = new FormData();
+      formData.append('file', item.file);
+      const uploadRes = await fetch('/api/images/upload', { method: 'POST', body: formData });
+      if (uploadRes.ok) {
+        const r = await uploadRes.json();
+        newUrls.push(r.image_url);
+      } else {
+        showToast('图片上传失败，请重试', 'error');
+        return;
+      }
+    }
+    // 合并：已上传URL + 新上传URL，作为 images 数组提交
+    const allImages = [...currentImageUrls, ...newUrls];
+    if (allImages.length > 0) {
+      data.images = allImages;
+      data.image_url = allImages[0]; // 封面 = 首图
+    } else {
+      // 明确清空
+      data.images = [];
+      data.image_url = '';
+    }
+
     const url = editId ? `${API}/${editId}` : API;
     const method = editId ? 'PUT' : 'POST';
     const res = await fetch(url, {
@@ -1211,6 +1430,7 @@ async function submitForm(e) {
     });
     if (!res.ok) throw new Error();
     closeModal();
+    resetImageUpload();
     loadCharacters();
     showToast(editId ? '角色已更新' : '角色已创建', 'success');
   } catch (e) {
@@ -1284,6 +1504,11 @@ async function openDetailModal(id) {
     const statusText = c.status || '存在';
     const statusBadgeHTML = statusText !== '存在' ? '<span class="status-badge perished">已消逝</span>' : '';
     document.getElementById('detailStatus').innerHTML = statusBadgeHTML;
+
+    // 图片显示（翻页器，支持多图）
+    detailImages = normalizeImages(c);
+    detailImageIdx = 0;
+    renderDetailImage();
 
     let body = '';
     if (c.university)        body += detailSection('代表高校', c.university);

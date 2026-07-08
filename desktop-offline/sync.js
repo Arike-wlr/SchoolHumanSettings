@@ -14,7 +14,7 @@ async function pingServer(url) {
 }
 
 // ============= 从服务器下载（覆盖本地） =============
-// 步骤：拉取服务器四类数据 → 清空本地 → 批量写入
+// 步骤：拉取服务器三类数据全量替换 → 文档按 name+size 增量同步
 async function downloadFromServer(onProgress) {
   const url = getServerUrl();
   if (!url) throw new Error('未配置服务器地址');
@@ -37,7 +37,9 @@ async function downloadFromServer(onProgress) {
   onProgress && onProgress('正在拉取文档列表...');
   const docListRes = await fetch(url + '/api/files');
   if (!docListRes.ok) throw new Error('获取文档列表失败');
-  const docList = await docListRes.json();
+  const serverDocs = await docListRes.json();
+  const localDocs = await docDB.list();
+  const localMap = new Map(localDocs.map(d => [d.name, d]));
 
   onProgress && onProgress('正在写入本地数据库...');
   await charDB.clear();
@@ -47,11 +49,22 @@ async function downloadFromServer(onProgress) {
   await relDB.clear();
   await relDB.bulkSet(relations);
 
-  // 下载文档文件
-  await docDB.clear();
-  for (let i = 0; i < docList.length; i++) {
-    const doc = docList[i];
-    onProgress && onProgress(`正在下载文档 (${i + 1}/${docList.length})...`);
+  // 文档增量同步：本地不存在 或 size 不同 才下载；本地多余文档则删除
+  const serverNames = new Set(serverDocs.map(d => d.name));
+  let deletedCount = 0;
+  for (const ld of localDocs) {
+    if (!serverNames.has(ld.name)) {
+      await docDB.delete(ld.name);
+      deletedCount++;
+    }
+  }
+  const toDownload = serverDocs.filter(sd => {
+    const ld = localMap.get(sd.name);
+    return !ld || ld.size !== sd.size;
+  });
+  for (let i = 0; i < toDownload.length; i++) {
+    const doc = toDownload[i];
+    onProgress && onProgress(`正在下载文档 (${i + 1}/${toDownload.length})...`);
     const blobRes = await fetch(url + '/api/files/' + encodeURIComponent(doc.name));
     if (!blobRes.ok) throw new Error('下载文档失败: ' + doc.name);
     const blob = await blobRes.blob();
@@ -59,7 +72,13 @@ async function downloadFromServer(onProgress) {
   }
 
   onProgress && onProgress('下载完成');
-  return { characters: characters.length, worldBuildings: worldBuildings.length, relations: relations.length, documents: docList.length };
+  return {
+    characters: characters.length,
+    worldBuildings: worldBuildings.length,
+    relations: relations.length,
+    documents: serverDocs.length,
+    documentsSynced: toDownload.length + deletedCount,
+  };
 }
 
 // ============= 上传到服务器（覆盖服务器） =============
@@ -86,23 +105,30 @@ async function uploadToServer(onProgress) {
   }
   const data = await res.json();
 
-  // 上传文档：先删除服务器上多余的文件，再上传本地全部文档
+  // 上传文档：先删除服务器上多余的文件，再仅上传新增/变更的文档（name+size 比较）
   onProgress && onProgress('正在同步文档...');
   const serverDocRes = await fetch(url + '/api/files');
   const serverDocs = await serverDocRes.json();
+  const serverMap = new Map(serverDocs.map(d => [d.name, d]));
   const localNames = new Set(localDocs.map(d => d.name));
 
   // 删除服务器上本地不存在的文件
+  let deletedCount = 0;
   for (const sd of serverDocs) {
     if (!localNames.has(sd.name)) {
       await fetch(url + '/api/files/' + encodeURIComponent(sd.name), { method: 'DELETE' });
+      deletedCount++;
     }
   }
 
-  // 上传本地文档
-  for (let i = 0; i < localDocs.length; i++) {
-    const docMeta = localDocs[i];
-    onProgress && onProgress(`正在上传文档 (${i + 1}/${localDocs.length})...`);
+  // 仅上传：服务器不存在 或 size 不同
+  const toUpload = localDocs.filter(ld => {
+    const sd = serverMap.get(ld.name);
+    return !sd || sd.size !== ld.size;
+  });
+  for (let i = 0; i < toUpload.length; i++) {
+    const docMeta = toUpload[i];
+    onProgress && onProgress(`正在上传文档 (${i + 1}/${toUpload.length})...`);
     const doc = await docDB.get(docMeta.name);
     const formData = new FormData();
     formData.append('files', doc.blob, doc.name);
@@ -111,7 +137,14 @@ async function uploadToServer(onProgress) {
   }
 
   onProgress && onProgress('上传完成');
-  return { characters: characters.length, worldBuildings: worldBuildings.length, relations: relations.length, documents: localDocs.length, server: data };
+  return {
+    characters: characters.length,
+    worldBuildings: worldBuildings.length,
+    relations: relations.length,
+    documents: localDocs.length,
+    documentsSynced: toUpload.length + deletedCount,
+    server: data,
+  };
 }
 
 // ============= 获取服务器统计信息（不下载） =============

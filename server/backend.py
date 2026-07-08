@@ -4,6 +4,7 @@
 
 import sqlite3
 import os
+import json
 import hashlib
 import shutil
 import zipfile
@@ -17,6 +18,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 from typing import Optional, List
+import uuid
 
 # 路径配置：基于本文件所在目录
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -24,9 +26,11 @@ DB_PATH = os.path.join(BASE_DIR, "oc_characters.db")
 UPLOAD_DIR = os.path.join(BASE_DIR, "文字设定")
 DESKTOP_DIR = os.path.join(BASE_DIR, "..", "web-desktop")
 MOBILE_DIR = os.path.join(BASE_DIR, "..", "web-mobile")
+IMAGE_DIR = os.path.join(BASE_DIR, "images")
 
 # 确保上传目录存在
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+os.makedirs(IMAGE_DIR, exist_ok=True)
 
 
 def init_db():
@@ -49,6 +53,7 @@ def init_db():
             identity_period TEXT DEFAULT '',
             birth_time TEXT DEFAULT '',
             setting TEXT DEFAULT '',
+            image_url TEXT DEFAULT '',
             sort_order INTEGER DEFAULT 0,
             created_at TEXT DEFAULT (datetime('now','localtime')),
             updated_at TEXT DEFAULT (datetime('now','localtime'))
@@ -57,12 +62,26 @@ def init_db():
     # 兼容旧表：如果缺少列则自动添加
     cursor.execute("PRAGMA table_info(characters)")
     cols = [col[1] for col in cursor.fetchall()]
-    for col_name in ["university", "region", "naming_rationale", "family", "birthplace", "status"]:
+    for col_name in ["university", "region", "naming_rationale", "family", "birthplace", "status", "image_url"]:
         if col_name not in cols:
             cursor.execute(f"ALTER TABLE characters ADD COLUMN {col_name} TEXT DEFAULT ''")
     if "sort_order" not in cols:
         cursor.execute("ALTER TABLE characters ADD COLUMN sort_order INTEGER DEFAULT 0")
         cursor.execute("UPDATE characters SET sort_order = id")
+    # 新增多图字段 images（JSON 数组），并把旧 image_url 迁移为 images 首项
+    if "images" not in cols:
+        cursor.execute("ALTER TABLE characters ADD COLUMN images TEXT DEFAULT '[]'")
+    cursor.execute("SELECT id, image_url, images FROM characters")
+    for row in cursor.fetchall():
+        row_id, old_url, images_json = row[0], row[1], row[2]
+        existing_images = []
+        try:
+            existing_images = json.loads(images_json) if images_json else []
+        except (json.JSONDecodeError, TypeError):
+            existing_images = []
+        if not existing_images and old_url:
+            existing_images = [old_url]
+            cursor.execute("UPDATE characters SET images = ? WHERE id = ?", (json.dumps(existing_images), row_id))
 
     # 世界设定表
     cursor.execute("""
@@ -143,6 +162,8 @@ class CharacterCreate(BaseModel):
     family: str = Field(default="", description="家族")
     birthplace: str = Field(default="", description="诞生地")
     status: str = Field(default="存在", description="存在状态")
+    image_url: str = Field(default="", description="角色图片URL（封面，兼容旧字段）")
+    images: List[str] = Field(default=[], description="角色图片URL数组（多图）")
 
 
 class CharacterUpdate(BaseModel):
@@ -160,6 +181,8 @@ class CharacterUpdate(BaseModel):
     family: Optional[str] = None
     birthplace: Optional[str] = None
     status: Optional[str] = None
+    image_url: Optional[str] = None
+    images: Optional[List[str]] = None
 
 
 class CharacterResponse(BaseModel):
@@ -257,6 +280,25 @@ def row_to_dict(row) -> dict:
     return dict(row)
 
 
+def char_to_dict(row) -> dict:
+    """角色行转字典：把 images JSON 字段解析为数组，兼容旧 image_url"""
+    d = dict(row)
+    images = []
+    try:
+        images = json.loads(d.get("images") or "[]")
+        if not isinstance(images, list):
+            images = []
+    except (json.JSONDecodeError, TypeError):
+        images = []
+    # 兼容：如果 images 为空但旧 image_url 有值，回退用 image_url
+    if not images and d.get("image_url"):
+        images = [d["image_url"]]
+    d["images"] = images
+    # image_url 保留为第一张图（封面），供卡片快速展示
+    d["image_url"] = images[0] if images else ""
+    return d
+
+
 # --- API 路由 ---
 
 @app.get("/api/characters")
@@ -267,7 +309,7 @@ def list_characters():
     cursor.execute("SELECT * FROM characters ORDER BY sort_order ASC, id ASC")
     rows = cursor.fetchall()
     conn.close()
-    return [row_to_dict(r) for r in rows]
+    return [char_to_dict(r) for r in rows]
 
 
 @app.post("/api/characters/reorder")
@@ -295,7 +337,7 @@ def get_character(char_id: int):
     conn.close()
     if not row:
         raise HTTPException(status_code=404, detail="角色不存在")
-    return row_to_dict(row)
+    return char_to_dict(row)
 
 
 @app.post("/api/characters")
@@ -310,19 +352,19 @@ def create_character(data: CharacterCreate):
     cursor.execute(
         """INSERT INTO characters
            (name, university, region, naming_rationale, height, gender, birthday, appearance,
-            identity_period, birth_time, setting, family, birthplace, status, sort_order, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            identity_period, birth_time, setting, family, birthplace, status, image_url, images, sort_order, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (data.name, data.university, data.region, data.naming_rationale,
          data.height, data.gender, data.birthday,
          data.appearance, data.identity_period, data.birth_time,
-         data.setting, data.family, data.birthplace, data.status, next_order, now, now)
+         data.setting, data.family, data.birthplace, data.status, data.image_url, json.dumps(data.images), next_order, now, now)
     )
     conn.commit()
     char_id = cursor.lastrowid
     cursor.execute("SELECT * FROM characters WHERE id = ?", (char_id,))
     row = cursor.fetchone()
     conn.close()
-    return row_to_dict(row)
+    return char_to_dict(row)
 
 
 @app.put("/api/characters/{char_id}")
@@ -336,12 +378,28 @@ def update_character(char_id: int, data: CharacterUpdate):
         conn.close()
         raise HTTPException(status_code=404, detail="角色不存在")
 
+    # 旧 images 列表（用于清理被移除的图片）
+    old_images = []
+    try:
+        old_images = json.loads(existing["images"]) if existing["images"] else []
+        if not isinstance(old_images, list):
+            old_images = []
+    except (json.JSONDecodeError, TypeError):
+        old_images = []
+    if not old_images and existing["image_url"]:
+        old_images = [existing["image_url"]]
+
     updates = {}
     for field in ["name", "university", "region", "naming_rationale", "height", "gender", "birthday", "appearance",
-                  "identity_period", "birth_time", "setting", "family", "birthplace", "status"]:
+                  "identity_period", "birth_time", "setting", "family", "birthplace", "status", "image_url"]:
         val = getattr(data, field)
         if val is not None:
             updates[field] = val
+    # images 数组单独处理（需序列化为 JSON）
+    if data.images is not None:
+        updates["images"] = json.dumps(data.images)
+        # 同步封面字段 image_url 为第一张图
+        updates["image_url"] = data.images[0] if data.images else ""
 
     if updates:
         updates["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -351,11 +409,15 @@ def update_character(char_id: int, data: CharacterUpdate):
             f"UPDATE characters SET {set_clause} WHERE id = ?", values
         )
         conn.commit()
+        # 清理被移除的旧图片文件（旧列表中存在但新列表中不存在的 URL）
+        if data.images is not None:
+            removed = [u for u in old_images if u not in data.images]
+            _delete_unused_images(cursor, removed)
 
     cursor.execute("SELECT * FROM characters WHERE id = ?", (char_id,))
     row = cursor.fetchone()
     conn.close()
-    return row_to_dict(row)
+    return char_to_dict(row)
 
 
 @app.delete("/api/characters/{char_id}")
@@ -364,11 +426,24 @@ def delete_character(char_id: int):
     conn = get_db()
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM characters WHERE id = ?", (char_id,))
-    if not cursor.fetchone():
+    row = cursor.fetchone()
+    if not row:
         conn.close()
         raise HTTPException(status_code=404, detail="角色不存在")
+    # 收集该角色所有图片 URL（images 数组 + 兼容旧 image_url）
+    old_images = []
+    try:
+        old_images = json.loads(row["images"]) if row["images"] else []
+        if not isinstance(old_images, list):
+            old_images = []
+    except (json.JSONDecodeError, TypeError):
+        old_images = []
+    if row["image_url"] and row["image_url"] not in old_images:
+        old_images.append(row["image_url"])
     cursor.execute("DELETE FROM characters WHERE id = ?", (char_id,))
     conn.commit()
+    # 删除角色后，清理其图片文件（如果没有其他角色引用）
+    _delete_unused_images(cursor, old_images)
     conn.close()
     return {"message": "删除成功"}
 
@@ -640,6 +715,7 @@ def delete_relation(rel_id: int):
 # --- 文档管理 API ---
 
 ALLOWED_EXTENSIONS = {".docx", ".doc", ".pdf", ".txt", ".md"}
+ALLOWED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".svg"}
 
 
 @app.get("/api/files")
@@ -691,6 +767,187 @@ async def upload_files(files: List[UploadFile] = File(...)):
             f.write(content)
         uploaded.append(safe_name)
     return {"message": f"已上传 {len(uploaded)} 个文件", "files": uploaded}
+
+
+async def _save_image_file(file: UploadFile) -> tuple[str, str]:
+    """校验并保存上传的图片，返回 (image_url, filename)"""
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="文件名为空")
+    ext = os.path.splitext(file.filename)[1].lower()
+    if ext not in ALLOWED_IMAGE_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"不支持的图片类型: {ext}，仅支持 {', '.join(ALLOWED_IMAGE_EXTENSIONS)}"
+        )
+    unique_filename = f"{uuid.uuid4().hex}{ext}"
+    image_path = os.path.join(IMAGE_DIR, unique_filename)
+    try:
+        with open(image_path, "wb") as f:
+            content = await file.read()
+            f.write(content)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"图片保存失败: {str(e)}")
+    return f"/api/images/{unique_filename}", unique_filename
+
+
+def _delete_image_file_if_unused(cursor, image_url: str):
+    """删除图片文件（如果没有其他角色引用）"""
+    if not image_url:
+        return
+    # 检查所有角色的 images 数组（兼容旧 image_url 字段）是否引用该 URL
+    cursor.execute("SELECT image_url, images FROM characters")
+    for row in cursor.fetchall():
+        urls = []
+        try:
+            urls = json.loads(row["images"]) if row["images"] else []
+            if not isinstance(urls, list):
+                urls = []
+        except (json.JSONDecodeError, TypeError):
+            urls = []
+        if not urls and row["image_url"]:
+            urls = [row["image_url"]]
+        if image_url in urls:
+            return  # 仍被引用，不删
+    filename = os.path.basename(image_url)
+    image_path = os.path.join(IMAGE_DIR, filename)
+    if os.path.exists(image_path) and os.path.isfile(image_path):
+        try:
+            os.remove(image_path)
+        except OSError:
+            pass
+
+
+def _delete_unused_images(cursor, image_urls: list):
+    """批量删除不再被引用的图片文件"""
+    for url in image_urls:
+        _delete_image_file_if_unused(cursor, url)
+
+
+@app.post("/api/images/upload")
+async def upload_image(file: UploadFile = File(...)):
+    """通用图片上传（无需角色ID），返回 image_url，由后续创建/更新角色时保存"""
+    image_url, filename = await _save_image_file(file)
+    return {"message": "图片上传成功", "image_url": image_url, "filename": filename}
+
+
+@app.post("/api/characters/{char_id}/upload-image")
+async def upload_character_image(char_id: int, file: UploadFile = File(...)):
+    """上传角色图片并追加到该角色的图片列表（多图）"""
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT image_url, images FROM characters WHERE id = ?", (char_id,))
+    row = cursor.fetchone()
+    if not row:
+        conn.close()
+        raise HTTPException(status_code=404, detail="角色不存在")
+
+    image_url, unique_filename = await _save_image_file(file)
+
+    # 读取现有 images 数组并追加新图
+    images = []
+    try:
+        images = json.loads(row["images"]) if row["images"] else []
+        if not isinstance(images, list):
+            images = []
+    except (json.JSONDecodeError, TypeError):
+        images = []
+    images.append(image_url)
+
+    cursor.execute(
+        "UPDATE characters SET image_url = ?, images = ?, updated_at = ? WHERE id = ?",
+        (images[0] if images else "", json.dumps(images), datetime.now().strftime("%Y-%m-%d %H:%M:%S"), char_id)
+    )
+    conn.commit()
+    conn.close()
+
+    return {"message": "图片上传成功", "image_url": image_url, "images": images, "filename": unique_filename}
+
+
+@app.delete("/api/characters/{char_id}/images/{index}")
+def delete_character_image(char_id: int, index: int):
+    """删除角色的指定图片（按索引），并清理文件"""
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT image_url, images FROM characters WHERE id = ?", (char_id,))
+    row = cursor.fetchone()
+    if not row:
+        conn.close()
+        raise HTTPException(status_code=404, detail="角色不存在")
+
+    images = []
+    try:
+        images = json.loads(row["images"]) if row["images"] else []
+        if not isinstance(images, list):
+            images = []
+    except (json.JSONDecodeError, TypeError):
+        images = []
+    if not images and row["image_url"]:
+        images = [row["image_url"]]
+
+    if index < 0 or index >= len(images):
+        conn.close()
+        raise HTTPException(status_code=400, detail="图片索引超出范围")
+
+    removed_url = images.pop(index)
+    cursor.execute(
+        "UPDATE characters SET image_url = ?, images = ?, updated_at = ? WHERE id = ?",
+        (images[0] if images else "", json.dumps(images), datetime.now().strftime("%Y-%m-%d %H:%M:%S"), char_id)
+    )
+    conn.commit()
+    # 清理被删除的图片文件（如果无其他角色引用）
+    _delete_image_file_if_unused(cursor, removed_url)
+    conn.close()
+
+    return {"message": "图片删除成功", "images": images}
+
+
+@app.get("/api/images/{filename}")
+def serve_image(filename: str):
+    """提供上传的图片"""
+    safe_name = os.path.basename(filename)
+    image_path = os.path.join(IMAGE_DIR, safe_name)
+    if not os.path.exists(image_path) or not os.path.isfile(image_path):
+        raise HTTPException(status_code=404, detail="图片不存在")
+    return FileResponse(image_path)
+
+
+@app.delete("/api/images/{filename}")
+def delete_image(filename: str):
+    """删除图片"""
+    safe_name = os.path.basename(filename)
+    image_path = os.path.join(IMAGE_DIR, safe_name)
+    if not os.path.exists(image_path) or not os.path.isfile(image_path):
+        raise HTTPException(status_code=404, detail="图片不存在")
+    
+    # 检查是否有角色在使用此图片（检查 images 数组和旧 image_url 字段）
+    target_url = f"/api/images/{safe_name}"
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, name, image_url, images FROM characters")
+    using_characters = []
+    for r in cursor.fetchall():
+        urls = []
+        try:
+            urls = json.loads(r["images"]) if r["images"] else []
+            if not isinstance(urls, list):
+                urls = []
+        except (json.JSONDecodeError, TypeError):
+            urls = []
+        if not urls and r["image_url"]:
+            urls = [r["image_url"]]
+        if target_url in urls:
+            using_characters.append(r)
+
+    if using_characters:
+        conn.close()
+        raise HTTPException(
+            status_code=400, 
+            detail=f"图片正在被以下角色使用，无法删除: {', '.join([c['name'] for c in using_characters])}"
+        )
+    
+    os.remove(image_path)
+    conn.close()
+    return {"message": f"已删除图片 {safe_name}"}
 
 
 def parse_docx_with_images(fpath, cache_dir, fname):
@@ -954,6 +1211,10 @@ def serve_m_documents():
 _desktop_index = os.path.join(DESKTOP_DIR, "index.html")
 if os.path.exists(_desktop_index):
     app.mount("/static", StaticFiles(directory=DESKTOP_DIR, html=True), name="static")
+
+# 托管图片目录
+if os.path.exists(IMAGE_DIR):
+    app.mount("/images", StaticFiles(directory=IMAGE_DIR), name="images")
 
 
 if __name__ == "__main__":
