@@ -3,6 +3,109 @@
 // 支持从服务器下载（覆盖本地）和上传到服务器（覆盖服务器）
 // ============================================================
 
+// ============= 图片处理辅助 =============
+// data URL 转 Blob
+function dataUrlToBlob(dataUrl) {
+  const [meta, b64] = dataUrl.split(',');
+  const mime = meta.match(/data:(.*?);/)[1] || 'image/png';
+  const bin = atob(b64);
+  const arr = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+  return new Blob([arr], { type: mime });
+}
+
+// Blob 转 data URL
+function blobToDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(r.result);
+    r.onerror = reject;
+    r.readAsDataURL(blob);
+  });
+}
+
+// 判断是否为服务器URL（非 data URL）
+function isServerUrl(u) {
+  return u && !u.startsWith('data:') && !u.startsWith('blob:');
+}
+
+// 把服务器URL图片转成 base64 data URL（下载时用）
+async function convertServerImagesToDataUrl(characters, serverUrl, onProgress) {
+  const urlSet = new Set();
+  for (const c of characters) {
+    const imgs = Array.isArray(c.images) ? c.images : (c.image_url ? [c.image_url] : []);
+    for (const u of imgs) {
+      if (isServerUrl(u)) urlSet.add(u);
+    }
+  }
+  if (urlSet.size === 0) return;
+  const cache = new Map();
+  let i = 0;
+  for (const imgPath of urlSet) {
+    i++;
+    onProgress && onProgress(`正在下载图片 (${i}/${urlSet.size})...`);
+    try {
+      const fullUrl = imgPath.startsWith('http') ? imgPath : (serverUrl + imgPath);
+      const res = await fetch(fullUrl);
+      if (res.ok) {
+        const blob = await res.blob();
+        const dataUrl = await blobToDataUrl(blob);
+        cache.set(imgPath, dataUrl);
+      }
+    } catch (e) {
+      console.warn('图片下载失败:', imgPath, e);
+    }
+  }
+  // 替换角色数据中的URL
+  for (const c of characters) {
+    if (Array.isArray(c.images)) {
+      c.images = c.images.map(u => cache.get(u) || u);
+    }
+    if (c.image_url && cache.has(c.image_url)) {
+      c.image_url = cache.get(c.image_url);
+    }
+  }
+}
+
+// 把 base64 data URL 图片上传到服务器换为 URL（上传时用）
+async function convertDataUrlImagesToServerUrl(characters, serverUrl, onProgress) {
+  const dataUrlSet = new Set();
+  for (const c of characters) {
+    const imgs = Array.isArray(c.images) ? c.images : (c.image_url ? [c.image_url] : []);
+    for (const u of imgs) {
+      if (u && u.startsWith('data:')) dataUrlSet.add(u);
+    }
+  }
+  if (dataUrlSet.size === 0) return;
+  const cache = new Map();
+  let i = 0;
+  for (const dataUrl of dataUrlSet) {
+    i++;
+    onProgress && onProgress(`正在上传图片 (${i}/${dataUrlSet.size})...`);
+    try {
+      const blob = dataUrlToBlob(dataUrl);
+      const formData = new FormData();
+      formData.append('file', blob, 'image.png');
+      const res = await fetch(serverUrl + '/api/images/upload', { method: 'POST', body: formData });
+      if (res.ok) {
+        const r = await res.json();
+        cache.set(dataUrl, r.image_url);
+      }
+    } catch (e) {
+      console.warn('图片上传失败:', e);
+    }
+  }
+  // 替换角色数据中的data URL
+  for (const c of characters) {
+    if (Array.isArray(c.images)) {
+      c.images = c.images.map(u => cache.get(u) || u);
+    }
+    if (c.image_url && cache.has(c.image_url)) {
+      c.image_url = cache.get(c.image_url);
+    }
+  }
+}
+
 // ============= 服务器连通性测试 =============
 async function pingServer(url) {
   try {
@@ -23,6 +126,11 @@ async function downloadFromServer(onProgress) {
   const charRes = await fetch(url + '/api/characters');
   if (!charRes.ok) throw new Error('获取角色失败');
   const characters = await charRes.json();
+
+  // 下载图片转 base64（离线可显示）
+  if (characters.some(c => (c.images && c.images.length) || c.image_url)) {
+    await convertServerImagesToDataUrl(characters, url, onProgress);
+  }
 
   onProgress && onProgress('正在拉取世界设定数据...');
   const worldRes = await fetch(url + '/api/world-buildings');
@@ -92,6 +200,11 @@ async function uploadToServer(onProgress) {
   const worldBuildings = await worldDB.list();
   const relations = await relDB.list();
   const localDocs = await docDB.list();
+
+  // 上传 base64 图片到服务器换为 URL
+  if (characters.some(c => (c.images && c.images.some(u => u && u.startsWith('data:'))) || (c.image_url && c.image_url.startsWith('data:')))) {
+    await convertDataUrlImagesToServerUrl(characters, url, onProgress);
+  }
 
   onProgress && onProgress('正在上传数据...');
   const res = await fetch(url + '/api/sync/replace-all', {

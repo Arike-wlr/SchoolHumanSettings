@@ -295,12 +295,9 @@ if (location.protocol === 'file:') {
   .btn-action:active { background: var(--accent-pale); }
   .btn-action.danger { color: var(--danger); border-color: var(--danger-bg); }
 
-  /* 上移/下移按钮 */
-  .sort-btn { display: flex; align-items: center; justify-content: center; width: 34px; min-width: 34px; height: 34px; background: none; border: 1.5px solid var(--border); border-radius: 8px; color: var(--text-light); font-size: 1.05rem; cursor: pointer; flex-shrink: 0; -webkit-tap-highlight-color: transparent; touch-action: manipulation; padding: 0; line-height: 1; }
-  .sort-btn:active { background: var(--accent-pale); color: var(--accent); border-color: var(--accent); }
-  .export-mode .sort-btn { display: none; }
-
-  /* 旧的拖拽（保留给拖拽代码引用，不再显示） */
+  /* 触控拖拽排序 */
+  .drag-handle { display: flex; align-items: center; justify-content: center; width: 28px; min-width: 28px; height: 28px; color: var(--text-light); font-size: 1.1rem; cursor: grab; -webkit-user-select: none; user-select: none; touch-action: none; flex-shrink: 0; }
+  .drag-handle:active { cursor: grabbing; }
   .card.dragging { opacity: 0.3; transform: scale(0.96); }
   .card.drag-over { border-color: var(--accent); border-style: dashed; background: var(--accent-pale); }
 
@@ -458,7 +455,6 @@ if (location.protocol === 'file:') {
     font-size: .92rem;
     line-height: 1.5;
     word-break: break-word;
-    white-space: pre-wrap;
   }
   .detail-value.muted { color: var(--text-light); font-style: italic; }
   .detail-info-row {
@@ -489,21 +485,6 @@ if (location.protocol === 'file:') {
   .toast.show { opacity: 1; }
   .toast.error { background: rgba(192,57,43,.92); }
   .toast.success { background: rgba(39,124,79,.92); }
-
-  /* ====== 导出模式 ====== */
-  .card-check { display: none; position: absolute; top:12px; left:12px; width:28px; height:28px; cursor:pointer; accent-color:var(--accent); z-index:2; }
-  .export-mode .card-check { display: block; }
-  .export-mode .card { cursor: default; }
-  .export-mode .card:active { transform: none; }
-  .card.selected { border-color: var(--accent); background: var(--accent-pale); }
-  .export-bar { display: none; gap: 8px; margin: 6px 14px 0; align-items: center; }
-  .export-mode .export-bar { display: flex; }
-  .btn-export-outline { padding:8px 14px; background:var(--card-bg); color:var(--text); border:1px solid var(--border); border-radius:8px; font-size:.82rem; cursor:pointer; }
-  .btn-export-primary { flex:1; padding:12px; background:var(--accent); color:#fff; border:none; border-radius:var(--radius); font-size:.95rem; font-weight:500; cursor:pointer; margin:0; box-shadow:0 2px 8px rgba(139,94,60,.25); }
-  .btn-export-primary:disabled { opacity:.5; cursor:default; }
-  .btn-export-trigger { display:block; width:calc(100% - 28px); margin:6px 14px 8px; padding:12px; background:var(--card-bg); color:var(--accent); border:1.5px solid var(--accent); border-radius:var(--radius); font-size:.95rem; font-weight:500; cursor:pointer; box-shadow:none; }
-  .btn-export-trigger:active { background:var(--accent-pale); }
-  .export-mode .btn-export-trigger { display: none; }
 </style>
 </head>
 <body>
@@ -524,13 +505,6 @@ if (location.protocol === 'file:') {
   </div>
   <button class="btn-add" onclick="openCreateModal()">＋ 添加新角色</button>
 </div>
-
-<div class="export-bar" id="exportActions">
-  <button class="btn-export-outline" onclick="toggleSelectAll()">全选</button>
-  <button class="btn-export-outline" onclick="cancelExport()" style="color:var(--text-light);">放弃</button>
-  <button class="btn-export-primary" id="confirmExportBtn" onclick="confirmExport()" disabled>确认导出</button>
-</div>
-<button class="btn-export-trigger" id="exportBtn" onclick="enterExportMode()">📥 选择导出</button>
 
 <div class="region-tabs" id="regionTabs"></div>
 
@@ -611,6 +585,19 @@ if (location.protocol === 'file:') {
           </select>
         </div>
         <div class="form-group">
+          <label class="form-label">角色图片（可多选）</label>
+          <input type="file" id="image" accept="image/*" multiple style="display: none;" onchange="handleImageUpload(event)">
+          <div class="image-upload-container" style="border: 2px dashed var(--border); border-radius: var(--radius-sm); padding: 16px; background: #fefdf9; text-align: center; margin-bottom: 8px;">
+            <div id="imagePreviewGrid" style="display: none; margin-bottom: 12px;"></div>
+            <button type="button" class="btn-action" onclick="document.getElementById('image').click()" style="width: 100%; padding: 12px; display: flex; align-items: center; justify-content: center; gap: 8px;">
+              <span style="font-size: 1.2rem;">📷</span> 选择图片文件（可多选）
+            </button>
+            <div class="image-upload-hint" style="font-size: 0.75rem; color: var(--text-light); margin-top: 6px; text-align: center;">
+              支持 JPG、PNG、GIF 格式，可一次选择多张，建议尺寸 300×400
+            </div>
+          </div>
+        </div>
+        <div class="form-group">
           <label class="form-label">设定</label>
           <textarea class="form-textarea large" id="setting" rows="10" placeholder="角色详细设定…"></textarea>
         </div>
@@ -630,6 +617,7 @@ if (location.protocol === 'file:') {
       <span class="modal-title" id="detailName">角色详情</span>
       <button class="modal-close" onclick="closeDetailModal()">✕</button>
     </div>
+    <div class="modal-image" id="detailImage" style="display: none; padding: 0 16px; margin-bottom: 16px;"></div>
     <div class="modal-body" id="detailBody"></div>
     <div class="modal-footer">
       <button class="btn-modal cancel" onclick="closeDetailModal()">关闭</button>
@@ -685,11 +673,130 @@ const API = '/api/characters';
 let deleteTargetId = null;
 let allCharacters = [];
 let activeRegion = '全部';
-let selectedIds = new Set();
-let exportMode = false;
+// 多图：currentImageUrls 已上传URL；currentImageFiles 待上传新文件
+let currentImageUrls = [];
+let currentImageFiles = [];
 
 function esc(s) {
   return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+// 归一化 images 字段：兼容后端返回数组或 JSON 字符串，回退到 image_url
+function normalizeImages(c) {
+  let imgs = c.images;
+  if (typeof imgs === 'string') {
+    try { imgs = JSON.parse(imgs); } catch (e) { imgs = []; }
+  }
+  if (!Array.isArray(imgs)) imgs = [];
+  if (imgs.length === 0 && c.image_url) imgs = [c.image_url];
+  return imgs;
+}
+
+// 图片上传处理（多图）
+function handleImageUpload(event) {
+  const files = Array.from(event.target.files || []);
+  if (files.length === 0) return;
+  for (const file of files) {
+    if (!file.type.startsWith('image/')) {
+      showToast(`文件 ${file.name} 不是图片，已跳过`, 'error');
+      continue;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      showToast(`图片 ${file.name} 超过5MB，已跳过`, 'error');
+      continue;
+    }
+    currentImageFiles.push({ file, previewUrl: URL.createObjectURL(file) });
+  }
+  renderImagePreview();
+  event.target.value = '';
+}
+
+function renderImagePreview() {
+  const grid = document.getElementById('imagePreviewGrid');
+  const items = [
+    ...currentImageUrls.map((url, i) => ({ url, index: i })),
+    ...currentImageFiles.map((item, i) => ({ url: item.previewUrl, index: currentImageUrls.length + i })),
+  ];
+  if (items.length === 0) {
+    grid.style.display = 'none';
+    grid.innerHTML = '';
+    return;
+  }
+  grid.style.display = 'grid';
+  grid.style.gridTemplateColumns = 'repeat(auto-fill, minmax(72px, 1fr))';
+  grid.style.gap = '8px';
+  grid.innerHTML = items.map(it => `
+    <div style="position: relative; aspect-ratio: 1; border-radius: 6px; overflow: hidden; border: 1px solid var(--border);">
+      <img src="${it.url}" alt="预览" style="width: 100%; height: 100%; object-fit: cover;">
+      <button type="button" onclick="removeImageItem(${it.index})" title="删除"
+        style="position: absolute; top: 2px; right: 2px; width: 20px; height: 20px; border-radius: 50%; border: none; background: rgba(0,0,0,0.6); color: #fff; cursor: pointer; font-size: 12px; line-height: 1; display: flex; align-items: center; justify-content: center;">✕</button>
+    </div>
+  `).join('');
+}
+
+function removeImageItem(index) {
+  const urlCount = currentImageUrls.length;
+  if (index < urlCount) {
+    currentImageUrls.splice(index, 1);
+  } else {
+    const fileIdx = index - urlCount;
+    URL.revokeObjectURL(currentImageFiles[fileIdx].previewUrl);
+    currentImageFiles.splice(fileIdx, 1);
+  }
+  renderImagePreview();
+}
+
+function resetImageUpload() {
+  currentImageFiles.forEach(item => URL.revokeObjectURL(item.previewUrl));
+  currentImageUrls = [];
+  currentImageFiles = [];
+  const grid = document.getElementById('imagePreviewGrid');
+  grid.style.display = 'none';
+  grid.innerHTML = '';
+  document.getElementById('image').value = '';
+}
+
+// 详情页图片翻页
+let detailImages = [];
+let detailImageIdx = 0;
+
+function renderDetailImage() {
+  const imgs = detailImages;
+  const wrap = document.getElementById('detailImage');
+  if (!imgs || imgs.length === 0) {
+    wrap.style.display = 'none';
+    wrap.innerHTML = '';
+    return;
+  }
+  const btnStyle = 'width:32px; height:32px; border-radius:50%; border:1px solid var(--border); background:var(--bg); cursor:pointer; font-size:18px; line-height:1; color:var(--text); flex-shrink:0;';
+  const spacer = '<span style="display:inline-block; width:32px; flex-shrink:0;"></span>';
+  const prevBtn = detailImageIdx > 0
+    ? `<button onclick="detailImageGo(${detailImageIdx - 1})" style="${btnStyle}" title="上一张">‹</button>`
+    : spacer;
+  const nextBtn = detailImageIdx < imgs.length - 1
+    ? `<button onclick="detailImageGo(${detailImageIdx + 1})" style="${btnStyle}" title="下一张">›</button>`
+    : spacer;
+  const counter = imgs.length > 1 ? `<div style="font-size:0.75rem; color:var(--text-light); margin-top:4px;">${detailImageIdx + 1} / ${imgs.length}</div>` : '';
+  const thumbs = imgs.length > 1 ? imgs.map((url, i) => `
+    <img src="${url}" onclick="detailImageGo(${i})" style="width:42px; height:42px; object-fit:cover; border-radius:4px; cursor:pointer; border:2px solid ${i === detailImageIdx ? 'var(--primary)' : 'transparent'};">`).join('') : '';
+  wrap.innerHTML = `
+    <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
+      ${prevBtn}
+      <div style="flex:1; text-align:center; min-width:0;">
+        <img src="${imgs[detailImageIdx]}" alt="角色图片" style="max-width:100%; max-height:240px; border-radius:6px; object-fit:contain;">
+        ${counter}
+      </div>
+      ${nextBtn}
+    </div>
+    ${thumbs ? `<div style="display:flex; gap:6px; justify-content:center; flex-wrap:wrap;">${thumbs}</div>` : ''}
+  `;
+  wrap.style.display = 'block';
+}
+
+function detailImageGo(idx) {
+  if (idx < 0 || idx >= detailImages.length) return;
+  detailImageIdx = idx;
+  renderDetailImage();
 }
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -701,8 +808,6 @@ async function loadCharacters() {
   try {
     const res = await fetch(API);
     allCharacters = await res.json();
-    const currentIds = new Set(allCharacters.map(c => c.id));
-    for (const id of selectedIds) { if (!currentIds.has(id)) selectedIds.delete(id); }
     buildRegionTabs();
     applyFilter();
   } catch (e) {
@@ -793,32 +898,53 @@ function renderGrid(chars) {
   } else {
     grid.innerHTML = chars.map(c => cardHTML(c, idxMap[c.id])).join('');
   }
-  if (exportMode) updateExportButtons();
 }
 
 function cardHTML(c, globalIdx) {
   const genderClass = c.gender==='男'?'male':c.gender==='女'?'female':'other';
   const statusText = c.status || '存在';
   const statusBadge = statusText!=='存在' ? `<span class="status-badge">已消逝</span>` : '';
-  const cardExtraClass = (statusText==='已消逝'?' perished':'') + (selectedIds.has(c.id) ? ' selected' : '');
+  const cardExtraClass = (statusText==='已消逝'?' perished':'');
   const settingText = c.setting || '';
   const settingTruncated = settingText.length > 80 ? settingText.substring(0,80)+'…' : settingText;
-  let fields = '';
-  if (c.region) fields += `<div class="field-row"><span class="field-label">地区</span><span class="field-value">${esc(c.region)}</span></div>`;
-  if (c.height) fields += `<div class="field-row"><span class="field-label">身高</span><span class="field-value">${esc(c.height)}</span></div>`;
-  if (c.birthday) fields += `<div class="field-row"><span class="field-label">生日</span><span class="field-value">${esc(c.birthday)}</span></div>`;
+  
+  // 图片预览（证件照样式，放右侧，顶部与名字齐平、底部与生日齐平）
+  const normImgs = normalizeImages(c);
+  const imgCount = normImgs.length;
+  const coverUrl = normImgs[0] || '';
+  let photoHTML = '';
+  if (coverUrl && coverUrl.trim() !== '') {
+    const badge = imgCount > 1 ? `<span style="position:absolute;right:2px;bottom:2px;background:rgba(0,0,0,0.65);color:#fff;font-size:10px;padding:1px 4px;border-radius:7px;line-height:1.3;">共${imgCount}张</span>` : '';
+    photoHTML = `
+      <div style="flex-shrink:0; width:88px; position:relative; align-self:stretch; margin-right:4px; margin-top:4px; min-height:64px;">
+        <div style="width:88px; height:100%; border-radius:4px; overflow:hidden; border:1px solid var(--border); background:#f8f9fa;">
+          <img src="${coverUrl}" alt="${esc(c.name)}" style="width:100%; height:100%; object-fit:cover;">
+        </div>
+        ${badge}
+      </div>`;
+  }
+
+  // 前3个字段（地区/身高/生日）与图片并排，设定放下方
+  let topFields = '';
+  if (c.region) topFields += `<div class="field-row"><span class="field-label">地区</span><span class="field-value">${esc(c.region)}</span></div>`;
+  if (c.height) topFields += `<div class="field-row"><span class="field-label">身高</span><span class="field-value">${esc(c.height)}</span></div>`;
+  if (c.birthday) topFields += `<div class="field-row"><span class="field-label">生日</span><span class="field-value">${esc(c.birthday)}</span></div>`;
+  
   return `
-    <div class="card${cardExtraClass}" data-drag-id="${c.id}" data-drag-idx="${globalIdx !== undefined ? globalIdx : 0}" onclick="handleCardClick(${c.id})">
-      <input type="checkbox" class="card-check" ${selectedIds.has(c.id) ? 'checked' : ''} onclick="event.stopPropagation();toggleCardSelect(${c.id}, this.checked)" title="选择导出">
-      <div class="card-header">
-        <button class="sort-btn" title="上移" onclick="event.stopPropagation();moveCharUp(${c.id});return false;">↑</button>
-        <button class="sort-btn" title="下移" onclick="event.stopPropagation();moveCharDown(${c.id});return false;">↓</button>
-        <span class="card-name">${esc(c.name)}</span>
-        ${c.university?`<span class="uni-tag">${esc(c.university)}</span>`:''}
-        ${c.gender?`<span class="gender-badge ${genderClass}">${esc(c.gender)}</span>`:''}
-        ${statusBadge}
+    <div class="card${cardExtraClass}" data-drag-id="${c.id}" data-drag-idx="${globalIdx !== undefined ? globalIdx : 0}" onclick="openDetailModal(${c.id})">
+      <div style="display:flex; gap:10px; align-items:stretch;">
+        <div style="flex:1; min-width:0;">
+          <div class="card-header">
+            <span class="drag-handle" title="长按拖动排序" onclick="event.stopPropagation()">⠿</span>
+            <span class="card-name">${esc(c.name)}</span>
+            ${c.university?`<span class="uni-tag">${esc(c.university)}</span>`:''}
+            ${c.gender?`<span class="gender-badge ${genderClass}">${esc(c.gender)}</span>`:''}
+            ${statusBadge}
+          </div>
+          <div class="card-fields">${topFields}</div>
+        </div>
+        ${photoHTML}
       </div>
-      <div class="card-fields">${fields}</div>
       ${settingTruncated?`<div class="setting-preview">${esc(settingTruncated)}</div>`:''}
       <div class="card-actions">
         <button class="btn-action" onclick="event.stopPropagation();openEditModal(${c.id})">编辑</button>
@@ -832,6 +958,7 @@ function openCreateModal() {
   document.getElementById('submitBtn').textContent = '确认添加';
   document.getElementById('editId').value = '';
   document.getElementById('charForm').reset();
+  resetImageUpload();
   document.getElementById('modalOverlay').classList.add('active');
 }
 
@@ -855,6 +982,12 @@ async function openEditModal(id) {
     document.getElementById('birthplace').value = c.birthplace || '';
     document.getElementById('status').value = c.status || '存在';
     document.getElementById('setting').value = c.setting || '';
+    
+    // 处理图片预览（多图）
+    resetImageUpload();
+    currentImageUrls = normalizeImages(c);
+    renderImagePreview();
+    
     document.getElementById('modalOverlay').classList.add('active');
   } catch (e) {
     showToast('获取数据失败', 'error');
@@ -881,12 +1014,38 @@ async function submitForm(e) {
     status: document.getElementById('status').value,
     setting: document.getElementById('setting').value.trim(),
   };
+
   try {
+    // 上传新选择的图片文件（统一用通用接口拿URL，随表单提交 images 数组）
+    const newUrls = [];
+    for (const item of currentImageFiles) {
+      const formData = new FormData();
+      formData.append('file', item.file);
+      const uploadRes = await fetch('/api/images/upload', { method: 'POST', body: formData });
+      if (uploadRes.ok) {
+        const r = await uploadRes.json();
+        newUrls.push(r.image_url);
+      } else {
+        showToast('图片上传失败，请重试', 'error');
+        return;
+      }
+    }
+    // 合并：已上传URL + 新上传URL，作为 images 数组提交
+    const allImages = [...currentImageUrls, ...newUrls];
+    if (allImages.length > 0) {
+      data.images = allImages;
+      data.image_url = allImages[0];
+    } else {
+      data.images = [];
+      data.image_url = '';
+    }
+
     const url = editId ? `${API}/${editId}` : API;
     const method = editId ? 'PUT' : 'POST';
     const res = await fetch(url, { method, headers:{'Content-Type':'application/json'}, body: JSON.stringify(data) });
     if (!res.ok) throw new Error();
     closeModal();
+    resetImageUpload();
     loadCharacters();
     showToast(editId ? '已更新' : '已创建', 'success');
   } catch (e) {
@@ -933,11 +1092,16 @@ async function openDetailModal(id) {
     const c = await res.json();
     detailCharId = c.id;
     document.getElementById('detailName').textContent = c.name;
+    
+    // 图片显示（翻页器，支持多图）
+    detailImages = normalizeImages(c);
+    detailImageIdx = 0;
+    renderDetailImage();
+    
     let body = '';
     if (c.university) body += detailSection('代表高校', c.university);
     if (c.region) body += detailSection('地区', c.region);
     if (c.birthplace) body += detailSection('诞生地', c.birthplace);
-    if (c.family) body += detailSection('家族/团体', c.family);
     const statusText = c.status || '存在';
     if (statusText !== '存在') body += detailSection('存在状态', statusText);
     body += `<div class="detail-info-row">`;
@@ -977,106 +1141,6 @@ function detailEdit() {
 document.getElementById('detailOverlay').addEventListener('click', function(e) {
   if (e.target === this) closeDetailModal();
 });
-
-// ====== 选择导出 ======
-function enterExportMode() {
-  exportMode = true;
-  selectedIds.clear();
-  document.body.classList.add('export-mode');
-  applyFilter();
-}
-
-function cancelExport() {
-  exportMode = false;
-  selectedIds.clear();
-  document.body.classList.remove('export-mode');
-  applyFilter();
-}
-
-function handleCardClick(id) {
-  if (exportMode) {
-    var checkbox = document.querySelector('.card[data-drag-id="' + id + '"] .card-check');
-    if (checkbox) {
-      checkbox.checked = !checkbox.checked;
-      toggleCardSelect(id, checkbox.checked);
-    }
-    return;
-  }
-  openDetailModal(id);
-}
-
-function toggleCardSelect(id, checked) {
-  if (checked) selectedIds.add(id);
-  else selectedIds.delete(id);
-  const card = document.querySelector('.card[data-drag-id="' + id + '"]');
-  if (card) card.classList.toggle('selected', checked);
-  updateExportButtons();
-}
-
-function toggleSelectAll() {
-  const cards = document.querySelectorAll('#charGrid .card[data-drag-id]');
-  if (cards.length === 0) return;
-  const visibleIds = [];
-  cards.forEach(function(c) { visibleIds.push(parseInt(c.dataset.dragId)); });
-  const allSelected = visibleIds.every(function(id) { return selectedIds.has(id); });
-  if (allSelected) {
-    visibleIds.forEach(function(id) { selectedIds.delete(id); });
-  } else {
-    visibleIds.forEach(function(id) { selectedIds.add(id); });
-  }
-  applyFilter();
-}
-
-function updateExportButtons() {
-  var btn = document.getElementById('confirmExportBtn');
-  if (!btn) return;
-  btn.disabled = selectedIds.size === 0;
-  btn.textContent = selectedIds.size > 0 ? '确认导出 (' + selectedIds.size + ')' : '确认导出';
-}
-
-function confirmExport() {
-  if (selectedIds.size === 0) return;
-  var selected = allCharacters.filter(function(c) { return selectedIds.has(c.id); });
-  var exportData = selected.map(function(c) { return {
-    姓名: c.name,
-    代表高校: c.university || '',
-    地区: c.region || '',
-    诞生地: c.birthplace || '',
-    身高: c.height || '',
-    性别: c.gender || '',
-    生日: c.birthday || '',
-    存在状态: c.status || '存在',
-    外貌: c.appearance || '',
-    身份存在时间: c.identity_period || '',
-    诞生时间: c.birth_time || '',
-    取名依据: c.naming_rationale || '',
-    设定: c.setting || '',
-  };});
-  var jsonStr = JSON.stringify(exportData, null, 2);
-  var fileName = '高校拟人OC_' + selected.length + '位角色_' + new Date().toISOString().slice(0,10) + '.json';
-  saveExportFile(jsonStr, fileName, '已导出 ' + selected.length + ' 位角色');
-  cancelExport();
-}
-
-function saveExportFile(jsonStr, fileName, msg) {
-  if (typeof Android !== 'undefined' && Android.saveFile) {
-    var blob = new Blob([jsonStr], {type: 'application/json'});
-    var reader = new FileReader();
-    reader.onloadend = function() { Android.saveFile(reader.result, fileName); };
-    reader.readAsDataURL(blob);
-    showToast('请选择保存位置', 'success');
-  } else {
-    var blob = new Blob([jsonStr], {type: 'application/json'});
-    var a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = fileName;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(a.href);
-    showToast(msg, 'success');
-  }
-}
 
 function showToast(msg, type) {
   const t = document.getElementById('toast');
@@ -1202,22 +1266,6 @@ async function saveCharOrder() {
       body: JSON.stringify({ items: allCharacters.map((c, i) => ({ id: c.id, sort_order: i })) }),
     });
   } catch(e) { /* 静默失败 */ }
-}
-
-function moveCharUp(id) {
-  const idx = allCharacters.findIndex(c => c.id === id);
-  if (idx <= 0) return;
-  [allCharacters[idx - 1], allCharacters[idx]] = [allCharacters[idx], allCharacters[idx - 1]];
-  saveCharOrder();
-  applyFilter();
-}
-
-function moveCharDown(id) {
-  const idx = allCharacters.findIndex(c => c.id === id);
-  if (idx < 0 || idx >= allCharacters.length - 1) return;
-  [allCharacters[idx + 1], allCharacters[idx]] = [allCharacters[idx], allCharacters[idx + 1]];
-  saveCharOrder();
-  applyFilter();
 }
 </script>
 <!-- 离线模式脚本（仅 APK 环境 file:// 协议加载） -->

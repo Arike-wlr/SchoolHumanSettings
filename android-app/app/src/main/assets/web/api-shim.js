@@ -208,6 +208,20 @@ async function handleApiRequest(url, init) {
       }
     }
 
+    // ---- 图片上传（离线：转 base64 data URL 直接存角色 images 数组）----
+    if (path === '/api/images/upload' && method === 'POST') {
+      const formData = body;
+      const file = formData.get('file');
+      if (!file) return makeResponse({ detail: '未找到文件' }, 400);
+      const dataUrl = await new Promise((resolve, reject) => {
+        const r = new FileReader();
+        r.onload = () => resolve(r.result);
+        r.onerror = reject;
+        r.readAsDataURL(file);
+      });
+      return makeResponse({ image_url: dataUrl });
+    }
+
     // 未匹配的 API
     console.warn('[api-shim] 未匹配的请求:', path, method);
     return makeResponse({ detail: '离线模式不支持此操作' }, 404);
