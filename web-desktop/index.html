@@ -853,6 +853,11 @@
         </div>
 
         <div class="form-group">
+          <label for="alias">别名</label>
+          <input type="text" id="alias" placeholder="字、曾用名">
+        </div>
+
+        <div class="form-group">
           <label for="university">代表高校</label>
           <input type="text" id="university" placeholder="如：上海交通大学">
         </div>
@@ -1154,7 +1159,7 @@ function cardHTML(c) {
 
   // 前4个字段（地区/诞生地/身高/生日）与图片并排，设定和"点击查看"放下方
   const topFields = `
-    ${c.region ? fieldRowShort('地区', c.region) : ''}
+    ${c.alias ? fieldRowShort('别名', c.alias) : ''}
     ${c.birthplace ? fieldRowShort('诞生地', c.birthplace) : ''}
     ${c.height ? fieldRowShort('身高', c.height) : ''}
     ${c.birthday ? fieldRowShort('生日', c.birthday) : ''}
@@ -1348,6 +1353,7 @@ async function openEditModal(id) {
     document.getElementById('submitBtn').textContent = '保存修改';
     document.getElementById('editId').value = c.id;
     document.getElementById('name').value = c.name;
+    document.getElementById('alias').value = c.alias || '';
     document.getElementById('university').value = c.university || '';
     document.getElementById('region').value = c.region || '';
     document.getElementById('namingRationale').value = c.naming_rationale || '';
@@ -1381,6 +1387,7 @@ async function submitForm(e) {
   const editId = document.getElementById('editId').value;
   const data = {
     name: document.getElementById('name').value.trim(),
+    alias: document.getElementById('alias').value.trim(),
     university: document.getElementById('university').value.trim(),
     region: document.getElementById('region').value.trim(),
     naming_rationale: document.getElementById('namingRationale').value.trim(),
@@ -1512,6 +1519,7 @@ async function openDetailModal(id) {
 
     let body = '';
     if (c.university)        body += detailSection('代表高校', c.university);
+    if (c.alias)             body += detailSection('别名', c.alias);
     if (c.region)            body += detailSection('地区', c.region);
     if (c.birthplace)        body += detailSection('诞生地', c.birthplace);
     if (statusText !== '存在') body += detailSection('存在状态', statusText);

@@ -63,7 +63,7 @@ def init_db():
     # 兼容旧表：如果缺少列则自动添加
     cursor.execute("PRAGMA table_info(characters)")
     cols = [col[1] for col in cursor.fetchall()]
-    for col_name in ["university", "region", "naming_rationale", "family", "birthplace", "status", "image_url"]:
+    for col_name in ["university", "region", "naming_rationale", "family", "birthplace", "status", "image_url", "alias"]:
         if col_name not in cols:
             cursor.execute(f"ALTER TABLE characters ADD COLUMN {col_name} TEXT DEFAULT ''")
     if "sort_order" not in cols:
@@ -150,6 +150,7 @@ app.add_middleware(
 
 class CharacterCreate(BaseModel):
     name: str = Field(..., description="姓名")
+    alias: str = Field(default="", description="别名（字、曾用名）")
     university: str = Field(default="", description="代表高校")
     region: str = Field(default="", description="地区/省份")
     naming_rationale: str = Field(default="", description="取名依据")
@@ -169,6 +170,7 @@ class CharacterCreate(BaseModel):
 
 class CharacterUpdate(BaseModel):
     name: Optional[str] = None
+    alias: Optional[str] = None
     university: Optional[str] = None
     region: Optional[str] = None
     naming_rationale: Optional[str] = None
@@ -190,6 +192,7 @@ class CharacterResponse(BaseModel):
     id: int
     name: str
     university: str
+    alias: str = ""
     region: str
     naming_rationale: str
     height: str
@@ -353,10 +356,10 @@ def create_character(data: CharacterCreate):
     next_order = cursor.fetchone()[0]
     cursor.execute(
         """INSERT INTO characters
-           (name, university, region, naming_rationale, height, gender, birthday, appearance,
+           (name, alias, university, region, naming_rationale, height, gender, birthday, appearance,
             identity_period, birth_time, setting, family, birthplace, status, image_url, images, sort_order, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        (data.name, data.university, data.region, data.naming_rationale,
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (data.name, data.alias, data.university, data.region, data.naming_rationale,
          data.height, data.gender, data.birthday,
          data.appearance, data.identity_period, data.birth_time,
          data.setting, data.family, data.birthplace, data.status, data.image_url, json.dumps(data.images), next_order, now, now)
@@ -392,7 +395,7 @@ def update_character(char_id: int, data: CharacterUpdate):
         old_images = [existing["image_url"]]
 
     updates = {}
-    for field in ["name", "university", "region", "naming_rationale", "height", "gender", "birthday", "appearance",
+    for field in ["name", "alias", "university", "region", "naming_rationale", "height", "gender", "birthday", "appearance",
                   "identity_period", "birth_time", "setting", "family", "birthplace", "status", "image_url"]:
         val = getattr(data, field)
         if val is not None:
