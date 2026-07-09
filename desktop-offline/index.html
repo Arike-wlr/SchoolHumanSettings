@@ -1231,8 +1231,8 @@ function handleImageUpload(event) {
       showToast(`文件 ${file.name} 不是图片，已跳过`, 'error');
       continue;
     }
-    if (file.size > 5 * 1024 * 1024) { // 5MB
-      showToast(`图片 ${file.name} 超过5MB，已跳过`, 'error');
+    if (file.size > 20 * 1024 * 1024) { // 20MB
+      showToast(`图片 ${file.name} 超过20MB，已跳过`, 'error');
       continue;
     }
     currentImageFiles.push({ file, previewUrl: URL.createObjectURL(file) });

@@ -4,7 +4,7 @@
 // ============================================================
 
 // 版本升级时自动清空图片缓存，避免复用已失效的 serverUrl
-const SYNC_VERSION = 'v4-clear-cache';
+const SYNC_VERSION = '抗大抗大越抗越大';
 (async () => {
   try {
     const stored = localStorage.getItem('imageCacheVersion');
