@@ -235,10 +235,15 @@ function hasServer() {
 // ============= 图片缓存（增量同步用） =============
 // 缓存 dataUrl → serverUrl 的映射，避免重复上传/下载同一张图片
 
-// 计算 dataUrl 的简易 hash（长度 + 头尾片段）
+// 计算 dataUrl 的 hash：djb2 变种，遍历整个字符串，碰撞率远低于只取头尾
 function imageHash(dataUrl) {
   if (!dataUrl) return '';
-  return dataUrl.length + '|' + dataUrl.slice(0, 100) + dataUrl.slice(-50);
+  let hash = 5381;
+  const len = dataUrl.length;
+  for (let i = 0; i < len; i++) {
+    hash = ((hash * 33) ^ dataUrl.charCodeAt(i)) >>> 0;
+  }
+  return len + '_' + hash.toString(36);
 }
 
 const imageCacheDB = {

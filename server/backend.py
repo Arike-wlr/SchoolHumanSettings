@@ -35,7 +35,8 @@ os.makedirs(IMAGE_DIR, exist_ok=True)
 
 def init_db():
     """初始化数据库，创建角色表与世界设定表"""
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=30)
+    conn.execute("PRAGMA journal_mode=WAL")
     cursor = conn.cursor()
 
     # 角色表
@@ -271,8 +272,9 @@ class RelationResponse(BaseModel):
 
 
 def get_db():
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=30)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA busy_timeout=30000")
     return conn
 
 
@@ -770,7 +772,8 @@ async def upload_files(files: List[UploadFile] = File(...)):
 
 
 async def _save_image_file(file: UploadFile) -> tuple[str, str]:
-    """校验并保存上传的图片，返回 (image_url, filename)"""
+    """校验并保存上传的图片，返回 (image_url, filename)。
+    按文件内容 SHA-256 命名，内容相同的图片自动去重，不重复存储。"""
     if not file.filename:
         raise HTTPException(status_code=400, detail="文件名为空")
     ext = os.path.splitext(file.filename)[1].lower()
@@ -779,14 +782,18 @@ async def _save_image_file(file: UploadFile) -> tuple[str, str]:
             status_code=400,
             detail=f"不支持的图片类型: {ext}，仅支持 {', '.join(ALLOWED_IMAGE_EXTENSIONS)}"
         )
-    unique_filename = f"{uuid.uuid4().hex}{ext}"
+    content = await file.read()
+    content_hash = hashlib.sha256(content).hexdigest()
+    unique_filename = f"{content_hash}{ext}"
     image_path = os.path.join(IMAGE_DIR, unique_filename)
-    try:
-        with open(image_path, "wb") as f:
-            content = await file.read()
-            f.write(content)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"图片保存失败: {str(e)}")
+    if not os.path.exists(image_path):
+        try:
+            with open(image_path, "wb") as f:
+                f.write(content)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"图片保存失败: {str(e)}")
+    else:
+        print(f"[images/upload] 内容去重命中，跳过写入: {unique_filename}")
     return f"/api/images/{unique_filename}", unique_filename
 
 
@@ -1131,6 +1138,9 @@ def sync_replace_all(payload: SyncPayload):
     # 替换角色
     cursor.execute("DELETE FROM characters")
     for c in payload.characters:
+        # images 字段在客户端是 list，数据库存为 JSON 字符串
+        if "images" in c and isinstance(c["images"], list):
+            c["images"] = json.dumps(c["images"])
         cols = list(c.keys())
         placeholders = ",".join(["?"] * len(cols))
         col_names = ",".join(cols)

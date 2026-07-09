@@ -3,6 +3,22 @@
 // 支持从服务器下载（覆盖本地）和上传到服务器（覆盖服务器）
 // ============================================================
 
+// 同步模块版本号：用于验证手机是否加载了最新代码（修改后递增）
+const SYNC_VERSION = 'v4-clear-cache';
+
+// 版本升级时自动清空图片缓存，避免复用已失效的 serverUrl
+// （服务器文件可能已被清理，旧缓存指向不存在的文件）
+(async () => {
+  try {
+    const stored = localStorage.getItem('imageCacheVersion');
+    if (stored !== SYNC_VERSION) {
+      await imageCacheDB.clear();
+      localStorage.setItem('imageCacheVersion', SYNC_VERSION);
+      console.log('[sync] 图片缓存已清空（版本升级）:', stored, '->', SYNC_VERSION);
+    }
+  } catch (e) { console.warn('[sync] 清空缓存失败:', e); }
+})();
+
 // ============= 图片处理辅助 =============
 // data URL 转 Blob
 function dataUrlToBlob(dataUrl) {
@@ -79,6 +95,7 @@ async function convertServerImagesToDataUrl(characters, serverUrl, onProgress) {
 }
 
 // 把 base64 data URL 图片上传到服务器换为 URL（上传时用，跳过已缓存的）
+// 上传成功后回写本地 DB，避免下次重复上传
 async function convertDataUrlImagesToServerUrl(characters, serverUrl, onProgress) {
   const dataUrlSet = new Set();
   for (const c of characters) {
@@ -91,6 +108,7 @@ async function convertDataUrlImagesToServerUrl(characters, serverUrl, onProgress
   const cache = new Map();
   let i = 0;
   let skipped = 0;
+  const failed = [];
   for (const dataUrl of dataUrlSet) {
     i++;
     // 先查本地缓存：该 dataUrl 是否已上传过
@@ -111,20 +129,29 @@ async function convertDataUrlImagesToServerUrl(characters, serverUrl, onProgress
         cache.set(dataUrl, r.image_url);
         // 存入缓存
         await imageCacheDB.set(dataUrl, r.image_url);
+      } else {
+        failed.push(dataUrl);
       }
     } catch (e) {
       console.warn('图片上传失败:', e);
+      failed.push(dataUrl);
     }
   }
   if (skipped > 0) onProgress && onProgress(`图片同步：${skipped} 张已缓存，${dataUrlSet.size - skipped} 张需上传`);
-  // 替换角色数据中的data URL
+  // 只在内存中替换 data URL → serverUrl（用于 POST 给服务器）
+  // 不回写本地 DB：本地始终保留 data URL，确保手机离线时能显示图片
+  // 去重靠 imageCacheDB 缓存，不会重复上传
   for (const c of characters) {
     if (Array.isArray(c.images)) {
-      c.images = c.images.map(u => cache.get(u) || u);
+      c.images = c.images.map(u => cache.has(u) ? cache.get(u) : u);
     }
     if (c.image_url && cache.has(c.image_url)) {
       c.image_url = cache.get(c.image_url);
     }
+  }
+  // 有图片上传失败时抛错，避免把超大 base64 塞进 replace-all 导致更难诊断的失败
+  if (failed.length > 0) {
+    throw new Error(`${failed.length} 张图片上传失败，请检查网络后重试`);
   }
 }
 

@@ -64,6 +64,9 @@ public class MainActivity extends AppCompatActivity {
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
         // 离线优先：优先使用缓存
         settings.setCacheMode(WebSettings.LOAD_DEFAULT);
+        // 关键：每次启动清空 WebView 缓存，确保加载 APK 内最新资源
+        // 否则更新 APK 后仍会命中旧的 sync.js / db.js，导致改动不生效
+        webView.clearCache(true);
 
         webView.setWebViewClient(new WebViewClient() {
             @Override

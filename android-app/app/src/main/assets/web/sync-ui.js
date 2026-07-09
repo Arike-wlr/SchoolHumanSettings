@@ -71,7 +71,7 @@
     overlay.id = 'syncOverlay';
     overlay.innerHTML = `
       <div class="sync-modal">
-        <div class="sync-title">☁ 数据同步</div>
+        <div class="sync-title">☁ 数据同步 <span style="font-size:.7rem;color:var(--text-light,#8a7a6a);font-weight:400;">${typeof SYNC_VERSION !== 'undefined' ? SYNC_VERSION : 'v1'}</span></div>
         <div class="sync-server-row">
           <input type="text" class="sync-server-input" id="syncServerInput"
                  placeholder="电脑IP:端口 (如 192.168.1.175:8000)"
