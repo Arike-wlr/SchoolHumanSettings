@@ -329,6 +329,7 @@ if (location.protocol === 'file:') {
     color: var(--text-light);
   }
   .empty .icon { font-size: 2.5rem; margin-bottom: 8px; opacity: .5; }
+  @keyframes spin { to { transform: rotate(360deg); } }
   .no-result {
     text-align: center;
     padding: 40px 20px;
@@ -476,6 +477,7 @@ if (location.protocol === 'file:') {
     font-size: .92rem;
     line-height: 1.5;
     word-break: break-word;
+    white-space: pre-wrap;
   }
   .detail-value.muted { color: var(--text-light); font-style: italic; }
   .detail-info-row {
@@ -517,7 +519,7 @@ if (location.protocol === 'file:') {
 
 <div class="toolbar">
   <div class="toolbar-top">
-    <span class="count">共 <strong id="charCount">0</strong> 位</span>
+    <span class="count">共 <strong id="charCount">…</strong> 位</span>
     <div class="search-wrap" id="searchWrap">
       <span class="search-icon">🔍</span>
       <input type="text" class="search-input" id="searchInput" placeholder="搜索校名或角色名…" oninput="onSearch()">
@@ -537,7 +539,10 @@ if (location.protocol === 'file:') {
 
 <div class="card-list" id="charGrid"></div>
 <div class="no-result" id="noResult" style="display:none;">未找到匹配的角色</div>
-
+<div class="empty" id="loadingState" style="display:block;">
+  <div class="icon" style="animation:spin 1s linear infinite;">⏳</div>
+  <p>加载中…</p>
+</div>
 <div class="empty" id="emptyState" style="display:none;">
   <div class="icon">📖</div>
   <p>还没有角色设定</p>
@@ -835,9 +840,11 @@ async function loadCharacters() {
   try {
     const res = await fetch(API);
     allCharacters = await res.json();
+    document.getElementById('loadingState').style.display = 'none';
     buildRegionTabs();
     applyFilter();
   } catch (e) {
+    document.getElementById('loadingState').style.display = 'none';
     showToast('加载失败，请确认后端已启动', 'error');
   }
 }
@@ -946,7 +953,7 @@ function cardHTML(c, globalIdx) {
     photoHTML = `
       <div style="flex-shrink:0; width:88px; position:relative; align-self:stretch; margin-right:4px; margin-top:4px; min-height:64px;">
         <div style="width:88px; height:100%; border-radius:4px; overflow:hidden; border:1px solid var(--border); background:#f8f9fa;">
-          <img src="${coverUrl}" alt="${esc(c.name)}" style="width:100%; height:100%; object-fit:cover;">
+          <img src="${coverUrl}" alt="${esc(c.name)}" loading="lazy" style="width:100%; height:100%; object-fit:cover;">
         </div>
         ${badge}
       </div>`;

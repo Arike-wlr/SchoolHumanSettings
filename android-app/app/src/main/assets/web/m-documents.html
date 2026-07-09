@@ -96,6 +96,16 @@ if (location.protocol === 'file:') {
   .doc-image { text-align: center; margin: 1em 0; }
   .doc-image img { max-width: 100%; height: auto; border-radius: 8px; box-shadow: 0 2px 12px rgba(0,0,0,.1); }
   .doc-image-caption { font-size: .8rem; color: var(--text-light); margin-top: 6px; }
+  /* mammoth.js docx→HTML 离线渲染样式 */
+  .docx-html p { font-size: .92rem; line-height: 1.8; margin: .6em 0; color: var(--text); }
+  .docx-html h1, .docx-html h2, .docx-html h3 { font-weight: 600; margin: 1em 0 .5em; color: var(--text); }
+  .docx-html h1 { font-size: 1.2rem; } .docx-html h2 { font-size: 1.1rem; } .docx-html h3 { font-size: 1rem; }
+  .docx-html ul, .docx-html ol { margin: .5em 0; padding-left: 1.5em; }
+  .docx-html li { font-size: .92rem; line-height: 1.8; margin: .3em 0; }
+  .docx-html table { border-collapse: collapse; width: 100%; margin: 1em 0; }
+  .docx-html td, .docx-html th { border: 1px solid var(--border); padding: 6px 10px; font-size: .88rem; }
+  .docx-html img { max-width: 100%; height: auto; border-radius: 8px; margin: .8em 0; }
+  .docx-html a { color: var(--accent); }
   .viewer-loading { text-align: center; padding: 40px 20px; color: var(--text-light); }
   .spinner { display: inline-block; width: 24px; height: 24px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 1s linear infinite; margin-bottom: 8px; }
   @keyframes spin { to { transform: rotate(360deg); } }
@@ -329,9 +339,20 @@ async function openViewer(encodedName) {
 function renderViewerContent(data) {
   const body = document.getElementById('viewerBody');
   if (data.type === 'docx') {
-    let html = '';
     const content = data.content;
     const cacheKey = data.cache_key || '';
+
+    // 情况1：mammoth.js 离线解析返回的 HTML 字符串（无 cache_key）
+    // 直接渲染 HTML（mammoth 已转义过内容，安全）
+    if (typeof content === 'string' && !cacheKey) {
+      body.innerHTML = content
+        ? `<div class="doc-paragraph docx-html">${content}</div>`
+        : '<div class="viewer-loading">文档为空</div>';
+      return;
+    }
+
+    // 情况2：电脑端返回的数组格式（含 text/image 段落 + cache_key）
+    let html = '';
     const isNewFormat = Array.isArray(content) && content.length > 0 && content[0].type !== undefined;
     if (Array.isArray(content)) {
       for (const item of content) {
@@ -454,6 +475,7 @@ function saveExportFile(jsonStr, fileName, msg) {
 if (location.protocol === 'file:') {
   document.write('<script src="db.js"><\/script>');
   document.write('<script src="api-shim.js"><\/script>');
+  document.write('<script src="mammoth.min.js"><\/script>');
   document.write('<script src="sync.js"><\/script>');
   document.write('<script src="sync-ui.js"><\/script>');
 }

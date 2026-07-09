@@ -92,6 +92,7 @@ if (location.protocol === 'file:') {
 
   .empty { text-align: center; padding: 60px 20px; color: var(--text-light); }
   .empty .icon { font-size: 2.5rem; margin-bottom: 8px; opacity: .5; }
+  @keyframes spin { to { transform: rotate(360deg); } }
   .no-result { text-align: center; padding: 40px 20px; color: var(--text-light); font-size: .88rem; }
 
   .bottom-nav { position: fixed; bottom: 0; left: 0; right: 0; background: linear-gradient(180deg, #2a1a12 0%, #1a0e08 100%); display: flex; padding-bottom: var(--safe-bottom); box-shadow: 0 -2px 12px rgba(0,0,0,.15); z-index: 200; }
@@ -149,7 +150,7 @@ if (location.protocol === 'file:') {
 </header>
 
 <div class="toolbar">
-  <span class="count">共 <strong id="relCount">0</strong> 条</span>
+  <span class="count">共 <strong id="relCount">…</strong> 条</span>
   <div class="search-wrap" id="searchWrap">
     <span class="search-icon">🔍</span>
     <input type="text" class="search-input" id="searchInput" placeholder="搜索角色名…" oninput="onSearch()">
@@ -188,6 +189,10 @@ if (location.protocol === 'file:') {
 
 <div class="card-list" id="relList"></div>
 <div class="no-result" id="noResult" style="display:none;">未找到匹配的关系</div>
+<div class="empty" id="loadingState" style="display:block;">
+  <div class="icon" style="animation:spin 1s linear infinite;">⏳</div>
+  <p>加载中…</p>
+</div>
 <div class="empty" id="emptyState" style="display:none;">
   <div class="icon">🔗</div>
   <p>还没有关系</p>
@@ -379,9 +384,11 @@ async function loadData() {
     const [relRes, charRes] = await Promise.all([fetch(API_REL), fetch(API_CHAR)]);
     allRelations = await relRes.json();
     allCharacters = await charRes.json();
+    document.getElementById('loadingState').style.display = 'none';
     renderRelList();
     graphInit();
   } catch(e) {
+    document.getElementById('loadingState').style.display = 'none';
     showToast('加载失败', 'error');
   }
 }

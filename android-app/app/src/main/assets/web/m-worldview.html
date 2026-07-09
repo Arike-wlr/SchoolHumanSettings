@@ -78,6 +78,7 @@ if (location.protocol === 'file:') {
 
   .empty { text-align: center; padding: 60px 20px; color: var(--text-light); }
   .empty .icon { font-size: 2.5rem; margin-bottom: 8px; opacity: .5; }
+  @keyframes spin { to { transform: rotate(360deg); } }
   .no-result { text-align: center; padding: 40px 20px; color: var(--text-light); font-size: .88rem; }
 
   .bottom-nav { position: fixed; bottom: 0; left: 0; right: 0; background: linear-gradient(180deg, #2a1a12 0%, #1a0e08 100%); display: flex; padding-bottom: var(--safe-bottom); box-shadow: 0 -2px 12px rgba(0,0,0,.15); z-index: 200; }
@@ -144,7 +145,7 @@ if (location.protocol === 'file:') {
 </div>
 
 <div class="toolbar">
-  <span class="count">共 <strong id="entryCount">0</strong> 条</span>
+  <span class="count">共 <strong id="entryCount">…</strong> 条</span>
   <div class="search-wrap" id="searchWrap">
     <span class="search-icon">🔍</span>
     <input type="text" class="search-input" id="searchInput" placeholder="搜索标题或内容…" oninput="onSearch()">
@@ -165,6 +166,10 @@ if (location.protocol === 'file:') {
 
 <div class="card-list" id="entryGrid"></div>
 <div class="no-result" id="noResult" style="display:none;">未找到匹配的设定</div>
+<div class="empty" id="loadingState" style="display:block;">
+  <div class="icon" style="animation:spin 1s linear infinite;">⏳</div>
+  <p>加载中…</p>
+</div>
 <div class="empty" id="emptyState" style="display:none;">
   <div class="icon">🌍</div>
   <p id="emptyText">还没有世界设定</p>
@@ -270,12 +275,16 @@ async function loadEntries() {
     const q = activeMainCategory ? `?main_category=${encodeURIComponent(activeMainCategory)}` : '';
     const res = await fetch(API + q);
     allEntries = await res.json();
+    document.getElementById('loadingState').style.display = 'none';
     const currentIds = new Set(allEntries.map(e => e.id));
     for (const id of selectedIds) { if (!currentIds.has(id)) selectedIds.delete(id); }
     buildCatTabs();
     applyFilter();
     updateEmptyText();
-  } catch (e) { showToast('加载失败', 'error'); }
+  } catch (e) {
+    document.getElementById('loadingState').style.display = 'none';
+    showToast('加载失败', 'error');
+  }
 }
 
 function updateEmptyText() {

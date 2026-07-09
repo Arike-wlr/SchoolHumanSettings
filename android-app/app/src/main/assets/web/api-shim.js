@@ -104,9 +104,8 @@ async function handleApiRequest(url, init) {
     // ---- 关系 ----
     if (path.startsWith('/api/relations')) {
       if (path === '/api/relations' && method === 'GET') {
-        const rels = await relDB.list();
-        // 补充 from_name / to_name
-        const chars = await charDB.list();
+        // 并行查询关系和角色，避免串行等待
+        const [rels, chars] = await Promise.all([relDB.list(), charDB.list()]);
         const charMap = {};
         chars.forEach(c => { charMap[c.id] = c.name; });
         rels.forEach(r => {
@@ -183,7 +182,25 @@ async function handleApiRequest(url, init) {
             cache_key: null,
           });
         }
-        // docx / pdf 等不支持离线解析
+        if (ext === 'docx') {
+          // 用 mammoth.js 离线解析 docx → HTML
+          if (typeof mammoth === 'undefined') {
+            return makeResponse({ name: doc.name, type: 'docx', content: '⚠️ 解析库未加载', cache_key: null });
+          }
+          try {
+            const arrayBuffer = await doc.blob.arrayBuffer();
+            const result = await mammoth.convertToHtml({ arrayBuffer });
+            return makeResponse({
+              name: doc.name,
+              type: 'docx',
+              content: result.value,
+              cache_key: null,
+            });
+          } catch (e) {
+            return makeResponse({ name: doc.name, type: 'docx', content: '⚠️ 解析失败: ' + e.message, cache_key: null });
+          }
+        }
+        // pdf 等暂不支持离线解析
         return makeResponse({
           name: doc.name,
           type: ext,
