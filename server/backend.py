@@ -251,7 +251,7 @@ class WorldBuildingResponse(BaseModel):
 class RelationCreate(BaseModel):
     from_char_id: int
     to_char_id: int
-    relation_type: str = Field(default="", description="关系类型，如：好友、对手、师徒等")
+    relation_type: str = Field(default="", description="关系类型，如：朋友、CP、师生、冤家等")
     description: str = Field(default="", description="关系描述")
 
 

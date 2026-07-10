@@ -222,6 +222,9 @@
   .rel-type-memory { background: #e0f2f1; color: #2e8b8a; }
   .rel-type-formation { background: #fdf0e0; color: #d4842a; }
   .rel-type-teacher { background: #e3edf7; color: #4a7db0; }
+  .rel-type-friend { background: #2ecc71; color: #2ecc71; }
+  .rel-type-enemy { background: #e67e22; color: #e67e22; }
+  .rel-type-family { background: #2ecc71; color: #2ecc71; }
   .info-label { width: 90px; font-weight: 500; color: var(--text-light); vertical-align: top; padding: 3px 12px 3px 0; white-space: nowrap; font-size: .85rem; }
   .info-label + td { padding: 3px 0; }
   .rel-desc { font-size: .82rem; color: var(--text-light); margin-top: 2px; }
@@ -358,6 +361,9 @@
       <div class="legend-item"><span style="color:#2e8b8a;margin-left:4px;">┅┅</span> 继承记忆</div>
       <div class="legend-item"><span style="color:#d4842a;margin-left:8px;">━━</span> 参与组建</div>
       <div class="legend-item"><span style="color:#4a7db0;margin-left:8px;">━━</span> 师生</div>
+      <div class="legend-item"><span style="color:#2ecc71;margin-left:8px;">⇄</span> 朋友</div>
+      <div class="legend-item"><span style="color:#e67e22;margin-left:8px;">⇄</span> 冤家</div>
+      <div class="legend-item"><span style="color:#2ecc71;margin-left:8px;">⇄</span> 亲属</div>
       <div class="legend-item" style="margin-left:16px;color:var(--text-light);">|</div>
     </div>
   </div>
@@ -412,6 +418,8 @@
             <option value="继承记忆">继承记忆</option>
             <option value="参与组建">参与组建</option>
             <option value="师生">师生</option>
+            <option value="朋友">朋友</option>
+            <option value="冤家">冤家</option>
           </select>
         </div>
         <div class="form-group">
@@ -980,8 +988,8 @@ function drawFamilyClusters() {
   });
 }
 
-// CP / 单箭头 / 继承记忆 / 参与组建 / 师生 边线渲染
-function drawEdge(fromX, fromY, toX, toY, type, hl) {
+// CP / 单箭头 / 继承记忆 / 参与组建 / 师生 / 朋友 / 冤家 / 亲属 边线渲染
+function drawEdge(fromX, fromY, toX, toY, type, isBidirectional, highlight = false) {
   const dx = toX - fromX, dy = toY - fromY;
   const len = Math.sqrt(dx * dx + dy * dy) || 1;
   const ux = dx / len, uy = dy / len;
@@ -999,15 +1007,18 @@ function drawEdge(fromX, fromY, toX, toY, type, hl) {
   else if (type === '继承记忆') color = '#2e8b8a';
   else if (type === '参与组建') color = '#d4842a';
   else if (type === '师生') color = '#4a7db0';
+  else if (type === '朋友') color = '#2ecc71';
+  else if (type === '冤家') color = '#e67e22';
+  else if (type === '亲属') color = '#2ecc71';
   else color = '#6b4c8a';
-  const alpha = hl ? 'b3' : '55';
+  const alpha = highlight ? 'b3' : '55';
   const isDashed = type === '继承记忆';
 
   ctx.beginPath();
   ctx.moveTo(sx, sy);
   ctx.lineTo(ex, ey);
   ctx.strokeStyle = color + alpha;
-  ctx.lineWidth = hl ? 3 : 2;
+  ctx.lineWidth = highlight ? 3 : 2;
   if (isDashed) ctx.setLineDash([8, 5]);
   ctx.stroke();
   ctx.setLineDash([]);
@@ -1024,8 +1035,8 @@ function drawEdge(fromX, fromY, toX, toY, type, hl) {
   }
 
   drawTip(ex, ey);  // 目标端箭头
-  if (type === 'CP') {
-    // CP 双向：source端也画箭头，指向源节点（从target方向来）
+  if (isBidirectional) {
+    // 双向关系：source端也画箭头，指向源节点（从target方向来）
     ctx.beginPath();
     ctx.moveTo(sx, sy);
     ctx.lineTo(sx + ux * arrowSize - uy * arrowSize * 0.6, sy + uy * arrowSize + ux * arrowSize * 0.6);
@@ -1059,8 +1070,8 @@ function drawGraph() {
     const to = nodes.find(n => n.id === edge.to);
     if (!from || !to) return;
 
-    const isCP = edge.type === 'CP';
-    drawEdge(from.x, from.y, to.x, to.y, edge.type, false);
+    const isBidirectional = ['CP', '朋友', '冤家', '亲属'].includes(edge.type);
+    drawEdge(from.x, from.y, to.x, to.y, edge.type, isBidirectional);
 
     // 标签
     const mx = (from.x + to.x) / 2;
@@ -1071,6 +1082,9 @@ function drawGraph() {
     else if (edge.type === '继承记忆') labelColor = '#2e8b8a';
     else if (edge.type === '参与组建') labelColor = '#d4842a';
     else if (edge.type === '师生') labelColor = '#4a7db0';
+    else if (edge.type === '朋友') labelColor = '#2ecc71';
+    else if (edge.type === '冤家') labelColor = '#e67e22';
+    else if (edge.type === '亲属') labelColor = '#2ecc71';
     else labelColor = '#6b4c8a';
     ctx.font = '12px "PingFang SC","Microsoft YaHei",sans-serif';
     const tw = ctx.measureText(label).width + 8;
@@ -1359,6 +1373,7 @@ function renderRelList() {
     const fromName = r.from_name || '角色#' + r.from_char_id;
     const toName = r.to_name || '角色#' + r.to_char_id;
     const typeHtml = r.relation_type ? `<span class="rel-type ${r.relation_type === 'CP' ? 'rel-type-cp' : r.relation_type === '继承记忆' ? 'rel-type-memory' : r.relation_type === '参与组建' ? 'rel-type-formation' : r.relation_type === '师生' ? 'rel-type-teacher' : ''}">${esc(r.relation_type)}</span>` : '';
+    const arrow = (r.relation_type === '朋友' || r.relation_type === '冤家' || r.relation_type === '亲属') ? '⇄' : '→';
     return `
       <div class="rel-item" id="rel-${r.id}" draggable="true" data-index="${i}"
            onmouseenter="highlightRelation(${r.id}, true)"
@@ -1372,14 +1387,14 @@ function renderRelList() {
         <span class="drag-handle" title="拖动排序">⠿</span>
         <div class="rel-info" onclick="openEditModal(${r.id})">
           <div class="rel-names">
-            ${esc(fromName)} <span class="arrow">→</span> ${esc(toName)}
+            ${esc(fromName)} <span class="arrow">${arrow}</span> ${esc(toName)}
             ${typeHtml}
           </div>
           ${r.description ? `<div class="rel-desc">${esc(r.description)}</div>` : ''}
         </div>
         <div class="rel-actions">
           <button class="btn btn-outline btn-sm" onclick="event.stopPropagation();openEditModal(${r.id})">编辑</button>
-          <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openDeleteModal(${r.id},'${esc(fromName)}→${esc(toName)}')">删除</button>
+          <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openDeleteModal(${r.id},'${esc(fromName)}${arrow}${esc(toName)}')">删除</button>
         </div>
       </div>`;
   }).join('');
@@ -1463,9 +1478,9 @@ function drawGraphWithHighlight() {
     const to = nodes.find(n => n.id === edge.to);
     if (!from || !to) return;
 
-    const isCP = edge.type === 'CP';
+    const isBidirectional = ['CP', '朋友', '冤家', '亲属'].includes(edge.type);
     const hl = edge.highlight;
-    drawEdge(from.x, from.y, to.x, to.y, edge.type, hl);
+    drawEdge(from.x, from.y, to.x, to.y, edge.type, isBidirectional, hl);
 
     const mx = (from.x + to.x) / 2, my = (from.y + to.y) / 2;
     const label = edge.type;
@@ -1474,6 +1489,9 @@ function drawGraphWithHighlight() {
     else if (edge.type === '继承记忆') labelColor = '#2e8b8a';
     else if (edge.type === '参与组建') labelColor = '#d4842a';
     else if (edge.type === '师生') labelColor = '#4a7db0';
+    else if (edge.type === '朋友') labelColor = '#2ecc71';
+    else if (edge.type === '冤家') labelColor = '#e67e22';
+    else if (edge.type === '亲属') labelColor = '#2ecc71';
     else labelColor = '#6b4c8a';
     const tw = ctx.measureText(label).width + 8;
     ctx.fillStyle = hl ? '#f0e8f8' : '#fff';

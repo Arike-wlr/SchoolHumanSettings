@@ -79,6 +79,9 @@ if (location.protocol === 'file:') {
   .rel-type { font-size: .72rem; padding: 2px 8px; border-radius: 10px; background: var(--accent-pale); color: var(--accent); font-weight: 500; }
   .rel-type.cp { background: #fce4ec; color: #c2185b; }
   .rel-type.师生 { background: #e3f2fd; color: #1565c0; }
+  .rel-type.朋友 { background: #e8f8e0; color: #2e7d32; }
+  .rel-type.冤家 { background: #fdf0e0; color: #d4842a; }
+  .rel-type.亲属 { background: #e8f8e0; color: #2ecc71; }
   .rel-desc { font-size: .85rem; color: var(--text-light); line-height: 1.5; margin-top: 4px; white-space: pre-wrap; }
   .card-actions { display: flex; gap: 8px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
   .btn-action { flex: 1; padding: 7px; border: 1px solid var(--border); border-radius: 8px; background: var(--card-bg); color: var(--text); font-size: .82rem; cursor: pointer; }
@@ -218,12 +221,13 @@ if (location.protocol === 'file:') {
         </div>
         <div class="form-group">
           <label class="form-label">关系类型</label>
-          <input type="text" class="form-input" id="relType" placeholder="如：好友、CP、师徒、对手" list="typeList">
+          <input type="text" class="form-input" id="relType" placeholder="如：朋友、CP、师生、冤家" list="typeList">
           <datalist id="typeList">
-            <option value="好友">
+            <option value="朋友">
             <option value="CP">
-            <option value="师徒">
-            <option value="对手">
+            <option value="单箭头">
+            <option value="师生">
+            <option value="冤家">
             <option value="继承记忆">
             <option value="参与组建">
             <option value="亲属">
@@ -426,6 +430,7 @@ function renderRelList() {
     const toName = r.to_name || '角色#' + r.to_char_id;
     const typeClass = r.relation_type === 'CP' ? 'cp' : r.relation_type === '师生' ? '师生' : '';
     const typeHtml = r.relation_type ? `<span class="rel-type ${typeClass}">${esc(r.relation_type)}</span>` : '';
+    const arrow = (r.relation_type === '朋友' || r.relation_type === '冤家' || r.relation_type === '亲属') ? '⇄' : '→';
     return `
       <div class="rel-card${selectedIds.has(r.id)?' selected':''}" data-drag-id="${r.id}" data-drag-idx="${idxMap[i]}">
         <input type="checkbox" class="card-check" ${selectedIds.has(r.id) ? 'checked' : ''} onclick="event.stopPropagation();toggleCardSelect(${r.id}, this.checked)" title="选择导出">
@@ -433,14 +438,14 @@ function renderRelList() {
           <button class="sort-btn" title="上移" onclick="event.stopPropagation();moveRelUp(${r.id});return false;">↑</button>
           <button class="sort-btn" title="下移" onclick="event.stopPropagation();moveRelDown(${r.id});return false;">↓</button>
           <span class="rel-name">${esc(fromName)}</span>
-          <span class="rel-arrow">→</span>
+          <span class="rel-arrow">${arrow}</span>
           <span class="rel-name">${esc(toName)}</span>
           ${typeHtml}
         </div>
         ${r.description ? `<div class="rel-desc">${esc(r.description)}</div>` : ''}
         <div class="card-actions">
           <button class="btn-action" onclick="openEditModal(${r.id})">编辑</button>
-          <button class="btn-action danger" onclick="openDeleteModal(${r.id},'${esc(fromName)} → ${esc(toName)}')">删除</button>
+          <button class="btn-action danger" onclick="openDeleteModal(${r.id},'${esc(fromName)} ${arrow} ${esc(toName)}')">删除</button>
         </div>
       </div>`;
   }).join('');
@@ -1009,9 +1014,9 @@ function graphDraw() {
     const a = gNodes.find(n => n.id === e.from);
     const b = gNodes.find(n => n.id === e.to);
     if (!a || !b) return;
-    const isCP = e.type === 'CP';
+    const isBidirectional = ['CP', '朋友', '冤家', '亲属'].includes(e.type);
     const isTeach = e.type === '师生';
-    const color = isCP ? '#c2185b' : isTeach ? '#1565c0' : '#8b5e3c';
+    const color = isBidirectional ? '#c2185b' : isTeach ? '#1565c0' : '#8b5e3c';
 
     // 计算线条起止点（从节点边缘开始）
     const dx = b.x - a.x, dy = b.y - a.y;
@@ -1025,7 +1030,7 @@ function graphDraw() {
     // 画线
     gCtx.strokeStyle = color;
     gCtx.globalAlpha = 0.7;
-    gCtx.lineWidth = isCP ? 2.5 : 1.8;
+    gCtx.lineWidth = isBidirectional ? 2.5 : 1.8;
     if (isTeach) gCtx.setLineDash([6, 4]);
     gCtx.beginPath();
     gCtx.moveTo(sx, sy);
@@ -1043,8 +1048,8 @@ function graphDraw() {
     gCtx.closePath();
     gCtx.fill();
 
-    // CP 关系：双向箭头（源端也画箭头）
-    if (isCP) {
+    // 双向关系：源端也画箭头
+    if (isBidirectional) {
       gCtx.beginPath();
       gCtx.moveTo(sx, sy);
       gCtx.lineTo(sx + ux * arrowSize - uy * arrowSize * 0.6, sy + uy * arrowSize + ux * arrowSize * 0.6);
