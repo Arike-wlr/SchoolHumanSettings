@@ -254,6 +254,11 @@ if (location.protocol === 'file:') {
     background: var(--danger-bg);
     color: var(--danger);
   }
+  .status-badge.ordinary {
+    background: #e8eaf0;
+    color: #5a6478;
+  }
+  .card.ordinary { opacity: .92; }
 
   .card-fields {
     display: flex;
@@ -618,6 +623,7 @@ if (location.protocol === 'file:') {
           <select class="form-select" id="status">
             <option value="存在">存在</option>
             <option value="已消逝">已消逝</option>
+            <option value="普通人">普通人</option>
           </select>
         </div>
         <div class="form-group">
@@ -942,8 +948,8 @@ function renderGrid(chars) {
 function cardHTML(c, globalIdx) {
   const genderClass = c.gender==='男'?'male':c.gender==='女'?'female':'other';
   const statusText = c.status || '存在';
-  const statusBadge = statusText!=='存在' ? `<span class="status-badge">已消逝</span>` : '';
-  const cardExtraClass = (statusText==='已消逝'?' perished':'');
+  const statusBadge = statusText !== '存在' ? `<span class="status-badge ${statusText === '普通人' ? ' ordinary' : ''} perished">${statusText}</span>` : '';
+  const cardExtraClass = (statusText==='已消逝'?' perished':statusText==='普通人'?' ordinary':'');
   const settingText = c.setting || '';
   const settingTruncated = settingText.length > 80 ? settingText.substring(0,80)+'…' : settingText;
   

@@ -371,7 +371,9 @@
   }
   .status-badge { font-size: .72rem; padding: 2px 10px; border-radius: 20px; font-weight: 600; letter-spacing: .06em; }
   .status-badge.perished { background: #e0d5cc; color: #5a3e2b; }
+  .status-badge.ordinary { background: #e3e6ee; color: #5a6478; }
   .card.perished { opacity: 0.7; filter: grayscale(0.4); }
+  .card.ordinary { opacity: .92; }
   .card.perished:hover { opacity: 0.85; filter: grayscale(0.2); }
   .card-header .gender-badge {
     font-size: .78rem;
@@ -918,6 +920,7 @@
           <select id="status">
             <option value="存在">存在</option>
             <option value="已消逝">已消逝</option>
+            <option value="普通人">普通人</option>
           </select>
         </div>
 
@@ -1136,8 +1139,8 @@ function renderGrid(chars) {
 function cardHTML(c) {
   const genderClass = c.gender === '男' ? 'male' : c.gender === '女' ? 'female' : 'other';
   const statusText = c.status || '存在';
-  const statusBadge = statusText !== '存在' ? `<span class="status-badge perished">已消逝</span>` : '';
-  const cardExtraClass = (statusText === '已消逝' ? ' perished' : '') + (selectedIds.has(c.id) ? ' selected' : '');
+  const statusBadge = statusText !== '存在' ? `<span class="status-badge ${statusText === '普通人' ? ' ordinary' : ''} perished">${statusText}</span>` : '';
+  const cardExtraClass = (statusText === '已消逝' ? ' perished' : statusText === '普通人' ? ' ordinary' : '') + (selectedIds.has(c.id) ? ' selected' : '');
   const settingText = c.setting || '';
   const settingTruncated = settingText.length > 120 ? settingText.substring(0, 120) + '…' : settingText;
   
@@ -1509,7 +1512,7 @@ async function openDetailModal(id) {
 
     // 状态徽章
     const statusText = c.status || '存在';
-    const statusBadgeHTML = statusText !== '存在' ? '<span class="status-badge perished">已消逝</span>' : '';
+    const statusBadgeHTML = statusText !== '存在' ? `<span class="status-badge ${statusText === '普通人' ? ' ordinary' : ''} perished">${statusText}</span>` : '';
     document.getElementById('detailStatus').innerHTML = statusBadgeHTML;
 
     // 图片显示（翻页器，支持多图）
