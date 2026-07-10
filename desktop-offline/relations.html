@@ -1374,7 +1374,7 @@ function renderRelList() {
     const fromName = r.from_name || '角色#' + r.from_char_id;
     const toName = r.to_name || '角色#' + r.to_char_id;
     const typeHtml = r.relation_type ? `<span class="rel-type ${r.relation_type === 'CP' ? 'rel-type-cp' : r.relation_type === '继承记忆' ? 'rel-type-memory' : r.relation_type === '参与组建' ? 'rel-type-formation' : r.relation_type === '师生' ? 'rel-type-teacher' : ''}">${esc(r.relation_type)}</span>` : '';
-    const arrow = (r.relation_type === '朋友' || r.relation_type === '冤家' || r.relation_type === '亲属') ? '⇄' : '→';
+    const arrow = ['CP', '朋友', '冤家', '亲属'].includes(r.relation_type) ? '⇄' : '→';
     return `
       <div class="rel-item" id="rel-${r.id}" draggable="true" data-index="${i}"
            onmouseenter="highlightRelation(${r.id}, true)"

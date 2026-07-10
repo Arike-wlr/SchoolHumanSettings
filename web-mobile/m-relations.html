@@ -398,7 +398,7 @@ function renderRelList() {
     const toName = r.to_name || '角色#' + r.to_char_id;
     const typeClass = r.relation_type === 'CP' ? 'cp' : r.relation_type === '师生' ? '师生' : '';
     const typeHtml = r.relation_type ? `<span class="rel-type ${typeClass}">${esc(r.relation_type)}</span>` : '';
-    const arrow = (r.relation_type === '朋友' || r.relation_type === '冤家' || r.relation_type === '亲属') ? '⇄' : '→';
+    const arrow = ['CP', '朋友', '冤家', '亲属'].includes(r.relation_type) ? '⇄' : '→';
     return `
       <div class="rel-card" data-drag-id="${r.id}" data-drag-idx="${idxMap[i]}">
         <div class="rel-names">
