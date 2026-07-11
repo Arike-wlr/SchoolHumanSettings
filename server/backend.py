@@ -24,8 +24,8 @@ import uuid
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, "oc_characters.db")
 UPLOAD_DIR = os.path.join(BASE_DIR, "文字设定")
-DESKTOP_DIR = os.path.join(BASE_DIR, "..", "web-desktop")
-MOBILE_DIR = os.path.join(BASE_DIR, "..", "web-mobile")
+DESKTOP_DIR = os.path.join(BASE_DIR, "..", "desktop-offline")
+MOBILE_DIR = os.path.join(BASE_DIR, "..", "android-app", "app", "src", "main", "assets", "web")
 IMAGE_DIR = os.path.join(BASE_DIR, "images")
 
 # 确保上传目录存在
