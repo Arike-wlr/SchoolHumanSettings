@@ -1687,6 +1687,7 @@ function confirmExport() {
   const selected = allCharacters.filter(c => selectedIds.has(c.id));
   const exportData = selected.map(c => ({
     姓名: c.name,
+    别名: c.alias || '',
     代表高校: c.university || '',
     地区: c.region || '',
     诞生地: c.birthplace || '',

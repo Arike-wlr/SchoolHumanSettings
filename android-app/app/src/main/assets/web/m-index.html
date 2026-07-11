@@ -1263,12 +1263,24 @@ function toggleSelectAll() {
 function confirmExport() {
   if (selectedIds.size === 0) return;
   var selected = allCharacters.filter(function(c) { return selectedIds.has(c.id); });
-  // 导出时剔除图片字段
+  // 导出时只保留有用字段
   var exportData = selected.map(function(c) {
-    var rest = Object.assign({}, c);
-    delete rest.image_url;
-    delete rest.images;
-    return rest;
+    return {
+      姓名: c.name,
+      别名: c.alias || '',
+      代表高校: c.university || '',
+      地区: c.region || '',
+      诞生地: c.birthplace || '',
+      存在状态: c.status || '存在',
+      性别: c.gender || '',
+      身高: c.height || '',
+      生日: c.birthday || '',
+      外貌: c.appearance || '',
+      身份存在时间: c.identity_period || '',
+      诞生时间: c.birth_time || '',
+      取名依据: c.naming_rationale || '',
+      设定: c.setting || '',
+    };
   });
   var jsonStr = JSON.stringify(exportData, null, 2);
   var fileName = '高校拟人OC_' + selected.length + '位角色_' + new Date().toISOString().slice(0,10) + '.json';
