@@ -1,5 +1,5 @@
 """
-高校拟人OC 设定管理 - FastAPI 后端
+高校拟人 OC 设定管理 - FastAPI 后端
 """
 
 import sqlite3
@@ -136,7 +136,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="高校拟人OC 设定管理", lifespan=lifespan)
+app = FastAPI(title="高校拟人 OC 设定管理", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
