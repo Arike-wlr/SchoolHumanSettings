@@ -52,6 +52,54 @@
     .sync-status { text-align: center; font-size: .85rem; color: var(--text-light, #8a7a6a); margin: 10px 0; min-height: 20px; }
     .sync-status.error { color: var(--danger, #c44b4b); }
     .sync-status.success { color: #4a8c5a; }
+
+    /* ====== 同步确认界面 ====== */
+    .sync-confirm-warn {
+      background: #fdf3e7; border: 1px solid #e8c79a; color: #9a6b2f;
+      padding: 10px 12px; border-radius: 8px; font-size: .82rem;
+      margin-bottom: 14px; line-height: 1.5;
+    }
+    .sync-diff-section {
+      background: var(--bg, #f5f0e8); border-radius: 10px;
+      padding: 12px; margin-bottom: 14px;
+    }
+    .sync-diff-section-title {
+      font-size: .78rem; color: var(--text-light, #8a7a6a);
+      margin-bottom: 8px; font-weight: 600;
+    }
+    .sync-diff-row {
+      display: flex; align-items: center; gap: 8px;
+      font-size: .88rem; padding: 5px 0;
+    }
+    .sync-diff-row .sync-diff-label { flex: 0 0 64px; color: var(--text, #3d322b); }
+    .sync-diff-row .sync-diff-num { font-weight: 600; color: var(--text, #3d322b); min-width: 28px; text-align: center; }
+    .sync-diff-row .sync-diff-arrow { color: var(--text-light, #8a7a6a); }
+    .sync-diff-row .sync-diff-num.highlight { color: var(--accent, #8b5e3c); }
+    .sync-diff-row.changed { background: rgba(196,154,108,.12); border-radius: 6px; padding: 5px 6px; }
+
+    .sync-diff-item {
+      display: flex; align-items: flex-start; gap: 8px;
+      font-size: .82rem; padding: 6px 0; border-top: 1px dashed var(--border, #e0d6c8);
+    }
+    .sync-diff-item:first-of-type { border-top: none; }
+    .sync-diff-badge {
+      flex-shrink: 0; padding: 2px 8px; border-radius: 10px;
+      font-size: .76rem; font-weight: 600; white-space: nowrap;
+    }
+    .sync-diff-item.add .sync-diff-badge { background: #e3f3e8; color: #2f7d4a; }
+    .sync-diff-item.del .sync-diff-badge { background: #fce4e4; color: #c0392b; }
+    .sync-diff-item.mod .sync-diff-badge { background: #fdf3e7; color: #9a6b2f; }
+    .sync-doc-list { flex: 1; line-height: 1.6; word-break: break-all; }
+    .sync-doc-name {
+      display: inline-block; background: var(--card-bg, #fff);
+      border: 1px solid var(--border, #e0d6c8); border-radius: 4px;
+      padding: 1px 6px; margin: 2px 4px 2px 0; font-size: .76rem;
+    }
+    .sync-doc-more { color: var(--text-light, #8a7a6a); font-size: .76rem; margin-left: 4px; }
+    .sync-diff-empty { font-size: .82rem; color: var(--text-light, #8a7a6a); text-align: center; padding: 8px 0; }
+
+    .sync-btn-cancel { background: #fff; color: var(--text-light, #8a7a6a); border: 1.5px solid var(--border, #e0d6c8); }
+    .sync-btn-confirm { background: var(--accent, #8b5e3c); color: #fff; }
   `;
   document.head.appendChild(style);
 
@@ -154,6 +202,155 @@
       return;
     }
     setServerUrl(input);
+    await showSyncConfirm('download');
+  }
+  window.doDownload = doDownload;
+
+  async function doUpload() {
+    const input = document.getElementById('syncServerInput').value.trim();
+    const status = document.getElementById('syncStatus');
+    if (!input) {
+      status.textContent = '请先输入服务器地址';
+      status.className = 'sync-status error';
+      return;
+    }
+    setServerUrl(input);
+    await showSyncConfirm('upload');
+  }
+  window.doUpload = doUpload;
+
+  // ============= 同步确认界面 =============
+  let pendingSyncAction = null; // 'download' | 'upload'
+
+  function escSync(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
+  async function showSyncConfirm(direction) {
+    const status = document.getElementById('syncStatus');
+    status.textContent = '正在计算差异...';
+    status.className = 'sync-status';
+
+    let diff;
+    try {
+      diff = await getSyncDiff(direction);
+    } catch (e) {
+      status.textContent = '获取差异失败: ' + e.message;
+      status.className = 'sync-status error';
+      return;
+    }
+
+    pendingSyncAction = direction;
+    const isDownload = direction === 'download';
+    const targetLabel = isDownload ? '本地' : '电脑';
+    const title = isDownload ? '⬇ 从电脑下载' : '⬆ 上传到电脑';
+
+    // 数量对比：被覆盖端 "当前数量 → 将变更为的数量"
+    const dims = [
+      ['角色', 'characters'],
+      ['世界设定', 'worldBuildings'],
+      ['关系', 'relations'],
+      ['文档', 'documents'],
+    ];
+    const targetNums = isDownload ? diff.local : diff.server;   // 被覆盖端当前数量
+    const sourceNums = isDownload ? diff.server : diff.local;   // 将变成的数量
+    let diffRows = '';
+    for (const [label, key] of dims) {
+      const from = targetNums[key];
+      const to = sourceNums[key];
+      const changed = from !== to;
+      diffRows += `
+        <div class="sync-diff-row${changed ? ' changed' : ''}">
+          <span class="sync-diff-label">${label}</span>
+          <span class="sync-diff-num">${from}</span>
+          <span class="sync-diff-arrow">→</span>
+          <span class="sync-diff-num${changed ? ' highlight' : ''}">${to}</span>
+        </div>`;
+    }
+
+    // 文档变更明细
+    const docsAdded = diff.docs.added;
+    const docsDeleted = diff.docs.deleted;
+    const docsModified = diff.docs.modified;
+    const totalDocChanges = docsAdded.length + docsDeleted.length + docsModified.length;
+    let docChangesHtml = '';
+    if (totalDocChanges === 0) {
+      docChangesHtml = '<div class="sync-diff-empty">文档无变化</div>';
+    } else {
+      const formatList = (arr, max) => {
+        if (!arr.length) return '';
+        const shown = arr.slice(0, max).map(n => `<span class="sync-doc-name">${escSync(n)}</span>`).join('');
+        const more = arr.length > max ? `<span class="sync-doc-more">等共 ${arr.length} 个</span>` : '';
+        return shown + more;
+      };
+      const MAX = 5;
+      if (docsAdded.length) {
+        docChangesHtml += `<div class="sync-diff-item add"><span class="sync-diff-badge">➕ 新增 ${docsAdded.length}</span><div class="sync-doc-list">${formatList(docsAdded, MAX)}</div></div>`;
+      }
+      if (docsDeleted.length) {
+        docChangesHtml += `<div class="sync-diff-item del"><span class="sync-diff-badge">❌ 删除 ${docsDeleted.length}</span><div class="sync-doc-list">${formatList(docsDeleted, MAX)}</div></div>`;
+      }
+      if (docsModified.length) {
+        docChangesHtml += `<div class="sync-diff-item mod"><span class="sync-diff-badge">✏ 修改 ${docsModified.length}</span><div class="sync-doc-list">${formatList(docsModified, MAX)}</div></div>`;
+      }
+    }
+
+    const html = `
+      <div class="sync-modal">
+        <div class="sync-title">${title}</div>
+        <div class="sync-confirm-warn">⚠ 此操作将覆盖${targetLabel}上的所有数据，不可撤销。请确认以下变更：</div>
+        <div class="sync-diff-section">
+          <div class="sync-diff-section-title">${targetLabel}数据变化（当前 → 变更后）</div>
+          ${diffRows}
+        </div>
+        <div class="sync-diff-section">
+          <div class="sync-diff-section-title">文档变更（共 ${totalDocChanges} 项）</div>
+          ${docChangesHtml}
+        </div>
+        <div class="sync-actions">
+          <button class="sync-btn sync-btn-cancel" onclick="cancelSyncConfirm()">取消</button>
+          <button class="sync-btn sync-btn-confirm" onclick="executeSyncConfirm()">确认执行</button>
+        </div>
+      </div>
+    `;
+
+    let overlay = document.getElementById('syncConfirmOverlay');
+    if (!overlay) {
+      overlay = document.createElement('div');
+      overlay.className = 'sync-overlay';
+      overlay.id = 'syncConfirmOverlay';
+      overlay.addEventListener('click', function (e) {
+        if (e.target === this) cancelSyncConfirm();
+      });
+      document.body.appendChild(overlay);
+    }
+    overlay.innerHTML = html;
+    overlay.classList.add('active');
+
+    status.textContent = '';
+    status.className = 'sync-status';
+  }
+
+  function cancelSyncConfirm() {
+    const overlay = document.getElementById('syncConfirmOverlay');
+    if (overlay) overlay.classList.remove('active');
+    pendingSyncAction = null;
+  }
+  window.cancelSyncConfirm = cancelSyncConfirm;
+
+  async function executeSyncConfirm() {
+    const direction = pendingSyncAction;
+    cancelSyncConfirm();
+    if (direction === 'download') await doDownloadExecute();
+    else if (direction === 'upload') await doUploadExecute();
+  }
+  window.executeSyncConfirm = executeSyncConfirm;
+
+  // 实际执行下载（已通过确认界面）
+  async function doDownloadExecute() {
+    const status = document.getElementById('syncStatus');
     status.textContent = '正在下载...';
     status.className = 'sync-status';
     try {
@@ -169,18 +366,10 @@
       status.className = 'sync-status error';
     }
   }
-  window.doDownload = doDownload;
 
-  async function doUpload() {
-    const input = document.getElementById('syncServerInput').value.trim();
+  // 实际执行上传（已通过确认界面）
+  async function doUploadExecute() {
     const status = document.getElementById('syncStatus');
-    if (!input) {
-      status.textContent = '请先输入服务器地址';
-      status.className = 'sync-status error';
-      return;
-    }
-    setServerUrl(input);
-    if (!confirm('上传将覆盖电脑上的所有数据，确定继续？')) return;
     status.textContent = '正在上传...';
     status.className = 'sync-status';
     try {
@@ -193,7 +382,6 @@
       status.className = 'sync-status error';
     }
   }
-  window.doUpload = doUpload;
 
   // 初始化
   if (document.readyState === 'loading') {

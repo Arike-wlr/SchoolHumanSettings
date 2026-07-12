@@ -337,3 +337,78 @@ async function getLocalStats() {
   ]);
   return { characters: characters.length, worldBuildings: worldBuildings.length, relations: relations.length, documents: documents.length };
 }
+
+// ============= 计算同步差异（只读，不修改任何数据） =============
+// direction: 'download' (服务器→本地，覆盖本地) | 'upload' (本地→服务器，覆盖服务器)
+// 返回结构：
+//   {
+//     direction, local: {characters, worldBuildings, relations, documents},
+//     server: {...},
+//     docs: { added: [name...], deleted: [name...], modified: [name...] }
+//   }
+// added/deleted/modified 都从"目标端"视角描述：
+//   download → 本地将新增/删除/更新
+//   upload   → 服务器将新增/删除/更新
+async function getSyncDiff(direction) {
+  const url = getServerUrl();
+  if (!url) throw new Error('未配置服务器地址');
+
+  const [charRes, worldRes, relRes, docRes] = await Promise.all([
+    fetch(url + '/api/characters'),
+    fetch(url + '/api/world-buildings'),
+    fetch(url + '/api/relations'),
+    fetch(url + '/api/files'),
+  ]);
+  if (!charRes.ok || !worldRes.ok || !relRes.ok || !docRes.ok) {
+    throw new Error('获取服务器数据失败');
+  }
+  const serverCharacters = await charRes.json();
+  const serverWorld = await worldRes.json();
+  const serverRelations = await relRes.json();
+  const serverDocs = await docRes.json();
+
+  const [localCharacters, localWorld, localRelations, localDocs] = await Promise.all([
+    charDB.list(),
+    worldDB.list(),
+    relDB.list(),
+    docDB.list(),
+  ]);
+
+  // 文档差异：按 name + size 比较
+  const localMap = new Map(localDocs.map(d => [d.name, d]));
+  const serverMap = new Map(serverDocs.map(d => [d.name, d]));
+  const allNames = new Set([...localMap.keys(), ...serverMap.keys()]);
+  const added = [], deleted = [], modified = [];
+  for (const name of allNames) {
+    const ld = localMap.get(name);
+    const sd = serverMap.get(name);
+    if (direction === 'download') {
+      // 本地为目标：服务器有/本地无 → 本地新增；本地有/服务器无 → 本地删除
+      if (!ld && sd) added.push(name);
+      else if (ld && !sd) deleted.push(name);
+      else if (ld && sd && ld.size !== sd.size) modified.push(name);
+    } else {
+      // 服务器为目标：本地有/服务器无 → 服务器新增；服务器有/本地无 → 服务器删除
+      if (ld && !sd) added.push(name);
+      else if (!ld && sd) deleted.push(name);
+      else if (ld && sd && ld.size !== sd.size) modified.push(name);
+    }
+  }
+
+  return {
+    direction,
+    local: {
+      characters: localCharacters.length,
+      worldBuildings: localWorld.length,
+      relations: localRelations.length,
+      documents: localDocs.length,
+    },
+    server: {
+      characters: serverCharacters.length,
+      worldBuildings: serverWorld.length,
+      relations: serverRelations.length,
+      documents: serverDocs.length,
+    },
+    docs: { added, deleted, modified },
+  };
+}

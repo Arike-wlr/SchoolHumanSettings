@@ -82,9 +82,28 @@ public class MainActivity extends AppCompatActivity {
                 MainActivity.this.filePathCallback = filePathCallback;
                 Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
                 intent.addCategory(Intent.CATEGORY_OPENABLE);
-                intent.setType("image/*");
                 intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
-                startActivityForResult(Intent.createChooser(intent, "选择图片"), FILE_CHOOSER_REQUEST);
+                // 根据 HTML input 的 accept 属性动态设置 MIME 类型，默认允许所有文件
+                // 否则硬编码 image/* 会导致文档页只能上传图片
+                String[] acceptTypes = fileChooserParams.getAcceptTypes();
+                String primaryType = "*/*";
+                java.util.List<String> validTypes = new java.util.ArrayList<>();
+                if (acceptTypes != null) {
+                    for (String t : acceptTypes) {
+                        if (t != null && !t.isEmpty() && t.contains("/")) {
+                            validTypes.add(t);
+                        }
+                    }
+                }
+                if (!validTypes.isEmpty()) {
+                    primaryType = validTypes.get(0);
+                    if (validTypes.size() > 1) {
+                        intent.putExtra(Intent.EXTRA_MIME_TYPES,
+                                validTypes.toArray(new String[0]));
+                    }
+                }
+                intent.setType(primaryType);
+                startActivityForResult(Intent.createChooser(intent, "选择文件"), FILE_CHOOSER_REQUEST);
                 return true;
             }
         });

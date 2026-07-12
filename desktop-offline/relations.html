@@ -1048,6 +1048,25 @@ function drawEdge(fromX, fromY, toX, toY, type, isBidirectional, highlight = fal
   }
 }
 
+// 计算每条边标签的垂直偏移索引，避免同一对节点间多条边的标签重叠
+function computeLabelOffsets(edgeArr) {
+  const key = (f, t) => f < t ? f + '-' + t : t + '-' + f;
+  const groups = {};
+  edgeArr.forEach((e, i) => {
+    const k = key(e.from, e.to);
+    if (!groups[k]) groups[k] = [];
+    groups[k].push(i);
+  });
+  const offsets = new Array(edgeArr.length).fill(0);
+  Object.values(groups).forEach(indices => {
+    const n = indices.length;
+    if (n <= 1) return;
+    // 2条 → [-1, +1]；3条 → [-2, 0, +2]；以此类推（保证间隔足够）
+    indices.forEach((idx, k) => { offsets[idx] = (k - (n - 1) / 2) * 2; });
+  });
+  return offsets;
+}
+
 function drawGraph() {
   ctx.clearRect(0, 0, cw, ch);
 
@@ -1066,7 +1085,8 @@ function drawGraph() {
   drawFamilyClusters();
 
   // 画边
-  edges.forEach(edge => {
+  const labelOffsets = computeLabelOffsets(edges);
+  edges.forEach((edge, i) => {
     const from = nodes.find(n => n.id === edge.from);
     const to = nodes.find(n => n.id === edge.to);
     if (!from || !to) return;
@@ -1074,9 +1094,14 @@ function drawGraph() {
     const isBidirectional = ['CP', '参与组建', '朋友', '冤家', '亲属'].includes(edge.type);
     drawEdge(from.x, from.y, to.x, to.y, edge.type, isBidirectional);
 
-    // 标签
+    // 标签（沿垂直方向偏移，避免同一对节点间多条边标签重叠）
     const mx = (from.x + to.x) / 2;
     const my = (from.y + to.y) / 2;
+    const dx = to.x - from.x, dy = to.y - from.y;
+    const elen = Math.sqrt(dx * dx + dy * dy) || 1;
+    const px = -dy / elen, py = dx / elen;
+    const off = (labelOffsets[i] || 0) * 15;
+    const lx = mx + px * off, ly = my + py * off;
     const label = edge.type;
     let labelColor;
     if (edge.type === 'CP') labelColor = '#c44b7a';
@@ -1090,14 +1115,14 @@ function drawGraph() {
     ctx.font = '12px "PingFang SC","Microsoft YaHei",sans-serif';
     const tw = ctx.measureText(label).width + 8;
     ctx.fillStyle = '#fff';
-    ctx.fillRect(mx - tw/2, my - 9, tw, 18);
+    ctx.fillRect(lx - tw/2, ly - 9, tw, 18);
     ctx.strokeStyle = labelColor + '55';
     ctx.lineWidth = 1;
-    ctx.strokeRect(mx - tw/2, my - 9, tw, 18);
+    ctx.strokeRect(lx - tw/2, ly - 9, tw, 18);
     ctx.fillStyle = labelColor;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(label, mx, my);
+    ctx.fillText(label, lx, ly);
   });
 
   // 节点头尺寸排序（小的先画）
@@ -1474,7 +1499,8 @@ function drawGraphWithHighlight() {
 
   drawFamilyClusters();
 
-  edges.forEach(edge => {
+  const labelOffsets = computeLabelOffsets(edges);
+  edges.forEach((edge, i) => {
     const from = nodes.find(n => n.id === edge.from);
     const to = nodes.find(n => n.id === edge.to);
     if (!from || !to) return;
@@ -1484,6 +1510,11 @@ function drawGraphWithHighlight() {
     drawEdge(from.x, from.y, to.x, to.y, edge.type, isBidirectional, hl);
 
     const mx = (from.x + to.x) / 2, my = (from.y + to.y) / 2;
+    const dx = to.x - from.x, dy = to.y - from.y;
+    const elen = Math.sqrt(dx * dx + dy * dy) || 1;
+    const px = -dy / elen, py = dx / elen;
+    const off = (labelOffsets[i] || 0) * 15;
+    const lx = mx + px * off, ly = my + py * off;
     const label = edge.type;
     let labelColor;
     if (edge.type === 'CP') labelColor = '#c44b7a';
@@ -1496,13 +1527,13 @@ function drawGraphWithHighlight() {
     else labelColor = '#6b4c8a';
     const tw = ctx.measureText(label).width + 8;
     ctx.fillStyle = hl ? '#f0e8f8' : '#fff';
-    ctx.fillRect(mx - tw/2, my - 9, tw, 18);
+    ctx.fillRect(lx - tw/2, ly - 9, tw, 18);
     ctx.strokeStyle = hl ? labelColor + '99' : labelColor + '55';
     ctx.lineWidth = 1;
-    ctx.strokeRect(mx - tw/2, my - 9, tw, 18);
+    ctx.strokeRect(lx - tw/2, ly - 9, tw, 18);
     ctx.fillStyle = labelColor;
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillText(label, mx, my);
+    ctx.fillText(label, lx, ly);
   });
 
   nodes.forEach(node => {

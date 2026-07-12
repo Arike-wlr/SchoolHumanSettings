@@ -154,7 +154,7 @@ if (location.protocol === 'file:') {
 <div class="graph-section">
   <div class="graph-header">
     <span class="graph-title">关系图</span>
-    <span class="graph-hint">拖动节点 · 双指缩放</span>
+    <span class="graph-hint">双击节点查看 · 拖动 · 双指缩放</span>
   </div>
   <div class="graph-canvas-wrap" id="canvasWrap">
     <canvas id="graphCanvas"></canvas>
@@ -257,6 +257,21 @@ if (location.protocol === 'file:') {
   </div>
 </div>
 
+<!-- 角色信息 Modal（双击节点查看） -->
+<div class="modal-overlay" id="infoOverlay">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title" id="infoName"></span>
+      <button class="modal-close" onclick="closeInfoModal()">✕</button>
+    </div>
+    <div class="modal-body" id="infoBody" style="padding-bottom:40px;"></div>
+    <div class="modal-footer">
+      <button class="btn-modal cancel" onclick="closeInfoModal()">关闭</button>
+      <button class="btn-modal primary" onclick="startRelationFromInfo()">＋ 添加关系</button>
+    </div>
+  </div>
+</div>
+
 <nav class="bottom-nav">
   <a href="/m" class="nav-item"><span class="nav-icon">📖</span><span class="nav-text">角色</span></a>
   <a href="/m/worldview" class="nav-item"><span class="nav-icon">🌍</span><span class="nav-text">世界观</span></a>
@@ -273,6 +288,8 @@ const API_CHAR = '/api/characters';
 let allRelations = [];
 let allCharacters = [];
 let deleteTargetId = null;
+let selectedFromCharId = null;
+let infoCharId = null;
 
 function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
 
@@ -449,6 +466,11 @@ function openCreateModal() {
   document.getElementById('submitBtn').textContent = '确认添加';
   document.getElementById('editId').value = '';
   document.getElementById('relForm').reset();
+  // 预设角色A（来自"添加与此角色的关系"）
+  if (selectedFromCharId) {
+    document.getElementById('fromChar').value = selectedFromCharId;
+    selectedFromCharId = null;
+  }
   document.getElementById('modalOverlay').classList.add('active');
 }
 
@@ -513,6 +535,63 @@ async function confirmDelete() {
 }
 
 function closeModal() { document.getElementById('modalOverlay').classList.remove('active'); }
+
+// ============================================================
+// 角色信息查看（双击节点触发）
+// ============================================================
+function infoRow(label, value) {
+  if (!value) return '';
+  return `<div style="display:flex;padding:7px 0;border-bottom:1px solid var(--border);gap:8px;"><span style="flex:0 0 84px;color:var(--text-light);font-size:.82rem;">${esc(label)}</span><span style="flex:1;font-size:.88rem;white-space:pre-wrap;line-height:1.5;word-break:break-word;">${value}</span></div>`;
+}
+
+async function showCharInfo(charId) {
+  infoCharId = charId;
+  try {
+    const res = await fetch(`${API_CHAR}/${charId}`);
+    const c = await res.json();
+    document.getElementById('infoName').textContent = c.name;
+    let body = '<div style="padding:4px 0;">';
+    body += infoRow('代表高校', esc(c.university));
+    body += infoRow('地区', esc(c.region));
+    body += infoRow('诞生地', esc(c.birthplace));
+    body += infoRow('性别', esc(c.gender));
+    body += infoRow('身高', esc(c.height));
+    body += infoRow('生日', esc(c.birthday));
+    body += infoRow('诞生时间', esc(c.birth_time));
+    body += infoRow('身份存在时间', esc(c.identity_period));
+    body += infoRow('存在状态', esc(c.status));
+    body += infoRow('取名依据', esc(c.naming_rationale));
+    body += infoRow('外貌', esc(c.appearance));
+    if (c.family) {
+      const fams = splitFamilies(c.family);
+      const famBadges = fams.map(f => {
+        const fc = gFamilyColorMap[f] || '#8b5e3c';
+        return `<span style="display:inline-flex;align-items:center;gap:4px;margin-right:8px;"><span style="display:inline-block;background:${fc};width:10px;height:10px;border-radius:50%;"></span>${esc(f)}</span>`;
+      }).join('');
+      body += infoRow('家族', famBadges);
+    }
+    if (c.setting) body += infoRow('设定', esc(c.setting));
+    body += '</div>';
+    document.getElementById('infoBody').innerHTML = body || '<p style="color:var(--text-light);text-align:center;">暂无详细信息</p>';
+    document.getElementById('infoOverlay').classList.add('active');
+  } catch(e) {
+    showToast('获取角色信息失败', 'error');
+  }
+}
+
+function startRelationFromInfo() {
+  if (infoCharId) {
+    selectedFromCharId = infoCharId;
+    closeInfoModal();
+    openCreateModal();
+  }
+}
+
+function closeInfoModal() {
+  document.getElementById('infoOverlay').classList.remove('active');
+  infoCharId = null;
+}
+document.getElementById('infoOverlay').addEventListener('click', function(e) { if (e.target === this) closeInfoModal(); });
 document.getElementById('deleteOverlay').addEventListener('click', function(e) { if (e.target === this) closeDeleteModal(); });
 
 function showToast(msg, type) {
@@ -891,6 +970,25 @@ function gConvexHull(points) {
   return lower.concat(upper);
 }
 
+// 计算每条边标签的垂直偏移索引，避免同一对节点间多条边的标签重叠
+function computeLabelOffsets(edgeArr) {
+  const key = (f, t) => f < t ? f + '-' + t : t + '-' + f;
+  const groups = {};
+  edgeArr.forEach((e, i) => {
+    const k = key(e.from, e.to);
+    if (!groups[k]) groups[k] = [];
+    groups[k].push(i);
+  });
+  const offsets = new Array(edgeArr.length).fill(0);
+  Object.values(groups).forEach(indices => {
+    const n = indices.length;
+    if (n <= 1) return;
+    // 2条 → [-1, +1]；3条 → [-2, 0, +2]；以此类推（保证间隔足够）
+    indices.forEach((idx, k) => { offsets[idx] = (k - (n - 1) / 2) * 2; });
+  });
+  return offsets;
+}
+
 function graphDraw() {
   if (!gCtx) return;
   gCtx.clearRect(0, 0, gW, gH);
@@ -903,7 +1001,8 @@ function graphDraw() {
   drawFamilyClusters();
 
   // 2. 画边（带箭头，区分单向/双向）
-  gEdges.forEach(e => {
+  const labelOffsets = computeLabelOffsets(gEdges);
+  gEdges.forEach((e, i) => {
     const a = gNodes.find(n => n.id === e.from);
     const b = gNodes.find(n => n.id === e.to);
     if (!a || !b) return;
@@ -951,19 +1050,22 @@ function graphDraw() {
       gCtx.fill();
     }
 
-    // 边中点显示类型
+    // 边中点显示类型（沿垂直方向偏移，避免同一对节点间多条边标签重叠）
     if (e.type) {
       const mx = (a.x + b.x) / 2;
       const my = (a.y + b.y) / 2;
+      const px = -uy, py = ux;  // 垂直单位向量
+      const off = (labelOffsets[i] || 0) * 12;
+      const lx = mx + px * off, ly = my + py * off;
       gCtx.globalAlpha = 0.9;
       gCtx.font = '10px "PingFang SC","Microsoft YaHei",sans-serif';
       const tw = gCtx.measureText(e.type).width;
       gCtx.fillStyle = '#fffef9';
-      gCtx.fillRect(mx - tw / 2 - 3, my - 7, tw + 6, 14);
+      gCtx.fillRect(lx - tw / 2 - 3, ly - 7, tw + 6, 14);
       gCtx.fillStyle = color;
       gCtx.textAlign = 'center';
       gCtx.textBaseline = 'middle';
-      gCtx.fillText(e.type, mx, my);
+      gCtx.fillText(e.type, lx, ly);
     }
     gCtx.globalAlpha = 1;
   });
@@ -1105,12 +1207,21 @@ function nodeAt(x, y) {
 }
 
 // ====== 触摸事件 ======
+// 双击检测状态
+let gLastTapTime = 0;
+let gLastTapNodeId = null;
+let gTouchStartX = 0, gTouchStartY = 0;
+let gTouchMoved = false;
+const G_DBL_TAP_DELAY = 300;
+const G_DBL_TAP_MOVE_TOL = 10;
+
 function onTouchStart(e) {
   e.preventDefault();
   if (e.touches.length === 1) {
     const rect = gCanvas.getBoundingClientRect();
     const x = e.touches[0].clientX - rect.left;
     const y = e.touches[0].clientY - rect.top;
+    gTouchStartX = x; gTouchStartY = y; gTouchMoved = false;
     const p = screenToCanvas(x, y);
     const node = nodeAt(p.x, p.y);
     if (node) {
@@ -1134,6 +1245,9 @@ function onTouchMove(e) {
     const rect = gCanvas.getBoundingClientRect();
     const x = e.touches[0].clientX - rect.left;
     const y = e.touches[0].clientY - rect.top;
+    // 判断是否超过移动阈值（用于区分 tap 与拖动）
+    const dx = x - gTouchStartX, dy = y - gTouchStartY;
+    if (dx * dx + dy * dy > G_DBL_TAP_MOVE_TOL * G_DBL_TAP_MOVE_TOL) gTouchMoved = true;
     if (gDragNode) {
       const p = screenToCanvas(x, y);
       gDragNode.x = p.x; gDragNode.y = p.y;
@@ -1146,6 +1260,7 @@ function onTouchMove(e) {
       graphDraw();
     }
   } else if (e.touches.length === 2) {
+    gTouchMoved = true; // 双指操作不算 tap
     const dx = e.touches[0].clientX - e.touches[1].clientX;
     const dy = e.touches[0].clientY - e.touches[1].clientY;
     const dist = Math.sqrt(dx * dx + dy * dy);
@@ -1160,6 +1275,24 @@ function onTouchMove(e) {
 
 function onTouchEnd(e) {
   if (e.touches.length === 0) {
+    // 双击检测：仅在未拖动且未平移的情况下判定 tap
+    if (!gTouchMoved) {
+      const p = screenToCanvas(gTouchStartX, gTouchStartY);
+      const node = nodeAt(p.x, p.y);
+      if (node) {
+        const now = Date.now();
+        if (gLastTapNodeId === node.id && (now - gLastTapTime) < G_DBL_TAP_DELAY) {
+          // 触发双击查看角色
+          showCharInfo(node.id);
+          gLastTapTime = 0; gLastTapNodeId = null;
+        } else {
+          gLastTapTime = now;
+          gLastTapNodeId = node.id;
+        }
+      } else {
+        gLastTapTime = 0; gLastTapNodeId = null;
+      }
+    }
     if (gDragNode) { gDragNode.fixed = false; gDragNode = null; }
     gPanning = false;
     gLastTouchDist = 0;
