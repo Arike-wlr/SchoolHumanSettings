@@ -247,15 +247,37 @@
     const targetLabel = isDownload ? '本地' : '电脑';
     const title = isDownload ? '⬇ 从电脑下载' : '⬆ 上传到电脑';
 
-    // 数量对比：被覆盖端 "当前数量 → 将变更为的数量"
+    // 通用格式化函数：把变更标签列表渲染为 HTML
+    const MAX = 5;
+    const formatList = (arr) => {
+      if (!arr.length) return '';
+      const shown = arr.slice(0, MAX).map(n => `<span class="sync-doc-name">${escSync(n)}</span>`).join('');
+      const more = arr.length > MAX ? `<span class="sync-doc-more">等共 ${arr.length} 个</span>` : '';
+      return shown + more;
+    };
+    // 渲染某一类数据的变更明细
+    const formatChanges = (changes) => {
+      const added = changes.added || [];
+      const deleted = changes.deleted || [];
+      const modified = changes.modified || [];
+      const total = added.length + deleted.length + modified.length;
+      if (total === 0) return '<div class="sync-diff-empty">无变化</div>';
+      let html = '';
+      if (added.length) html += `<div class="sync-diff-item add"><span class="sync-diff-badge">➕ 新增 ${added.length}</span><div class="sync-doc-list">${formatList(added)}</div></div>`;
+      if (deleted.length) html += `<div class="sync-diff-item del"><span class="sync-diff-badge">❌ 删除 ${deleted.length}</span><div class="sync-doc-list">${formatList(deleted)}</div></div>`;
+      if (modified.length) html += `<div class="sync-diff-item mod"><span class="sync-diff-badge">✏ 修改 ${modified.length}</span><div class="sync-doc-list">${formatList(modified)}</div></div>`;
+      return html;
+    };
+
+    // 数量对比
     const dims = [
       ['角色', 'characters'],
       ['世界设定', 'worldBuildings'],
       ['关系', 'relations'],
       ['文档', 'documents'],
     ];
-    const targetNums = isDownload ? diff.local : diff.server;   // 被覆盖端当前数量
-    const sourceNums = isDownload ? diff.server : diff.local;   // 将变成的数量
+    const targetNums = isDownload ? diff.local : diff.server;
+    const sourceNums = isDownload ? diff.server : diff.local;
     let diffRows = '';
     for (const [label, key] of dims) {
       const from = targetNums[key];
@@ -270,48 +292,40 @@
         </div>`;
     }
 
-    // 文档变更明细
-    const docsAdded = diff.docs.added;
-    const docsDeleted = diff.docs.deleted;
-    const docsModified = diff.docs.modified;
-    const totalDocChanges = docsAdded.length + docsDeleted.length + docsModified.length;
-    let docChangesHtml = '';
-    if (totalDocChanges === 0) {
-      docChangesHtml = '<div class="sync-diff-empty">文档无变化</div>';
-    } else {
-      const formatList = (arr, max) => {
-        if (!arr.length) return '';
-        const shown = arr.slice(0, max).map(n => `<span class="sync-doc-name">${escSync(n)}</span>`).join('');
-        const more = arr.length > max ? `<span class="sync-doc-more">等共 ${arr.length} 个</span>` : '';
-        return shown + more;
-      };
-      const MAX = 5;
-      if (docsAdded.length) {
-        docChangesHtml += `<div class="sync-diff-item add"><span class="sync-diff-badge">➕ 新增 ${docsAdded.length}</span><div class="sync-doc-list">${formatList(docsAdded, MAX)}</div></div>`;
-      }
-      if (docsDeleted.length) {
-        docChangesHtml += `<div class="sync-diff-item del"><span class="sync-diff-badge">❌ 删除 ${docsDeleted.length}</span><div class="sync-doc-list">${formatList(docsDeleted, MAX)}</div></div>`;
-      }
-      if (docsModified.length) {
-        docChangesHtml += `<div class="sync-diff-item mod"><span class="sync-diff-badge">✏ 修改 ${docsModified.length}</span><div class="sync-doc-list">${formatList(docsModified, MAX)}</div></div>`;
-      }
-    }
+    // 各类型变更明细
+    const charTotal = (diff.chars.added.length + diff.chars.deleted.length + diff.chars.modified.length);
+    const worldTotal = (diff.worlds.added.length + diff.worlds.deleted.length + diff.worlds.modified.length);
+    const relTotal = (diff.relations.added.length + diff.relations.deleted.length + diff.relations.modified.length);
+    const docTotal = (diff.docs.added.length + diff.docs.deleted.length + diff.docs.modified.length);
+    const allTotal = charTotal + worldTotal + relTotal + docTotal;
 
     const html = `
       <div class="sync-modal">
         <div class="sync-title">${title}</div>
-        <div class="sync-confirm-warn">⚠ 此操作将覆盖${targetLabel}上的所有数据，不可撤销。请确认以下变更：</div>
+        <div class="sync-confirm-warn">ℹ 增量同步：只更新以下变化的部分，不会覆盖未变更的数据。${allTotal === 0 ? '当前无变更，无需同步。' : `共 ${allTotal} 项变更。`}</div>
         <div class="sync-diff-section">
-          <div class="sync-diff-section-title">${targetLabel}数据变化（当前 → 变更后）</div>
+          <div class="sync-diff-section-title">${targetLabel}数据数量（当前 → 变更后）</div>
           ${diffRows}
         </div>
         <div class="sync-diff-section">
-          <div class="sync-diff-section-title">文档变更（共 ${totalDocChanges} 项）</div>
-          ${docChangesHtml}
+          <div class="sync-diff-section-title">角色变更（共 ${charTotal} 项）</div>
+          ${formatChanges(diff.chars)}
+        </div>
+        <div class="sync-diff-section">
+          <div class="sync-diff-section-title">世界设定变更（共 ${worldTotal} 项）</div>
+          ${formatChanges(diff.worlds)}
+        </div>
+        <div class="sync-diff-section">
+          <div class="sync-diff-section-title">关系变更（共 ${relTotal} 项）</div>
+          ${formatChanges(diff.relations)}
+        </div>
+        <div class="sync-diff-section">
+          <div class="sync-diff-section-title">文档变更（共 ${docTotal} 项）</div>
+          ${formatChanges(diff.docs)}
         </div>
         <div class="sync-actions">
           <button class="sync-btn sync-btn-cancel" onclick="cancelSyncConfirm()">取消</button>
-          <button class="sync-btn sync-btn-confirm" onclick="executeSyncConfirm()">确认执行</button>
+          <button class="sync-btn sync-btn-confirm" onclick="executeSyncConfirm()"${allTotal === 0 ? ' disabled style="opacity:.5"' : ''}>确认执行</button>
         </div>
       </div>
     `;
@@ -355,8 +369,10 @@
     status.className = 'sync-status';
     try {
       const result = await downloadFromServer(msg => { status.textContent = msg; });
-      const docSync = result.documentsSynced != null ? `（同步 ${result.documentsSynced} 个）` : '';
-      status.textContent = `下载完成：${result.characters} 角色、${result.worldBuildings} 设定、${result.relations} 关系、${result.documents} 文档${docSync}`;
+      const chg = result.charChanges + result.worldChanges + result.relChanges;
+      const chgMsg = chg > 0 ? `，更新 ${chg} 项变更（角色${result.charChanges}/设定${result.worldChanges}/关系${result.relChanges}）` : '，数据已最新';
+      const docSync = result.documentsSynced != null ? `，文档同步 ${result.documentsSynced} 个` : '';
+      status.textContent = `下载完成：${result.characters} 角色、${result.worldBuildings} 设定、${result.relations} 关系、${result.documents} 文档${chgMsg}${docSync}`;
       status.className = 'sync-status success';
       loadLocalStats();
       // 刷新当前页面数据
@@ -374,8 +390,10 @@
     status.className = 'sync-status';
     try {
       const result = await uploadToServer(msg => { status.textContent = msg; });
-      const docSync = result.documentsSynced != null ? `（同步 ${result.documentsSynced} 个）` : '';
-      status.textContent = `上传完成：${result.characters} 角色、${result.worldBuildings} 设定、${result.relations} 关系、${result.documents} 文档${docSync}`;
+      const chg = result.charChanges + result.worldChanges + result.relChanges;
+      const chgMsg = chg > 0 ? `，更新 ${chg} 项变更（角色${result.charChanges}/设定${result.worldChanges}/关系${result.relChanges}）` : '，数据已最新';
+      const docSync = result.documentsSynced != null ? `，文档同步 ${result.documentsSynced} 个` : '';
+      status.textContent = `上传完成：${result.characters} 角色、${result.worldBuildings} 设定、${result.relations} 关系、${result.documents} 文档${chgMsg}${docSync}`;
       status.className = 'sync-status success';
     } catch (e) {
       status.textContent = '上传失败: ' + e.message;

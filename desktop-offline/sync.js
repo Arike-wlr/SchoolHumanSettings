@@ -1,6 +1,6 @@
 // ============================================================
 // sync.js - 数据同步逻辑
-// 支持从服务器下载（覆盖本地）和上传到服务器（覆盖服务器）
+// 增量同步：只更新变化的部分，不全量覆盖
 // ============================================================
 
 // 版本升级时自动清空图片缓存，避免复用已失效的 serverUrl
@@ -146,7 +146,7 @@ async function convertDataUrlImagesToServerUrl(characters, serverUrl, onProgress
       c.image_url = cache.get(c.image_url);
     }
   }
-  // 有图片上传失败时抛错，避免把超大 base64 塞进 replace-all 导致更难诊断的失败
+  // 有图片上传失败时抛错，避免后续同步步骤出现更难诊断的失败
   if (failed.length > 0) {
     throw new Error(`${failed.length} 张图片上传失败，请检查网络后重试`);
   }
@@ -162,58 +162,190 @@ async function pingServer(url) {
   }
 }
 
-// ============= 从服务器下载（覆盖本地） =============
-// 步骤：拉取服务器三类数据全量替换 → 文档按 name+size 增量同步
+// ============= 增量比较辅助 =============
+
+/**
+ * 比较两个数组，计算 source → target 方向的增量变更
+ * @param sourceArr 源端数据（同步的来源）
+ * @param targetArr 目标端数据（将被更新的一端）
+ * @param matchFn (sourceRec, targetRec) => boolean 判断两条记录是否指向同一实体
+ * @param isSameFn (sourceRec, targetRec) => boolean 判断内容是否相同（相同则跳过）
+ * @param labelFn (rec) => string 返回用于显示的标签
+ * @returns {{added: [], deleted: [], modified: []}}
+ *   added: 源端有、目标端无 → 目标端需新增
+ *   deleted: 目标端有、源端无 → 目标端需删除
+ *   modified: 匹配但内容不同 → 目标端需更新
+ */
+function computeRecordDiff(sourceArr, targetArr, matchFn, isSameFn, labelFn) {
+  const added = [], deleted = [], modified = [];
+  const matchedTarget = new Set();
+  for (const s of sourceArr) {
+    let found = -1;
+    for (let i = 0; i < targetArr.length; i++) {
+      if (matchedTarget.has(i)) continue;
+      if (matchFn(s, targetArr[i])) { found = i; break; }
+    }
+    if (found >= 0) {
+      matchedTarget.add(found);
+      if (!isSameFn(s, targetArr[found])) {
+        modified.push({ source: s, target: targetArr[found], label: labelFn(s) });
+      }
+    } else {
+      added.push({ source: s, label: labelFn(s) });
+    }
+  }
+  for (let i = 0; i < targetArr.length; i++) {
+    if (!matchedTarget.has(i)) {
+      deleted.push({ target: targetArr[i], label: labelFn(targetArr[i]) });
+    }
+  }
+  return { added, deleted, modified };
+}
+
+// 角色内容比较（排除 id/时间戳/sort_order/images格式差异）
+function charContentEqual(a, b) {
+  const fields = ['alias', 'university', 'region', 'naming_rationale', 'height',
+                   'gender', 'birthday', 'appearance', 'identity_period', 'birth_time',
+                   'setting', 'family', 'birthplace', 'status'];
+  for (const f of fields) {
+    if ((a[f] || '') !== (b[f] || '')) return false;
+  }
+  // 图片只比较数量（data URL vs server URL 无法直接比较内容）
+  const aImgs = Array.isArray(a.images) ? a.images : (a.image_url ? [a.image_url] : []);
+  const bImgs = Array.isArray(b.images) ? b.images : (b.image_url ? [b.image_url] : []);
+  if (aImgs.length !== bImgs.length) return false;
+  return true;
+}
+
+// 设定内容比较
+function worldContentEqual(a, b) {
+  return (a.category || '') === (b.category || '')
+      && (a.content || '') === (b.content || '')
+      && (a.main_category || '') === (b.main_category || '');
+}
+
+// 关系内容比较（只比较 description，from/to/type 是匹配键）
+function relContentEqual(a, b) {
+  return (a.description || '') === (b.description || '');
+}
+
+// 给本地关系补充 from_name / to_name（本地 DB 不存这俩字段）
+function enrichRelationsWithNames(relations, characters) {
+  const charMap = {};
+  characters.forEach(c => { charMap[c.id] = c.name; });
+  return relations.map(r => ({
+    ...r,
+    from_name: r.from_name || charMap[r.from_char_id] || '',
+    to_name: r.to_name || charMap[r.to_char_id] || '',
+  }));
+}
+
+// ============= 从服务器增量下载（只更新变化的部分） =============
 async function downloadFromServer(onProgress) {
   const url = getServerUrl();
   if (!url) throw new Error('未配置服务器地址');
 
-  onProgress && onProgress('正在拉取角色数据...');
-  const charRes = await fetch(url + '/api/characters');
+  // 1. 并行拉取服务器全量数据
+  onProgress && onProgress('正在拉取服务器数据...');
+  const [charRes, worldRes, relRes, docListRes] = await Promise.all([
+    fetch(url + '/api/characters'),
+    fetch(url + '/api/world-buildings'),
+    fetch(url + '/api/relations'),
+    fetch(url + '/api/files'),
+  ]);
   if (!charRes.ok) throw new Error('获取角色失败');
-  const characters = await charRes.json();
+  if (!worldRes.ok) throw new Error('获取世界设定失败');
+  if (!relRes.ok) throw new Error('获取关系网失败');
+  if (!docListRes.ok) throw new Error('获取文档列表失败');
+  const serverChars = await charRes.json();
+  const serverWorlds = await worldRes.json();
+  const serverRels = await relRes.json();
+  const serverDocs = await docListRes.json();
 
-  // 下载图片转 base64（离线可显示）
-  if (characters.some(c => (c.images && c.images.length) || c.image_url)) {
-    await convertServerImagesToDataUrl(characters, url, onProgress);
+  // 2. 转换服务器图片 URL → data URL（离线可显示）
+  if (serverChars.some(c => (c.images && c.images.length) || c.image_url)) {
+    await convertServerImagesToDataUrl(serverChars, url, onProgress);
   }
 
-  onProgress && onProgress('正在拉取世界设定数据...');
-  const worldRes = await fetch(url + '/api/world-buildings');
-  if (!worldRes.ok) throw new Error('获取世界设定失败');
-  const worldBuildings = await worldRes.json();
+  // 3. 获取本地数据
+  const [localChars, localWorlds, localRels, localDocs] = await Promise.all([
+    charDB.list(), worldDB.list(), relDB.list(), docDB.list(),
+  ]);
+  const localRelsNamed = enrichRelationsWithNames(localRels, localChars);
 
-  onProgress && onProgress('正在拉取关系网数据...');
-  const relRes = await fetch(url + '/api/relations');
-  if (!relRes.ok) throw new Error('获取关系网失败');
-  const relations = await relRes.json();
+  // 4. 计算增量差异
+  const charDiff = computeRecordDiff(serverChars, localChars,
+    (s, t) => s.name === t.name, charContentEqual, r => r.name);
+  const worldDiff = computeRecordDiff(serverWorlds, localWorlds,
+    (s, t) => s.title === t.title, worldContentEqual, r => r.title);
+  const relDiff = computeRecordDiff(serverRels, localRelsNamed,
+    (s, t) => s.from_name === t.from_name && s.to_name === t.to_name && s.relation_type === t.relation_type,
+    relContentEqual, r => `${r.from_name}→${r.to_name}(${r.relation_type})`);
 
-  onProgress && onProgress('正在拉取文档列表...');
-  const docListRes = await fetch(url + '/api/files');
-  if (!docListRes.ok) throw new Error('获取文档列表失败');
-  const serverDocs = await docListRes.json();
-  const localDocs = await docDB.list();
-  const localMap = new Map(localDocs.map(d => [d.name, d]));
+  const charChanges = charDiff.added.length + charDiff.deleted.length + charDiff.modified.length;
+  const worldChanges = worldDiff.added.length + worldDiff.deleted.length + worldDiff.modified.length;
+  const relChanges = relDiff.added.length + relDiff.deleted.length + relDiff.modified.length;
 
-  onProgress && onProgress('正在写入本地数据库...');
-  await charDB.clear();
-  await charDB.bulkSet(characters);
-  await worldDB.clear();
-  await worldDB.bulkSet(worldBuildings);
-  await relDB.clear();
-  await relDB.bulkSet(relations);
-
-  // 文档增量同步：本地不存在 或 size 不同 才下载；本地多余文档则删除
-  const serverNames = new Set(serverDocs.map(d => d.name));
-  let deletedCount = 0;
-  for (const ld of localDocs) {
-    if (!serverNames.has(ld.name)) {
-      await docDB.delete(ld.name);
-      deletedCount++;
+  // 5. 增量同步角色
+  if (charChanges > 0) {
+    onProgress && onProgress(`正在同步角色 (${charChanges} 项变更)...`);
+    for (const item of charDiff.deleted) await charDB.delete(item.target.id);
+    for (const item of charDiff.modified) {
+      await charDB.update({ ...item.source, id: item.target.id, sort_order: item.target.sort_order });
+    }
+    for (const item of charDiff.added) {
+      const { id, ...rest } = item.source;
+      await charDB.create(rest);
     }
   }
+
+  // 6. 重新获取本地角色，建立 name → localId 映射（关系同步需要）
+  const updatedLocalChars = await charDB.list();
+  const nameToLocalId = new Map(updatedLocalChars.map(c => [c.name, c.id]));
+
+  // 7. 增量同步世界设定
+  if (worldChanges > 0) {
+    onProgress && onProgress(`正在同步世界设定 (${worldChanges} 项变更)...`);
+    for (const item of worldDiff.deleted) await worldDB.delete(item.target.id);
+    for (const item of worldDiff.modified) {
+      await worldDB.update({ ...item.source, id: item.target.id, sort_order: item.target.sort_order });
+    }
+    for (const item of worldDiff.added) {
+      const { id, ...rest } = item.source;
+      await worldDB.create(rest);
+    }
+  }
+
+  // 8. 增量同步关系（转换 char_id：server id → local id）
+  if (relChanges > 0) {
+    onProgress && onProgress(`正在同步关系 (${relChanges} 项变更)...`);
+    for (const item of relDiff.deleted) await relDB.delete(item.target.id);
+    for (const item of relDiff.modified) {
+      const localFromId = nameToLocalId.get(item.source.from_name);
+      const localToId = nameToLocalId.get(item.source.to_name);
+      if (!localFromId || !localToId) continue;
+      const { id, from_name, to_name, ...rest } = item.source;
+      await relDB.update({ ...rest, id: item.target.id, from_char_id: localFromId, to_char_id: localToId, sort_order: item.target.sort_order });
+    }
+    for (const item of relDiff.added) {
+      const localFromId = nameToLocalId.get(item.source.from_name);
+      const localToId = nameToLocalId.get(item.source.to_name);
+      if (!localFromId || !localToId) continue;
+      const { id, from_name, to_name, ...rest } = item.source;
+      await relDB.create({ ...rest, from_char_id: localFromId, to_char_id: localToId });
+    }
+  }
+
+  // 9. 文档增量同步（name + size 比较）
+  onProgress && onProgress('正在同步文档...');
+  const localDocMap = new Map(localDocs.map(d => [d.name, d]));
+  const serverDocNames = new Set(serverDocs.map(d => d.name));
+  let docDeleted = 0;
+  for (const ld of localDocs) {
+    if (!serverDocNames.has(ld.name)) { await docDB.delete(ld.name); docDeleted++; }
+  }
   const toDownload = serverDocs.filter(sd => {
-    const ld = localMap.get(sd.name);
+    const ld = localDocMap.get(sd.name);
     return !ld || ld.size !== sd.size;
   });
   for (let i = 0; i < toDownload.length; i++) {
@@ -227,62 +359,177 @@ async function downloadFromServer(onProgress) {
 
   onProgress && onProgress('下载完成');
   return {
-    characters: characters.length,
-    worldBuildings: worldBuildings.length,
-    relations: relations.length,
+    characters: updatedLocalChars.length,
+    worldBuildings: (await worldDB.list()).length,
+    relations: (await relDB.list()).length,
     documents: serverDocs.length,
-    documentsSynced: toDownload.length + deletedCount,
+    documentsSynced: toDownload.length + docDeleted,
+    charChanges, worldChanges, relChanges,
   };
 }
 
-// ============= 上传到服务器（覆盖服务器） =============
-// 步骤：读取本地全部数据 → 调用服务器批量替换接口 → 上传文档
+// ============= 增量上传到服务器（只更新变化的部分） =============
 async function uploadToServer(onProgress) {
   const url = getServerUrl();
   if (!url) throw new Error('未配置服务器地址');
 
+  // 1. 读取本地数据
   onProgress && onProgress('正在读取本地数据...');
-  const characters = await charDB.list();
-  const worldBuildings = await worldDB.list();
-  const relations = await relDB.list();
-  const localDocs = await docDB.list();
+  const [localChars, localWorlds, localRels, localDocs] = await Promise.all([
+    charDB.list(), worldDB.list(), relDB.list(), docDB.list(),
+  ]);
+  const localRelsNamed = enrichRelationsWithNames(localRels, localChars);
 
-  // 上传 base64 图片到服务器换为 URL
-  if (characters.some(c => (c.images && c.images.some(u => u && u.startsWith('data:'))) || (c.image_url && c.image_url.startsWith('data:')))) {
-    await convertDataUrlImagesToServerUrl(characters, url, onProgress);
+  // 2. 拉取服务器数据（用于比较）
+  onProgress && onProgress('正在拉取服务器数据...');
+  const [charRes, worldRes, relRes, docListRes] = await Promise.all([
+    fetch(url + '/api/characters'),
+    fetch(url + '/api/world-buildings'),
+    fetch(url + '/api/relations'),
+    fetch(url + '/api/files'),
+  ]);
+  if (!charRes.ok || !worldRes.ok || !relRes.ok || !docListRes.ok) {
+    throw new Error('获取服务器数据失败');
+  }
+  const serverChars = await charRes.json();
+  const serverWorlds = await worldRes.json();
+  const serverRels = await relRes.json();
+  const serverDocs = await docListRes.json();
+
+  // 3. 计算增量差异
+  const charDiff = computeRecordDiff(localChars, serverChars,
+    (s, t) => s.name === t.name, charContentEqual, r => r.name);
+  const worldDiff = computeRecordDiff(localWorlds, serverWorlds,
+    (s, t) => s.title === t.title, worldContentEqual, r => r.title);
+  const relDiff = computeRecordDiff(localRelsNamed, serverRels,
+    (s, t) => s.from_name === t.from_name && s.to_name === t.to_name && s.relation_type === t.relation_type,
+    relContentEqual, r => `${r.from_name}→${r.to_name}(${r.relation_type})`);
+
+  const charChanges = charDiff.added.length + charDiff.deleted.length + charDiff.modified.length;
+  const worldChanges = worldDiff.added.length + worldDiff.deleted.length + worldDiff.modified.length;
+  const relChanges = relDiff.added.length + relDiff.deleted.length + relDiff.modified.length;
+
+  // 4. 上传图片（仅对需要同步的角色）
+  const charsToUpload = [
+    ...charDiff.added.map(i => i.source),
+    ...charDiff.modified.map(i => i.source),
+  ];
+  if (charsToUpload.some(c => (c.images && c.images.some(u => u && u.startsWith('data:'))) || (c.image_url && c.image_url.startsWith('data:')))) {
+    await convertDataUrlImagesToServerUrl(charsToUpload, url, onProgress);
   }
 
-  onProgress && onProgress('正在上传数据...');
-  const res = await fetch(url + '/api/sync/replace-all', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ characters, worldBuildings, relations }),
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || '上传失败');
-  }
-  const data = await res.json();
-
-  // 上传文档：先删除服务器上多余的文件，再仅上传新增/变更的文档（name+size 比较）
-  onProgress && onProgress('正在同步文档...');
-  const serverDocRes = await fetch(url + '/api/files');
-  const serverDocs = await serverDocRes.json();
-  const serverMap = new Map(serverDocs.map(d => [d.name, d]));
-  const localNames = new Set(localDocs.map(d => d.name));
-
-  // 删除服务器上本地不存在的文件
-  let deletedCount = 0;
-  for (const sd of serverDocs) {
-    if (!localNames.has(sd.name)) {
-      await fetch(url + '/api/files/' + encodeURIComponent(sd.name), { method: 'DELETE' });
-      deletedCount++;
+  // 5. 增量同步角色到服务器
+  if (charChanges > 0) {
+    onProgress && onProgress(`正在同步角色 (${charChanges} 项变更)...`);
+    for (const item of charDiff.deleted) {
+      await fetch(url + '/api/characters/' + item.target.id, { method: 'DELETE' });
+    }
+    for (const item of charDiff.modified) {
+      const c = item.source;
+      const body = {
+        name: c.name, alias: c.alias || '', university: c.university || '',
+        region: c.region || '', naming_rationale: c.naming_rationale || '',
+        height: c.height || '', gender: c.gender || '', birthday: c.birthday || '',
+        appearance: c.appearance || '', identity_period: c.identity_period || '',
+        birth_time: c.birth_time || '', setting: c.setting || '', family: c.family || '',
+        birthplace: c.birthplace || '', status: c.status || '存在',
+        images: Array.isArray(c.images) ? c.images : (c.image_url ? [c.image_url] : []),
+      };
+      const res = await fetch(url + '/api/characters/' + item.target.id, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      });
+      if (!res.ok) throw new Error('更新角色失败: ' + c.name);
+    }
+    for (const item of charDiff.added) {
+      const c = item.source;
+      const body = {
+        name: c.name, alias: c.alias || '', university: c.university || '',
+        region: c.region || '', naming_rationale: c.naming_rationale || '',
+        height: c.height || '', gender: c.gender || '', birthday: c.birthday || '',
+        appearance: c.appearance || '', identity_period: c.identity_period || '',
+        birth_time: c.birth_time || '', setting: c.setting || '', family: c.family || '',
+        birthplace: c.birthplace || '', status: c.status || '存在',
+        image_url: c.image_url || '',
+        images: Array.isArray(c.images) ? c.images : (c.image_url ? [c.image_url] : []),
+      };
+      const res = await fetch(url + '/api/characters', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      });
+      if (!res.ok) throw new Error('新增角色失败: ' + c.name);
     }
   }
 
-  // 仅上传：服务器不存在 或 size 不同
+  // 6. 重新拉取服务器角色，建立 name → serverId 映射（关系同步需要）
+  const updatedServerChars = await (await fetch(url + '/api/characters')).json();
+  const nameToServerId = new Map(updatedServerChars.map(c => [c.name, c.id]));
+
+  // 7. 增量同步世界设定
+  if (worldChanges > 0) {
+    onProgress && onProgress(`正在同步世界设定 (${worldChanges} 项变更)...`);
+    for (const item of worldDiff.deleted) {
+      await fetch(url + '/api/world-buildings/' + item.target.id, { method: 'DELETE' });
+    }
+    for (const item of worldDiff.modified) {
+      const w = item.source;
+      const res = await fetch(url + '/api/world-buildings/' + item.target.id, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: w.title, category: w.category || '', content: w.content || '', main_category: w.main_category || '' }),
+      });
+      if (!res.ok) throw new Error('更新设定失败: ' + w.title);
+    }
+    for (const item of worldDiff.added) {
+      const w = item.source;
+      const res = await fetch(url + '/api/world-buildings', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: w.title, category: w.category || '', content: w.content || '', main_category: w.main_category || '' }),
+      });
+      if (!res.ok) throw new Error('新增设定失败: ' + w.title);
+    }
+  }
+
+  // 8. 增量同步关系（转换 char_id：local id → server id）
+  if (relChanges > 0) {
+    onProgress && onProgress(`正在同步关系 (${relChanges} 项变更)...`);
+    for (const item of relDiff.deleted) {
+      await fetch(url + '/api/relations/' + item.target.id, { method: 'DELETE' });
+    }
+    for (const item of relDiff.modified) {
+      const r = item.source;
+      const serverFromId = nameToServerId.get(r.from_name);
+      const serverToId = nameToServerId.get(r.to_name);
+      if (!serverFromId || !serverToId) continue;
+      const res = await fetch(url + '/api/relations/' + item.target.id, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ from_char_id: serverFromId, to_char_id: serverToId, relation_type: r.relation_type, description: r.description || '' }),
+      });
+      if (!res.ok) throw new Error('更新关系失败: ' + r.from_name + '→' + r.to_name);
+    }
+    for (const item of relDiff.added) {
+      const r = item.source;
+      const serverFromId = nameToServerId.get(r.from_name);
+      const serverToId = nameToServerId.get(r.to_name);
+      if (!serverFromId || !serverToId) continue;
+      const res = await fetch(url + '/api/relations', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ from_char_id: serverFromId, to_char_id: serverToId, relation_type: r.relation_type, description: r.description || '' }),
+      });
+      if (!res.ok) throw new Error('新增关系失败: ' + r.from_name + '→' + r.to_name);
+    }
+  }
+
+  // 9. 文档增量同步（name + size 比较）
+  onProgress && onProgress('正在同步文档...');
+  const serverDocMap = new Map(serverDocs.map(d => [d.name, d]));
+  const localDocNames = new Set(localDocs.map(d => d.name));
+  let docDeleted = 0;
+  for (const sd of serverDocs) {
+    if (!localDocNames.has(sd.name)) {
+      await fetch(url + '/api/files/' + encodeURIComponent(sd.name), { method: 'DELETE' });
+      docDeleted++;
+    }
+  }
   const toUpload = localDocs.filter(ld => {
-    const sd = serverMap.get(ld.name);
+    const sd = serverDocMap.get(ld.name);
     return !sd || sd.size !== ld.size;
   });
   for (let i = 0; i < toUpload.length; i++) {
@@ -297,12 +544,12 @@ async function uploadToServer(onProgress) {
 
   onProgress && onProgress('上传完成');
   return {
-    characters: characters.length,
-    worldBuildings: worldBuildings.length,
-    relations: relations.length,
+    characters: localChars.length,
+    worldBuildings: localWorlds.length,
+    relations: localRels.length,
     documents: localDocs.length,
-    documentsSynced: toUpload.length + deletedCount,
-    server: data,
+    documentsSynced: toUpload.length + docDeleted,
+    charChanges, worldChanges, relChanges,
   };
 }
 
@@ -339,16 +586,8 @@ async function getLocalStats() {
 }
 
 // ============= 计算同步差异（只读，不修改任何数据） =============
-// direction: 'download' (服务器→本地，覆盖本地) | 'upload' (本地→服务器，覆盖服务器)
-// 返回结构：
-//   {
-//     direction, local: {characters, worldBuildings, relations, documents},
-//     server: {...},
-//     docs: { added: [name...], deleted: [name...], modified: [name...] }
-//   }
-// added/deleted/modified 都从"目标端"视角描述：
-//   download → 本地将新增/删除/更新
-//   upload   → 服务器将新增/删除/更新
+// direction: 'download' (服务器→本地) | 'upload' (本地→服务器)
+// 返回各数据类型的 added/deleted/modified 标签列表
 async function getSyncDiff(direction) {
   const url = getServerUrl();
   if (!url) throw new Error('未配置服务器地址');
@@ -362,53 +601,80 @@ async function getSyncDiff(direction) {
   if (!charRes.ok || !worldRes.ok || !relRes.ok || !docRes.ok) {
     throw new Error('获取服务器数据失败');
   }
-  const serverCharacters = await charRes.json();
-  const serverWorld = await worldRes.json();
-  const serverRelations = await relRes.json();
+  const serverChars = await charRes.json();
+  const serverWorlds = await worldRes.json();
+  const serverRels = await relRes.json();
   const serverDocs = await docRes.json();
 
-  const [localCharacters, localWorld, localRelations, localDocs] = await Promise.all([
-    charDB.list(),
-    worldDB.list(),
-    relDB.list(),
-    docDB.list(),
+  const [localChars, localWorlds, localRels, localDocs] = await Promise.all([
+    charDB.list(), worldDB.list(), relDB.list(), docDB.list(),
   ]);
+  const localRelsNamed = enrichRelationsWithNames(localRels, localChars);
 
-  // 文档差异：按 name + size 比较
-  const localMap = new Map(localDocs.map(d => [d.name, d]));
-  const serverMap = new Map(serverDocs.map(d => [d.name, d]));
-  const allNames = new Set([...localMap.keys(), ...serverMap.keys()]);
-  const added = [], deleted = [], modified = [];
-  for (const name of allNames) {
-    const ld = localMap.get(name);
-    const sd = serverMap.get(name);
-    if (direction === 'download') {
-      // 本地为目标：服务器有/本地无 → 本地新增；本地有/服务器无 → 本地删除
-      if (!ld && sd) added.push(name);
-      else if (ld && !sd) deleted.push(name);
-      else if (ld && sd && ld.size !== sd.size) modified.push(name);
+  // 根据方向确定 source 和 target
+  const isDownload = direction === 'download';
+  const charDiff = computeRecordDiff(
+    isDownload ? serverChars : localChars,
+    isDownload ? localChars : serverChars,
+    (s, t) => s.name === t.name, charContentEqual, r => r.name);
+  const worldDiff = computeRecordDiff(
+    isDownload ? serverWorlds : localWorlds,
+    isDownload ? localWorlds : serverWorlds,
+    (s, t) => s.title === t.title, worldContentEqual, r => r.title);
+  const relDiff = computeRecordDiff(
+    isDownload ? serverRels : localRelsNamed,
+    isDownload ? localRelsNamed : serverRels,
+    (s, t) => s.from_name === t.from_name && s.to_name === t.to_name && s.relation_type === t.relation_type,
+    relContentEqual, r => `${r.from_name}→${r.to_name}(${r.relation_type})`);
+
+  // 文档差异
+  const localDocMap = new Map(localDocs.map(d => [d.name, d]));
+  const serverDocMap = new Map(serverDocs.map(d => [d.name, d]));
+  const allDocNames = new Set([...localDocMap.keys(), ...serverDocMap.keys()]);
+  const docsAdded = [], docsDeleted = [], docsModified = [];
+  for (const name of allDocNames) {
+    const ld = localDocMap.get(name);
+    const sd = serverDocMap.get(name);
+    if (isDownload) {
+      if (!ld && sd) docsAdded.push(name);
+      else if (ld && !sd) docsDeleted.push(name);
+      else if (ld && sd && ld.size !== sd.size) docsModified.push(name);
     } else {
-      // 服务器为目标：本地有/服务器无 → 服务器新增；服务器有/本地无 → 服务器删除
-      if (ld && !sd) added.push(name);
-      else if (!ld && sd) deleted.push(name);
-      else if (ld && sd && ld.size !== sd.size) modified.push(name);
+      if (ld && !sd) docsAdded.push(name);
+      else if (!ld && sd) docsDeleted.push(name);
+      else if (ld && sd && ld.size !== sd.size) docsModified.push(name);
     }
   }
 
   return {
     direction,
     local: {
-      characters: localCharacters.length,
-      worldBuildings: localWorld.length,
-      relations: localRelations.length,
+      characters: localChars.length,
+      worldBuildings: localWorlds.length,
+      relations: localRels.length,
       documents: localDocs.length,
     },
     server: {
-      characters: serverCharacters.length,
-      worldBuildings: serverWorld.length,
-      relations: serverRelations.length,
+      characters: serverChars.length,
+      worldBuildings: serverWorlds.length,
+      relations: serverRels.length,
       documents: serverDocs.length,
     },
-    docs: { added, deleted, modified },
+    chars: {
+      added: charDiff.added.map(i => i.label),
+      deleted: charDiff.deleted.map(i => i.label),
+      modified: charDiff.modified.map(i => i.label),
+    },
+    worlds: {
+      added: worldDiff.added.map(i => i.label),
+      deleted: worldDiff.deleted.map(i => i.label),
+      modified: worldDiff.modified.map(i => i.label),
+    },
+    relations: {
+      added: relDiff.added.map(i => i.label),
+      deleted: relDiff.deleted.map(i => i.label),
+      modified: relDiff.modified.map(i => i.label),
+    },
+    docs: { added: docsAdded, deleted: docsDeleted, modified: docsModified },
   };
 }
