@@ -50,16 +50,7 @@ if (location.protocol === 'file:') {
   }
 
   /* ====== 顶部 Header ====== */
-  .header {
-    background: linear-gradient(135deg, #3d2b1f 0%, #5a3e2b 50%, #7a5543 100%);
-    color: #f5ede4;
-    padding: 16px 16px calc(16px + env(safe-area-inset-top, 0px));
-    padding-top: max(16px, env(safe-area-inset-top, 0px));
-    position: sticky;
-    top: 0;
-    z-index: 100;
-    box-shadow: 0 2px 12px rgba(0,0,0,.15);
-  }
+  .header { background: linear-gradient(135deg, #3d2b1f 0%, #5a3e2b 50%, #7a5543 100%); color: #f5ede4; padding: 16px; padding-top: max(16px, env(safe-area-inset-top, 0px)); position: sticky; top: 0; z-index: 100; box-shadow: 0 2px 12px rgba(0,0,0,.15); }
   .header h1 {
     font-family: var(--font-serif);
     font-size: 1.15rem;
