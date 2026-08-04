@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#3d2b1f">
+<title>校拟设定簿</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+
+<!-- VIEW: 首页 -->
+<div class="view" id="view-home">
+  <div class="brand">
+    <div class="app-icon"><img src="app-icon.png" alt="校拟设定簿"></div>
+    <h1>校拟设定簿</h1>
+    <div class="subtitle">记录你的 OC 世界</div>
+  </div>
+  <div class="cards">
+    <div class="card" onclick="navigateTo('index')"><div class="card-icon">👤</div><div class="card-title">角色</div><div class="card-desc">管理角色档案<br>按地区分类查看</div></div>
+    <div class="card" onclick="navigateTo('worldview')"><div class="card-icon">🌍</div><div class="card-title">世界观</div><div class="card-desc">构建世界设定<br>记录背景故事</div></div>
+    <div class="card" onclick="navigateTo('relations')"><div class="card-icon">🔗</div><div class="card-title">关系网</div><div class="card-desc">编织人物关系<br>可视化图谱</div></div>
+    <div class="card" onclick="navigateTo('documents')"><div class="card-icon">📄</div><div class="card-title">文档</div><div class="card-desc">管理参考文件<br>灵感永不丢失</div></div>
+  </div>
+  <div class="footer">校拟设定簿 v1.0</div>
+</div>
+
+<!-- VIEW: 角色设定 -->
+<div class="view" id="view-index" style="display:none">
+<header class="header"><h1>高校拟人 OC 设定簿</h1><p class="subtitle">角色设定管理</p></header>
+<div class="toolbar">
+  <div class="toolbar-top">
+    <span class="count">共 <strong id="charCount">…</strong> 位</span>
+    <div class="search-wrap" id="indexSearchWrap"><span class="search-icon">🔍</span><input type="text" class="search-input" id="indexSearchInput" placeholder="搜索校名或角色名…" oninput="VM.index.onSearch()"><button class="clear-btn" onclick="VM.index.clearSearch()">✕</button></div>
+  </div>
+  <button class="btn-add" onclick="VM.index.openCreateModal()">＋ 添加新角色</button>
+  <div class="export-bar" id="indexExportActions"><button class="btn-export-outline" onclick="VM.index.toggleSelectAll()">全选</button><button class="btn-export-outline" onclick="VM.index.cancelExport()" style="color:var(--text-light);">放弃</button><button class="btn-export-primary" id="indexConfirmExportBtn" onclick="VM.index.confirmExport()" disabled>确认导出</button></div>
+  <button class="btn-export-trigger" id="indexExportBtn" onclick="VM.index.enterExportMode()">📥 选择导出</button>
+</div>
+<div class="region-tabs" id="regionTabs"></div>
+<div class="card-list" id="charGrid"></div>
+<div class="no-result" id="indexNoResult" style="display:none;">未找到匹配的角色</div>
+<div class="empty" id="indexLoadingState"><div class="icon" style="animation:spin 1s linear infinite;">⏳</div><p>加载中…</p></div>
+<div class="empty" id="indexEmptyState" style="display:none;"><div class="icon">📖</div><p>还没有角色设定</p></div>
+<!-- Modals -->
+<div class="modal-overlay" id="indexModalOverlay"><div class="modal"><div class="modal-header"><span class="modal-title" id="indexModalTitle">添加新角色</span><button class="modal-close" onclick="VM.index.closeModal()">✕</button></div><div class="modal-body"><form id="indexCharForm" onsubmit="VM.index.submitForm(event)"><input type="hidden" id="indexEditId"><div class="form-group"><label class="form-label">姓名 *</label><input type="text" class="form-input" id="indexName" required placeholder="角色姓名"></div><div class="form-group"><label class="form-label">别名</label><input type="text" class="form-input" id="indexAlias" placeholder="字、曾用名"></div><div class="form-group"><label class="form-label">代表高校</label><input type="text" class="form-input" id="indexUniversity" placeholder="如：南京大学"></div><div class="form-group"><label class="form-label">地区</label><input type="text" class="form-input" id="indexRegion" placeholder="如：南京、北京"></div><div class="form-group"><label class="form-label">取名依据</label><textarea class="form-textarea" id="indexNamingRationale" rows="3" placeholder="名字来源、含义…"></textarea></div><div class="form-row"><div class="form-group"><label class="form-label">身高</label><input type="text" class="form-input" id="indexHeight" placeholder="175cm"></div><div class="form-group"><label class="form-label">性别</label><select class="form-select" id="indexGender"><option value="">请选择</option><option value="男">男</option><option value="女">女</option><option value="其他">其他</option></select></div></div><div class="form-group"><label class="form-label">生日</label><input type="text" class="form-input" id="indexBirthday" placeholder="5月20日"></div><div class="form-group"><label class="form-label">外貌</label><textarea class="form-textarea" id="indexAppearance" rows="4" placeholder="外貌特征…"></textarea></div><div class="form-group"><label class="form-label">身份存在时间</label><input type="text" class="form-input" id="indexIdentityPeriod" placeholder="如：1905-至今"></div><div class="form-group"><label class="form-label">诞生时间</label><input type="text" class="form-input" id="indexBirthTime" placeholder="如：1905年"></div><div class="form-group"><label class="form-label">诞生地</label><input type="text" class="form-input" id="indexBirthplace" placeholder="如：南京"></div><div class="form-group"><label class="form-label">存在状态</label><select class="form-select" id="indexStatus"><option value="存在">存在</option><option value="已消逝">已消逝</option><option value="普通人">普通人</option></select></div><div class="form-group"><label class="form-label">角色图片（可多选）</label><input type="file" id="indexImage" accept="image/*" multiple style="display:none" onchange="VM.index.handleImageUpload(event)"><div style="border:2px dashed var(--border);border-radius:var(--radius);padding:16px;background:#fefdf9;text-align:center;margin-bottom:8px;"><div id="indexImagePreviewGrid" style="display:none;margin-bottom:12px;"></div><button type="button" class="btn-action" onclick="document.getElementById('indexImage').click()" style="width:100%;padding:12px;display:flex;align-items:center;justify-content:center;gap:8px;"><span style="font-size:1.2rem;">📷</span> 选择图片文件（可多选）</button><div style="font-size:.75rem;color:var(--text-light);margin-top:6px;text-align:center;">支持 JPG、PNG、GIF 格式，可一次选择多张，建议尺寸 300×400</div></div></div><div class="form-group"><label class="form-label">设定</label><textarea class="form-textarea large" id="indexSetting" rows="10" placeholder="角色详细设定…"></textarea></div></form></div><div class="modal-footer"><button class="btn-modal cancel" onclick="VM.index.closeModal()">取消</button><button class="btn-modal primary" onclick="document.getElementById('indexCharForm').requestSubmit()" id="indexSubmitBtn">确认添加</button></div></div></div>
+<div class="modal-overlay" id="indexDetailOverlay"><div class="modal"><div class="modal-header"><span class="modal-title" id="indexDetailName">角色详情</span><button class="modal-close" onclick="VM.index.closeDetailModal()">✕</button></div><div id="indexDetailImage" style="display:none;padding:0 16px;margin-bottom:16px;"></div><div class="modal-body" id="indexDetailBody"></div><div class="modal-footer"><button class="btn-modal cancel" onclick="VM.index.closeDetailModal()">关闭</button><button class="btn-modal primary" onclick="VM.index.detailEdit()">编辑</button></div></div></div>
+<div class="modal-overlay" id="indexDeleteOverlay"><div class="modal" style="max-width:400px;"><div class="modal-header"><span class="modal-title">确认删除</span><button class="modal-close" onclick="VM.index.closeDeleteModal()">✕</button></div><div class="modal-body" style="text-align:center;padding:24px 16px;"><p style="margin-bottom:8px;">确定要删除</p><p style="font-size:1.1rem;font-weight:600;color:var(--danger);" id="indexDeleteName"></p><p style="margin-top:8px;color:var(--text-light);font-size:.85rem;">此操作不可撤销</p></div><div class="modal-footer"><button class="btn-modal cancel" onclick="VM.index.closeDeleteModal()">取消</button><button class="btn-modal danger" onclick="VM.index.confirmDelete()">删除</button></div></div></div>
+</div>
+
+<!-- VIEW: 世界观 -->
+<div class="view" id="view-worldview" style="display:none">
+<header class="header"><h1>世界设定</h1><p class="subtitle">世界观与人物背景</p></header>
+<div class="main-cat-tabs"><button class="main-cat-tab active" data-main="意识体世界设定" onclick="VM.worldview.selectMainCategory('意识体世界设定')">意识体世界设定</button><button class="main-cat-tab" data-main="人物背景故事" onclick="VM.worldview.selectMainCategory('人物背景故事')">人物背景故事</button></div>
+<div class="toolbar"><span class="count">共 <strong id="worldEntryCount">…</strong> 条</span><div class="search-wrap" id="worldSearchWrap"><span class="search-icon">🔍</span><input type="text" class="search-input" id="worldSearchInput" placeholder="搜索标题或内容…" oninput="VM.worldview.onSearch()"><button class="clear-btn" onclick="VM.worldview.clearSearch()">✕</button></div></div>
+<button class="btn-add" onclick="VM.worldview.openCreateModal()">＋ 添加新设定</button>
+<div class="export-bar" id="worldExportActions"><button class="btn-export-outline" onclick="VM.worldview.toggleSelectAll()">全选</button><button class="btn-export-outline" onclick="VM.worldview.cancelExport()" style="color:var(--text-light);">放弃</button><button class="btn-export-primary" id="worldConfirmExportBtn" onclick="VM.worldview.confirmExport()" disabled>确认导出</button></div>
+<button class="btn-export-trigger" id="worldExportBtn" onclick="VM.worldview.enterExportMode()">📥 选择导出</button>
+<div class="cat-tabs" id="catTabs"></div>
+<div class="card-list" id="entryGrid"></div>
+<div class="no-result" id="worldNoResult" style="display:none;">未找到匹配的设定</div>
+<div class="empty" id="worldLoadingState"><div class="icon" style="animation:spin 1s linear infinite;">⏳</div><p>加载中…</p></div>
+<div class="empty" id="worldEmptyState" style="display:none;"><div class="icon">🌍</div><p id="worldEmptyText">还没有世界设定</p></div>
+<div class="modal-overlay" id="worldModalOverlay"><div class="modal"><div class="modal-header"><span class="modal-title" id="worldModalTitle">添加新设定</span><button class="modal-close" onclick="VM.worldview.closeModal()">✕</button></div><div class="modal-body"><form id="worldEntryForm" onsubmit="VM.worldview.submitForm(event)"><input type="hidden" id="worldEditId"><input type="hidden" id="worldMainCategoryInput"><div class="form-group" id="worldCategoryGroup"><label class="form-label">分类</label><input type="text" class="form-input" id="worldCategoryInput" placeholder="襟江枕海甲东南" list="worldCatList"><datalist id="worldCatList"></datalist></div><div class="form-group"><label class="form-label">标题 *</label><input type="text" class="form-input" id="worldTitle" required placeholder="设定标题"></div><div class="form-group"><label class="form-label">内容</label><textarea class="form-textarea large" id="worldContent" rows="12" placeholder="详细内容…"></textarea></div></form></div><div class="modal-footer"><button class="btn-modal cancel" onclick="VM.worldview.closeModal()">取消</button><button class="btn-modal primary" onclick="document.getElementById('worldEntryForm').requestSubmit()" id="worldSubmitBtn">确认添加</button></div></div></div>
+<div class="modal-overlay" id="worldDetailOverlay"><div class="modal"><div class="modal-header"><span class="modal-title" id="worldDetailTitle">详情</span><button class="modal-close" onclick="VM.worldview.closeDetailModal()">✕</button></div><div class="modal-body" id="worldDetailBody"></div><div class="modal-footer"><button class="btn-modal cancel" onclick="VM.worldview.closeDetailModal()">关闭</button><button class="btn-modal primary" onclick="VM.worldview.detailEdit()">编辑</button></div></div></div>
+<div class="modal-overlay" id="worldDeleteOverlay"><div class="modal" style="max-width:400px;"><div class="modal-header"><span class="modal-title">确认删除</span><button class="modal-close" onclick="VM.worldview.closeDeleteModal()">✕</button></div><div class="modal-body" style="text-align:center;padding:24px 16px;"><p style="margin-bottom:8px;">确定要删除</p><p style="font-size:1.1rem;font-weight:600;color:var(--danger);" id="worldDeleteName"></p><p style="margin-top:8px;color:var(--text-light);font-size:.85rem;">此操作不可撤销</p></div><div class="modal-footer"><button class="btn-modal cancel" onclick="VM.worldview.closeDeleteModal()">取消</button><button class="btn-modal danger" onclick="VM.worldview.confirmDelete()">删除</button></div></div></div>
+</div>
+
+<!-- VIEW: 关系网 -->
+<div class="view" id="view-relations" style="display:none">
+<header class="header"><h1>关系网</h1><p class="subtitle">角色之间的关系</p></header>
+<div class="toolbar"><span class="count">共 <strong id="relCount">…</strong> 条</span><div class="search-wrap" id="relSearchWrap"><span class="search-icon">🔍</span><input type="text" class="search-input" id="relSearchInput" placeholder="搜索角色名…" oninput="VM.relations.onSearch()"><button class="clear-btn" onclick="VM.relations.clearSearch()">✕</button></div></div>
+<div class="action-bar"><button class="btn-add" onclick="VM.relations.openCreateModal()">＋ 添加关系</button><button class="btn-fam" onclick="VM.relations.openFamilyModal()">🏛 家族</button></div>
+<div class="export-bar" id="relExportActions" style="margin-bottom:8px;"><button class="btn-export-outline" onclick="VM.relations.toggleSelectAll()">全选</button><button class="btn-export-outline" onclick="VM.relations.cancelExport()" style="color:var(--text-light);">放弃</button><button class="btn-export-primary" id="relConfirmExportBtn" onclick="VM.relations.confirmExport()" disabled>确认导出</button></div>
+<button class="btn-export-trigger" id="relExportBtn" onclick="VM.relations.enterExportMode()">📥 选择导出</button>
+<div class="type-tabs" id="typeTabs"></div>
+<div class="graph-section"><div class="graph-header"><span class="graph-title">关系图</span><span class="graph-hint">双击节点查看 · 拖动 · 双指缩放</span></div><div class="graph-canvas-wrap" id="canvasWrap"><canvas id="graphCanvas"></canvas><div class="graph-empty" id="graphEmpty">添加角色和关系后显示关系图</div><div class="graph-controls"><button class="graph-btn" onclick="VM.relations.graphZoom(1.2)">+</button><button class="graph-btn" onclick="VM.relations.graphZoom(0.8)">−</button><button class="graph-btn" onclick="VM.relations.graphReset()" style="font-size:.75rem;">↺</button></div></div></div>
+<div class="card-list" id="relList"></div>
+<div class="no-result" id="relNoResult" style="display:none;">未找到匹配的关系</div>
+<div class="empty" id="relLoadingState"><div class="icon" style="animation:spin 1s linear infinite;">⏳</div><p>加载中…</p></div>
+<div class="empty" id="relEmptyState" style="display:none;"><div class="icon">🔗</div><p>还没有关系</p></div>
+<div class="modal-overlay" id="relModalOverlay"><div class="modal"><div class="modal-header"><span class="modal-title" id="relModalTitle">添加关系</span><button class="modal-close" onclick="VM.relations.closeModal()">✕</button></div><div class="modal-body"><form id="relForm" onsubmit="VM.relations.submitForm(event)"><input type="hidden" id="relEditId"><div class="form-group"><label class="form-label">角色 A *</label><select class="form-select" id="relFromChar" required></select></div><div class="form-group"><label class="form-label">角色 B *</label><select class="form-select" id="relToChar" required></select></div><div class="form-group"><label class="form-label">关系类型</label><input type="text" class="form-input" id="relType" placeholder="如：朋友、CP、师生、冤家" list="relTypeList"><datalist id="relTypeList"><option value="朋友"><option value="CP"><option value="单箭头"><option value="师生"><option value="冤家"><option value="继承记忆"><option value="参与组建"><option value="亲属"></datalist></div><div class="form-group"><label class="form-label">关系描述</label><textarea class="form-textarea large" id="relDesc" rows="6" placeholder="关系详细说明…"></textarea></div></form></div><div class="modal-footer"><button class="btn-modal cancel" onclick="VM.relations.closeModal()">取消</button><button class="btn-modal primary" onclick="document.getElementById('relForm').requestSubmit()" id="relSubmitBtn">确认添加</button></div></div></div>
+<div class="modal-overlay" id="relDeleteOverlay"><div class="modal" style="max-width:400px;"><div class="modal-header"><span class="modal-title">确认删除</span><button class="modal-close" onclick="VM.relations.closeDeleteModal()">✕</button></div><div class="modal-body" style="text-align:center;padding:24px 16px;"><p style="margin-bottom:8px;">确定要删除</p><p style="font-size:1rem;font-weight:600;color:var(--danger);" id="relDeleteInfo"></p><p style="margin-top:8px;color:var(--text-light);font-size:.85rem;">此操作不可撤销</p></div><div class="modal-footer"><button class="btn-modal cancel" onclick="VM.relations.closeDeleteModal()">取消</button><button class="btn-modal danger" onclick="VM.relations.confirmDelete()">删除</button></div></div></div>
+<div class="modal-overlay" id="relFamilyOverlay"><div class="modal"><div class="modal-header"><span class="modal-title">🏛 管理家族</span><button class="modal-close" onclick="VM.relations.closeFamilyModal()">✕</button></div><div class="modal-body" id="relFamilyBody"></div><div class="modal-footer"><button class="btn-modal cancel" onclick="VM.relations.closeFamilyModal()">取消</button><button class="btn-modal primary" onclick="VM.relations.saveFamilies()">保存</button></div></div></div>
+<div class="modal-overlay" id="relInfoOverlay"><div class="modal"><div class="modal-header"><span class="modal-title" id="relInfoName"></span><button class="modal-close" onclick="VM.relations.closeInfoModal()">✕</button></div><div class="modal-body" id="relInfoBody" style="padding-bottom:40px;"></div><div class="modal-footer"><button class="btn-modal cancel" onclick="VM.relations.closeInfoModal()">关闭</button><button class="btn-modal primary" onclick="VM.relations.startRelationFromInfo()">＋ 添加关系</button></div></div></div>
+</div>
+
+<!-- VIEW: 文档 -->
+<div class="view" id="view-documents" style="display:none">
+<header class="header"><h1>文档管理</h1><p class="subtitle">上传、查看、下载文档</p></header>
+<div class="upload-zone" onclick="document.getElementById('docFileInput').click()"><div class="upload-icon">📁</div><div class="upload-text">点击选择文件上传</div><div class="upload-hint">支持 docx、txt、md、pdf 等格式</div><input type="file" id="docFileInput" multiple style="display:none" onchange="VM.documents.onFileSelect(event)"></div>
+<div class="count-bar">共 <strong id="docFileCount">0</strong> 个文档</div>
+<div class="file-list" id="docFileList"></div>
+<div class="empty" id="docEmptyState" style="display:none;"><div class="icon">📄</div><p>还没有文档</p></div>
+<div class="modal-overlay" id="docViewerOverlay"><div class="modal"><div class="modal-header"><span class="modal-title" id="docViewerTitle">文档</span><span class="modal-tag" id="docViewerTag">TXT</span><button class="modal-close" onclick="VM.documents.closeViewer()">✕</button></div><div class="modal-body" id="docViewerBody"></div><div class="modal-footer"><a class="btn-modal cancel" id="docViewerDownload" href="#" download>下载</a><button class="btn-modal primary" onclick="VM.documents.closeViewer()">关闭</button></div></div></div>
+<div class="modal-overlay" id="docDeleteOverlay"><div class="modal" style="max-width:400px;"><div class="modal-header"><span class="modal-title">确认删除</span><button class="modal-close" onclick="VM.documents.closeDeleteModal()">✕</button></div><div class="modal-body" style="text-align:center;padding:24px 16px;"><p style="margin-bottom:8px;">确定要删除</p><p style="font-size:1rem;font-weight:600;color:var(--danger);word-break:break-all;" id="docDeleteName"></p><p style="margin-top:8px;color:var(--text-light);font-size:.85rem;">此操作不可撤销</p></div><div class="modal-footer"><button class="btn-modal cancel" onclick="VM.documents.closeDeleteModal()">取消</button><button class="btn-modal danger" onclick="VM.documents.confirmDelete()">删除</button></div></div></div>
+</div>
+
+<!-- 底部导航 -->
+<nav class="bottom-nav" id="bottomNav" style="display:none">
+  <span class="nav-item" data-view="home" onclick="navigateTo('home')"><span class="nav-icon">🏠</span><span class="nav-text">首页</span></span>
+  <span class="nav-item" data-view="index" onclick="navigateTo('index')"><span class="nav-icon">📖</span><span class="nav-text">角色</span></span>
+  <span class="nav-item" data-view="worldview" onclick="navigateTo('worldview')"><span class="nav-icon">🌍</span><span class="nav-text">世界观</span></span>
+  <span class="nav-item" data-view="relations" onclick="navigateTo('relations')"><span class="nav-icon">🔗</span><span class="nav-text">关系网</span></span>
+  <span class="nav-item" data-view="documents" onclick="navigateTo('documents')"><span class="nav-icon">📄</span><span class="nav-text">文档</span></span>
+</nav>
+
+<div class="toast" id="toast"></div>
+
+<!-- 全局错误捕获（调试用） -->
+<script>
+window._jsErrors = [];
+window.onerror = function(msg, url, line, col, err) {
+  window._jsErrors.push({msg: String(msg), url: String(url||''), line: line, col: col});
+  return false;
+};
+</script>
+<script src="db.js"></script>
+<script src="api-shim.js"></script>
+<script src="mammoth.min.js"></script>
+<script src="app.js"></script>
+<script>
+// app.js 加载完成后再加载同步模块
+if (window._jsErrors.length > 0) {
+  document.title = 'JS ERROR';
+  var el = document.createElement('div');
+  el.style.cssText = 'position:fixed;top:0;left:0;right:0;background:#c0392b;color:#fff;padding:8px 12px;font-size:12px;z-index:99999;white-space:pre-wrap;max-height:120px;overflow:auto;';
+  el.textContent = 'app.js ERRORS:\n' + window._jsErrors.map(function(e){return 'L'+e.line+': '+e.msg;}).join('\n');
+  document.body.appendChild(el);
+  window._jsErrors = [];
+}
+</script>
+<script src="sync.js"></script>
+<script src="sync-ui.js"></script>
+<script>
+// sync 脚本完成后再次检查错误
+if (window._jsErrors.length > 0) {
+  var el = document.createElement('div');
+  el.style.cssText = 'position:fixed;bottom:0;left:0;right:0;background:#f39c12;color:#fff;padding:8px 12px;font-size:12px;z-index:99999;white-space:pre-wrap;max-height:120px;overflow:auto;';
+  el.textContent = 'sync ERRORS:\n' + window._jsErrors.map(function(e){return 'L'+e.line+': '+e.msg;}).join('\n');
+  document.body.appendChild(el);
+}
+</script>
+</body>
+</html>

@@ -55,7 +55,11 @@ Settings/
 │   ├── m-worldview.html    #   世界设定页面（移动端）
 │   ├── m-relations.html    #   关系网页面（移动端）
 │   └── m-documents.html    #   文档管理页面（移动端）
-├── android-app/            # 离线移动版（APK 源码，WebView 壳 + IndexedDB 离线存储）
+├── android-app/            # Android 离线版（WebView + SPA，IndexedDB 本地存储）
+│   └── app/src/main/
+│       ├── assets/web/     #   SPA 前端（index.html + JS/CSS）
+│       └── java/.../       #   MainActivity.java（WebView 壳）
+├── desktop-offline/        # 桌面离线版（独立 HTML，无需后端）
 ├── mobile/                 # Expo 尝试（React Native，未完成，不上传）
 ├── android-sdk/            # Android SDK（本地工具链，不上传）
 └── apks/                   # 构建产物（APK 文件）
@@ -63,17 +67,19 @@ Settings/
 
 ## Android App
 
-项目内置一个 Android WebView 壳应用，把网页打包成可安装的 APK，方便手机使用。
+Android 离线版，基于 WebView 加载 SPA（单页应用），所有数据存储在 IndexedDB 本地数据库中，**无需连接后端**即可使用。
 
-### 使用方式
+### 特性
 
-1. 电脑端启动后端：`python backend.py`
-2. 手机和电脑连接**同一 WiFi**
-3. 在手机上安装 APK（见下方构建方法，或从 Release 下载）
-4. 打开 App，输入电脑的局域网 IP 和端口
-5. 点击"连接"，首次连接后地址会自动保存
+- 离线优先：角色、世界设定、关系网、文档全部本地存储
+- 支持导入/导出 JSON 备份
+- 支持 docx/txt/md 文档上传与预览
 
-> 查看电脑 IP：PowerShell 运行 `ipconfig`，找到 IPv4 地址
+### 项目结构
+
+- **`android-app/app/src/main/assets/web/`** — SPA 前端（HTML/JS/CSS），所有业务逻辑在此
+- **`android-app/`** — Android WebView 壳工程
+- 构建命令：在 `android-app/` 中运行 `./gradlew assembleRelease`
 
 ### 构建 APK
 
@@ -87,32 +93,16 @@ Settings/
 ```powershell
 # 1. 设置环境变量（按实际路径调整）
 $env:JAVA_HOME = "D:\Java\jdk-21"
-$env:ANDROID_HOME = "d:\SchoolHumanSettings\android-sdk"
+$env:ANDROID_HOME = "d:\Settings\android-sdk"
 
-# 2. 首次构建：下载并安装 Android SDK 命令行工具
-#    跳过此步如果 android-sdk\cmdline-tools\latest\bin\sdkmanager.bat 已存在
-Invoke-WebRequest "https://dl.google.com/android/repository/commandlinetools-win-11076708_latest.zip" -OutFile sdk.zip
-Expand-Archive sdk.zip -DestinationPath android-sdk\tmp
-New-Item -ItemType Directory -Force -Path android-sdk\cmdline-tools\latest | Out-Null
-Copy-Item android-sdk\tmp\cmdline-tools\* android-sdk\cmdline-tools\latest\ -Recurse -Force
-Remove-Item android-sdk\tmp, sdk.zip -Recurse -Force
-
-# 3. 安装 Android Platform 35 和 Build-tools
-$sdk = "$env:ANDROID_HOME\cmdline-tools\latest\bin\sdkmanager.bat"
-echo "y" | & $sdk "platform-tools" "platforms;android-35" "build-tools;35.0.0"
-
-# 4. 配置 SDK 路径（android-app/local.properties，按实际路径填写）
-#    sdk.dir=d\:\\Settings\\android-sdk
-
-# 5. 构建 APK（首次会自动下载 Gradle 8.11.1，约 140MB）
+# 2. 构建 APK
 cd android-app
 .\gradlew.bat assembleRelease
-
-# 6. 构建产物
-#    android-app\app\build\outputs\apk\release\app-release.apk
 ```
 
-构建成功后，将 `app-release.apk` 复制到手机安装即可。APK 使用 debug 签名，安装时可能需要允许"未知来源"。
+构建产物：`android-app/app/build/outputs/apk/release/app-release.apk`
+
+APK 使用 debug 签名，安装时可能需要允许"未知来源"。
 
 #### 常见问题
 
@@ -121,7 +111,6 @@ cd android-app
 | `Unsupported class file major version 68` | JDK 版本过高，使用 JDK 21 |
 | `SDK location not found` | 检查 `android-app/local.properties` 的 `sdk.dir` 路径 |
 | 下载 Gradle 失败 | 多试几次，或手动下载 [gradle-8.11.1-bin.zip](https://services.gradle.org/distributions/gradle-8.11.1-bin.zip) 解压到 `%USERPROFILE%\.gradle\wrappers\dists\gradle-8.11.1-bin\` |
-| 手机连不上后端 | 确认手机和电脑在同一 WiFi，关闭路由器"AP 隔离"，检查 Windows 防火墙允许 8000 端口 |
 
 ## 数据存储
 
