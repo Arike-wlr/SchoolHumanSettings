@@ -92,6 +92,29 @@ if (location.protocol === 'file:') {
   .sort-btn { display: flex; align-items: center; justify-content: center; width: 44px; min-width: 44px; height: 44px; background: none; border: 1.5px solid var(--border); border-radius: 8px; color: var(--text-light); font-size: 1.05rem; cursor: pointer; flex-shrink: 0; -webkit-tap-highlight-color: transparent; touch-action: manipulation; padding: 0; line-height: 1; }
   .sort-btn:active { background: var(--accent-pale); color: var(--accent); border-color: var(--accent); }
 
+  /* ====== 关系类型标签 ====== */
+  .type-tabs { display: flex; gap: 6px; padding: 4px 14px 8px; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+  .type-tabs::-webkit-scrollbar { display: none; }
+  .type-tab { flex-shrink: 0; padding: 6px 14px; background: var(--card-bg); border: 1px solid var(--border); border-radius: 16px; font-size: .8rem; color: var(--text-light); cursor: pointer; white-space: nowrap; transition: all .2s; }
+  .type-tab.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .tab-count { margin-left: 4px; font-size: .7rem; opacity: .7; }
+
+  /* ====== 导出模式 ====== */
+  .rel-card { position: relative; }
+  .rel-check { display: none; position: absolute; top: 14px; left: 12px; width: 28px; height: 28px; cursor: pointer; accent-color: var(--accent); z-index: 2; }
+  .export-mode .rel-check { display: block; }
+  .export-mode .rel-card { cursor: default; }
+  .rel-card.selected { border-color: var(--accent); background: var(--accent-pale); }
+  .export-bar { display: none; gap: 8px; margin: 6px 14px 0; align-items: center; }
+  .export-mode .export-bar { display: flex; }
+  .btn-export-outline { padding: 8px 14px; background: var(--card-bg); color: var(--text); border: 1px solid var(--border); border-radius: 8px; font-size: .82rem; cursor: pointer; }
+  .btn-export-primary { flex: 1; padding: 12px; background: var(--accent); color: #fff; border: none; border-radius: var(--radius); font-size: .95rem; font-weight: 500; cursor: pointer; margin: 0; box-shadow: 0 2px 8px rgba(139,94,60,.25); }
+  .btn-export-primary:disabled { opacity: .5; cursor: default; }
+  .btn-export-trigger { display: block; width: calc(100% - 28px); margin: 6px 14px 8px; padding: 12px; background: var(--card-bg); color: var(--accent); border: 1.5px solid var(--accent); border-radius: var(--radius); font-size: .95rem; font-weight: 500; cursor: pointer; box-shadow: none; }
+  .btn-export-trigger:active { background: var(--accent-pale); }
+  .export-mode .btn-export-trigger { display: none; }
+  .export-mode .sort-btn { display: none; }
+
   .empty { text-align: center; padding: 60px 20px; color: var(--text-light); }
   .empty .icon { font-size: 2.5rem; margin-bottom: 8px; opacity: .5; }
   @keyframes spin { to { transform: rotate(360deg); } }
@@ -136,6 +159,8 @@ if (location.protocol === 'file:') {
   <p class="subtitle">角色之间的关系</p>
 </header>
 
+<div class="type-tabs" id="typeTabs"></div>
+
 <div class="toolbar">
   <span class="count">共 <strong id="relCount">…</strong> 条</span>
   <div class="search-wrap" id="searchWrap">
@@ -149,6 +174,12 @@ if (location.protocol === 'file:') {
   <button class="btn-add" onclick="openCreateModal()">＋ 添加关系</button>
   <button class="btn-fam" onclick="openFamilyModal()">🏛 家族</button>
 </div>
+<div class="export-bar" id="exportActions" style="margin-bottom:8px;">
+  <button class="btn-export-outline" onclick="toggleSelectAll()">全选</button>
+  <button class="btn-export-outline" onclick="cancelExport()" style="color:var(--text-light);">放弃</button>
+  <button class="btn-export-primary" id="confirmExportBtn" onclick="confirmExport()" disabled>确认导出</button>
+</div>
+<button class="btn-export-trigger" id="exportBtn" onclick="enterExportMode()">📥 选择导出</button>
 
 <!-- 关系图可视化 -->
 <div class="graph-section">
@@ -291,6 +322,12 @@ let deleteTargetId = null;
 let selectedFromCharId = null;
 let infoCharId = null;
 
+// 类型筛选 & 导出
+let activeType = '全部';
+let exportMode = false;
+let selectedIds = new Set();
+const REL_TYPES = ['CP', '单箭头', '继承记忆', '参与组建', '师生', '朋友', '冤家', '亲属'];
+
 function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
 
 // ============================================================
@@ -380,7 +417,14 @@ async function loadData() {
     const [relRes, charRes] = await Promise.all([fetch(API_REL), fetch(API_CHAR)]);
     allRelations = await relRes.json();
     allCharacters = await charRes.json();
+
+    // 清理已不存在的选中 ID
+    const currentIds = new Set(allRelations.map(r => r.id));
+    for (const id of selectedIds) { if (!currentIds.has(id)) selectedIds.delete(id); }
+    if (exportMode) updateExportButtons();
+
     document.getElementById('loadingState').style.display = 'none';
+    buildTypeTabs();
     renderRelList();
     graphInit();
   } catch(e) {
@@ -397,6 +441,12 @@ function renderRelList() {
   const searchVal = document.getElementById('searchInput').value.trim().toLowerCase();
 
   let filtered = allRelations;
+
+  // 类型筛选
+  if (activeType !== '全部') {
+    filtered = filtered.filter(r => r.relation_type === activeType);
+  }
+
   if (searchVal) {
     filtered = allRelations.filter(r => {
       const fromName = (r.from_name||'').toLowerCase();
@@ -405,13 +455,13 @@ function renderRelList() {
     });
   }
 
-  count.textContent = (searchVal ? `${filtered.length}/${allRelations.length}` : allRelations.length);
+  count.textContent = (searchVal || activeType !== '全部') ? `${filtered.length}/${allRelations.length}` : allRelations.length;
 
   if (allRelations.length === 0) {
     list.innerHTML = ''; empty.style.display='block'; noResult.style.display='none'; return;
   }
   empty.style.display = 'none';
-  if (filtered.length === 0 && searchVal) { list.innerHTML=''; noResult.style.display='block'; return; }
+  if (filtered.length === 0 && (searchVal || activeType !== '全部')) { list.innerHTML=''; noResult.style.display='block'; return; }
   noResult.style.display = 'none';
 
   const idxMap = filtered.map(r => allRelations.indexOf(r));
@@ -421,9 +471,12 @@ function renderRelList() {
     const typeClass = r.relation_type === 'CP' ? 'cp' : r.relation_type === '师生' ? '师生' : '';
     const typeHtml = r.relation_type ? `<span class="rel-type ${typeClass}">${esc(r.relation_type)}</span>` : '';
     const arrow = ['CP', '朋友', '冤家', '亲属'].includes(r.relation_type) ? '⇄' : '→';
+    const checked = selectedIds.has(r.id) ? 'checked' : '';
+    const selectedClass = selectedIds.has(r.id) ? ' selected' : '';
     return `
-      <div class="rel-card" data-drag-id="${r.id}" data-drag-idx="${idxMap[i]}">
-        <div class="rel-names">
+      <div class="rel-card${selectedClass}" data-drag-id="${r.id}" data-drag-idx="${idxMap[i]}" data-rel-id="${r.id}">
+        <input type="checkbox" class="rel-check" ${checked} onchange="toggleCardSelect(${r.id}, this.checked)" onclick="event.stopPropagation()">
+        <div class="rel-names" onclick="${exportMode ? `toggleCardClick(${r.id})` : `openEditModal(${r.id})`}">
           <button class="sort-btn" title="上移" onclick="event.stopPropagation();moveRelUp(${r.id});return false;">↑</button>
           <button class="sort-btn" title="下移" onclick="event.stopPropagation();moveRelDown(${r.id});return false;">↓</button>
           <span class="rel-name">${esc(fromName)}</span>
@@ -433,11 +486,13 @@ function renderRelList() {
         </div>
         ${r.description ? `<div class="rel-desc">${esc(r.description)}</div>` : ''}
         <div class="card-actions">
-          <button class="btn-action" onclick="openEditModal(${r.id})">编辑</button>
-          <button class="btn-action danger" onclick="openDeleteModal(${r.id},'${esc(fromName)} ${arrow} ${esc(toName)}')">删除</button>
+          <button class="btn-action" onclick="event.stopPropagation();openEditModal(${r.id})">编辑</button>
+          <button class="btn-action danger" onclick="event.stopPropagation();openDeleteModal(${r.id},'${esc(fromName)} ${arrow} ${esc(toName)}')">删除</button>
         </div>
       </div>`;
   }).join('');
+
+  if (exportMode) updateExportButtons();
 }
 
 function onSearch() {
@@ -599,6 +654,123 @@ function showToast(msg, type) {
   t.textContent = msg;
   t.className = 'toast show' + (type ? ' '+type : '');
   setTimeout(() => t.classList.remove('show'), 2200);
+}
+
+// ====== 关系类型分类 ======
+function buildTypeTabs() {
+  const container = document.getElementById('typeTabs');
+  if (!container) return;
+
+  const counts = {};
+  REL_TYPES.forEach(function(t) { counts[t] = 0; });
+  allRelations.forEach(function(r) {
+    if (r.relation_type && counts[r.relation_type] !== undefined) counts[r.relation_type]++;
+  });
+
+  let html = '<button class="type-tab' + (activeType === '全部' ? ' active' : '') + '" onclick="selectType(\'全部\')">全部<span class="tab-count">' + allRelations.length + '</span></button>';
+
+  const orderedTypes = REL_TYPES.filter(function(t) { return counts[t] > 0; }).sort(function(a, b) { return counts[b] - counts[a]; });
+  orderedTypes.forEach(function(t) {
+    html += '<button class="type-tab' + (activeType === t ? ' active' : '') + '" onclick="selectType(\'' + t + '\')">' + t + '<span class="tab-count">' + counts[t] + '</span></button>';
+  });
+
+  container.innerHTML = html;
+}
+
+function selectType(type) {
+  activeType = type;
+  document.querySelectorAll('.type-tab').forEach(function(tab) { tab.classList.remove('active'); });
+  var tab = document.querySelector('.type-tab[onclick="selectType(\'' + type + '\')"]');
+  if (tab) tab.classList.add('active');
+  renderRelList();
+}
+
+// ====== 选择导出 ======
+function enterExportMode() {
+  exportMode = true;
+  selectedIds.clear();
+  document.body.classList.add('export-mode');
+  document.getElementById('exportBtn').style.display = 'none';
+  document.getElementById('exportActions').style.display = '';
+  renderRelList();
+}
+
+function cancelExport() {
+  exportMode = false;
+  selectedIds.clear();
+  document.body.classList.remove('export-mode');
+  document.getElementById('exportBtn').style.display = '';
+  document.getElementById('exportActions').style.display = '';
+  renderRelList();
+}
+
+function toggleCardClick(id) {
+  var checkbox = document.querySelector('.rel-card[data-rel-id="' + id + '"] .rel-check');
+  if (checkbox) { checkbox.checked = !checkbox.checked; toggleCardSelect(id, checkbox.checked); }
+}
+
+function toggleCardSelect(id, checked) {
+  if (checked) selectedIds.add(id);
+  else selectedIds.delete(id);
+  var card = document.querySelector('.rel-card[data-rel-id="' + id + '"]');
+  if (card) card.classList.toggle('selected', checked);
+  updateExportButtons();
+}
+
+function toggleSelectAll() {
+  var cards = document.querySelectorAll('#relList .rel-card[data-rel-id]');
+  if (cards.length === 0) return;
+  var visibleIds = [];
+  cards.forEach(function(c) { visibleIds.push(parseInt(c.dataset.relId)); });
+  var allSelected = visibleIds.every(function(id) { return selectedIds.has(id); });
+  if (allSelected) {
+    visibleIds.forEach(function(id) { selectedIds.delete(id); });
+  } else {
+    visibleIds.forEach(function(id) { selectedIds.add(id); });
+  }
+  renderRelList();
+}
+
+function updateExportButtons() {
+  var btn = document.getElementById('confirmExportBtn');
+  if (!btn) return;
+  btn.disabled = selectedIds.size === 0;
+  btn.textContent = selectedIds.size > 0 ? '确认导出 (' + selectedIds.size + ')' : '确认导出';
+}
+
+function confirmExport() {
+  if (selectedIds.size === 0) return;
+  var selected = allRelations.filter(function(r) { return selectedIds.has(r.id); });
+  var exportData = selected.map(function(r) { return {
+    角色A: r.from_name || '',
+    角色B: r.to_name || '',
+    关系类型: r.relation_type || '',
+    关系描述: r.description || '',
+  };});
+  var jsonStr = JSON.stringify(exportData, null, 2);
+  var fileName = '关系网_' + selected.length + '条关系_' + new Date().toISOString().slice(0,10) + '.json';
+  saveExportFile(jsonStr, fileName, '已导出 ' + selected.length + ' 条关系');
+  cancelExport();
+}
+
+function saveExportFile(jsonStr, fileName, msg) {
+  if (typeof Android !== 'undefined' && Android.saveFile) {
+    var blob = new Blob([jsonStr], {type: 'application/json'});
+    var reader = new FileReader();
+    reader.onloadend = function() { Android.saveFile(reader.result, fileName); };
+    reader.readAsDataURL(blob);
+    showToast('请选择保存位置', 'success');
+  } else {
+    var blob = new Blob([jsonStr], {type: 'application/json'});
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(a.href);
+    showToast(msg, 'success');
+  }
 }
 
 // ============================================================

@@ -302,6 +302,39 @@
   .toast.success { background: #2d5a27; }
   .toast.error { background: var(--danger); }
 
+  /* ====== 关系类型标签 ====== */
+  .type-tabs {
+    display: flex; flex-wrap: wrap; gap: 8px;
+    padding: 16px 20px 12px; align-items: center;
+  }
+  .type-tab {
+    border: 1.5px solid var(--border); background: transparent;
+    padding: 7px 16px; border-radius: 20px; cursor: pointer;
+    font-size: .84rem; font-family: var(--font-sans); color: var(--text-light);
+    transition: var(--transition); display: inline-flex; align-items: center; gap: 6px;
+  }
+  .type-tab:hover { border-color: var(--accent-light); color: var(--accent); }
+  .type-tab.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .type-tab .tab-count {
+    font-size: .74rem; opacity: .7;
+  }
+  .type-tab.active .tab-count { opacity: .9; }
+
+  /* ====== 导出模式 ====== */
+  .rel-checkbox {
+    display: none; flex-shrink: 0;
+    width: 20px; height: 20px; cursor: pointer;
+    accent-color: var(--accent);
+  }
+  body.export-mode .rel-checkbox { display: block; }
+  body.export-mode .rel-item { cursor: default; }
+  body.export-mode .rel-info { cursor: pointer; }
+  body.export-mode .rel-item.selected {
+    border-color: var(--accent); background: var(--accent-pale);
+  }
+  body.export-mode .rel-item .drag-handle { display: none; }
+  body.export-mode .rel-item .rel-actions { display: none; }
+
   @media (max-width: 768px) {
     .header h1 { font-size: 1.4rem; }
     .graph-canvas-wrap { height: 340px; }
@@ -340,6 +373,9 @@
 </header>
 
 <div class="container">
+  <!-- 关系类型标签 -->
+  <div class="type-tabs" id="typeTabs"></div>
+
   <!-- 图形区域 -->
   <div class="graph-section">
     <div class="graph-header">
@@ -376,6 +412,12 @@
              placeholder="🔍 搜索关系（角色名/类型/描述）…"
              oninput="renderRelList()" autocomplete="off">
       <button class="btn btn-primary" onclick="openCreateModal()">＋ 添加关系</button>
+      <span id="exportActions" style="display:none;">
+        <button class="btn btn-outline btn-sm" onclick="toggleSelectAll()">全选</button>
+        <button class="btn btn-outline btn-sm" onclick="cancelExport()">放弃选择</button>
+        <button class="btn btn-primary" id="confirmExportBtn" onclick="confirmExport()" disabled>确认导出</button>
+      </span>
+      <button class="btn btn-outline btn-sm" id="exportBtn" onclick="enterExportMode()">📥 导出</button>
     </div>
   </div>
 
@@ -494,6 +536,12 @@ let allCharacters = [];
 let deleteTargetId = null;
 let selectedFromCharId = null;
 
+// 类型筛选 & 导出
+let activeType = '全部';
+let exportMode = false;
+let selectedIds = new Set();
+let visibleRelations = [];
+
 // 家族颜色配置
 const FAMILY_COLORS = [
   '#e74c3c', '#3498db', '#2ecc71', '#f39c12', '#9b59b6',
@@ -528,8 +576,14 @@ async function loadData() {
     allRelations = await relRes.json();
     allCharacters = await charRes.json();
 
+    // 清理已不存在的选中 ID
+    const currentIds = new Set(allRelations.map(r => r.id));
+    for (const id of selectedIds) { if (!currentIds.has(id)) selectedIds.delete(id); }
+    if (exportMode) updateExportButtons();
+
     buildNodeMap();
     buildEdges();
+    buildTypeTabs();
     renderRelList();
     initCanvas();
     drawGraph();
@@ -1370,14 +1424,21 @@ function renderRelList() {
   if (allRelations.length === 0) {
     list.innerHTML = '';
     empty.style.display = 'block';
+    empty.querySelector('p').textContent = '还没有建立角色关系，点击上方按钮添加吧';
     return;
   }
 
   // 搜索过滤
   const q = (document.getElementById('relSearchInput')?.value || '').trim().toLowerCase();
   let filtered = allRelations;
+
+  // 类型筛选
+  if (activeType !== '全部') {
+    filtered = filtered.filter(r => r.relation_type === activeType);
+  }
+
   if (q) {
-    filtered = allRelations.filter(r => {
+    filtered = filtered.filter(r => {
       const fromName = (r.from_name || '').toLowerCase();
       const toName = (r.to_name || '').toLowerCase();
       const type = (r.relation_type || '').toLowerCase();
@@ -1387,10 +1448,12 @@ function renderRelList() {
     });
   }
 
+  visibleRelations = filtered;
+
   if (filtered.length === 0) {
     list.innerHTML = '';
     empty.style.display = 'block';
-    empty.querySelector('p').textContent = '没有匹配的关系';
+    empty.querySelector('p').textContent = (q || activeType !== '全部') ? '没有匹配的关系' : '还没有建立角色关系，点击上方按钮添加吧';
     return;
   }
   empty.style.display = 'none';
@@ -1400,8 +1463,10 @@ function renderRelList() {
     const toName = r.to_name || '角色#' + r.to_char_id;
     const typeHtml = r.relation_type ? `<span class="rel-type ${r.relation_type === 'CP' ? 'rel-type-cp' : r.relation_type === '继承记忆' ? 'rel-type-memory' : r.relation_type === '参与组建' ? 'rel-type-formation' : r.relation_type === '师生' ? 'rel-type-teacher' : ''}">${esc(r.relation_type)}</span>` : '';
     const arrow = ['CP', '朋友', '冤家', '亲属'].includes(r.relation_type) ? '⇄' : '→';
+    const checked = selectedIds.has(r.id) ? 'checked' : '';
+    const selectedClass = selectedIds.has(r.id) ? ' selected' : '';
     return `
-      <div class="rel-item" id="rel-${r.id}" draggable="true" data-index="${i}"
+      <div class="rel-item${selectedClass}" id="rel-${r.id}" draggable="true" data-index="${i}" data-id="${r.id}"
            onmouseenter="highlightRelation(${r.id}, true)"
            onmouseleave="highlightRelation(${r.id}, false)"
            ondragstart="onRelDragStart(event, ${i})"
@@ -1410,8 +1475,9 @@ function renderRelList() {
            ondragenter="onRelDragEnter(event, this)"
            ondragleave="onRelDragLeave(event, this)"
            ondrop="onRelDrop(event, ${i})">
+        <input type="checkbox" class="rel-checkbox" ${checked} onchange="toggleCardSelect(${r.id}, this.checked)" onclick="event.stopPropagation()">
         <span class="drag-handle" title="拖动排序">⠿</span>
-        <div class="rel-info" onclick="openEditModal(${r.id})">
+        <div class="rel-info" onclick="${exportMode ? `toggleCardSelect(${r.id}, !${selectedIds.has(r.id)})` : `openEditModal(${r.id})`}">
           <div class="rel-names">
             ${esc(fromName)} <span class="arrow">${arrow}</span> ${esc(toName)}
             ${typeHtml}
@@ -1424,6 +1490,8 @@ function renderRelList() {
         </div>
       </div>`;
   }).join('');
+
+  if (exportMode) updateExportButtons();
 }
 
 function onRelDragStart(e, idx) {
@@ -1723,8 +1791,108 @@ document.getElementById('deleteOverlay').addEventListener('click', function(e) {
 document.addEventListener('keydown', function(e) {
   if (e.key === 'Escape') {
     closeModal(); closeDeleteModal(); closeInfoModal(); closeFamilyModal();
+    if (exportMode) cancelExport();
   }
 });
+
+// ====== 关系类型分类 ======
+const REL_TYPES = ['CP', '单箭头', '继承记忆', '参与组建', '师生', '朋友', '冤家', '亲属'];
+
+function buildTypeTabs() {
+  const container = document.getElementById('typeTabs');
+  if (!container) return;
+
+  // 按数量降序排列
+  const counts = {};
+  REL_TYPES.forEach(t => { counts[t] = 0; });
+  allRelations.forEach(r => {
+    if (r.relation_type && counts[r.relation_type] !== undefined) counts[r.relation_type]++;
+  });
+
+  // 全部标签
+  let html = `<button class="type-tab${activeType === '全部' ? ' active' : ''}" data-type="全部" onclick="selectType('全部')">全部<span class="tab-count">${allRelations.length}</span></button>`;
+
+  // 按数量降序排列类型标签
+  const orderedTypes = REL_TYPES.filter(t => counts[t] > 0).sort((a, b) => counts[b] - counts[a]);
+  for (const t of orderedTypes) {
+    html += `<button class="type-tab${activeType === t ? ' active' : ''}" data-type="${t}" onclick="selectType('${t}')">${t}<span class="tab-count">${counts[t]}</span></button>`;
+  }
+
+  container.innerHTML = html;
+}
+
+function selectType(type) {
+  activeType = type;
+  document.querySelectorAll('.type-tab').forEach(tab => tab.classList.remove('active'));
+  const tab = document.querySelector(`.type-tab[data-type="${type}"]`);
+  if (tab) tab.classList.add('active');
+  renderRelList();
+}
+
+// ====== 选择导出 ======
+function enterExportMode() {
+  exportMode = true;
+  selectedIds.clear();
+  document.body.classList.add('export-mode');
+  document.getElementById('exportBtn').style.display = 'none';
+  document.getElementById('exportActions').style.display = '';
+  renderRelList();
+}
+
+function cancelExport() {
+  exportMode = false;
+  selectedIds.clear();
+  document.body.classList.remove('export-mode');
+  document.getElementById('exportBtn').style.display = '';
+  document.getElementById('exportActions').style.display = 'none';
+  renderRelList();
+}
+
+function toggleCardSelect(id, checked) {
+  if (checked) selectedIds.add(id);
+  else selectedIds.delete(id);
+  const item = document.querySelector(`.rel-item[data-id="${id}"]`);
+  if (item) item.classList.toggle('selected', checked);
+  updateExportButtons();
+}
+
+function toggleSelectAll() {
+  const visibleIds = new Set(visibleRelations.map(r => r.id));
+  const selectedInView = visibleRelations.filter(r => selectedIds.has(r.id)).length;
+  if (selectedInView < visibleRelations.length) {
+    visibleRelations.forEach(r => selectedIds.add(r.id));
+  } else {
+    visibleRelations.forEach(r => selectedIds.delete(r.id));
+  }
+  renderRelList();
+}
+
+function updateExportButtons() {
+  const confirmBtn = document.getElementById('confirmExportBtn');
+  if (!confirmBtn) return;
+  confirmBtn.disabled = selectedIds.size === 0;
+  confirmBtn.textContent = selectedIds.size > 0 ? `确认导出 (${selectedIds.size})` : '确认导出';
+}
+
+function confirmExport() {
+  if (selectedIds.size === 0) return;
+  const selected = allRelations.filter(r => selectedIds.has(r.id));
+  const exportData = selected.map(r => ({
+    角色A: r.from_name || '',
+    角色B: r.to_name || '',
+    关系类型: r.relation_type || '',
+    关系描述: r.description || '',
+  }));
+  const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `关系网_${selected.length}条关系_${new Date().toISOString().slice(0,10)}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+  showToast(`已导出 ${selected.length} 条关系`, 'success');
+  cancelExport();
+}
 
 // --- Toast ---
 let toastTimer;
