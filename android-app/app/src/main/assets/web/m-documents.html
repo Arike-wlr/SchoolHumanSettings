@@ -11,7 +11,7 @@ if (location.protocol === 'file:') {
   document.addEventListener('DOMContentLoaded', function() {
     document.querySelectorAll('a[href]').forEach(function(a) {
       var h = a.getAttribute('href');
-      var map = {'/m':'m-index.html','/m/worldview':'m-worldview.html','/m/relations':'m-relations.html','/m/documents':'m-documents.html'};
+      var map = {'/m/home':'m-home.html','/m':'m-index.html','/m/worldview':'m-worldview.html','/m/relations':'m-relations.html','/m/documents':'m-documents.html'};
       if (map[h]) a.href = map[h];
     });
   });
@@ -174,6 +174,7 @@ if (location.protocol === 'file:') {
 </div>
 
 <nav class="bottom-nav">
+  <a href="/m/home" class="nav-item"><span class="nav-icon">🏠</span><span class="nav-text">首页</span></a>
   <a href="/m" class="nav-item"><span class="nav-icon">📖</span><span class="nav-text">角色</span></a>
   <a href="/m/worldview" class="nav-item"><span class="nav-icon">🌍</span><span class="nav-text">世界观</span></a>
   <a href="/m/relations" class="nav-item"><span class="nav-icon">🔗</span><span class="nav-text">关系网</span></a>

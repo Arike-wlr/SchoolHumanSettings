@@ -130,7 +130,7 @@ public class MainActivity extends AppCompatActivity {
 
         // 直接加载本地离线页面
         webView.setVisibility(View.VISIBLE);
-        webView.loadUrl("file:///android_asset/web/m-index.html");
+        webView.loadUrl("file:///android_asset/web/m-home.html");
     }
 
     /** JS 可调用的原生方法：弹出保存对话框并写入文件 */

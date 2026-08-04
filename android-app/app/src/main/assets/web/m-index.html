@@ -12,7 +12,7 @@ if (location.protocol === 'file:') {
   document.addEventListener('DOMContentLoaded', function() {
     document.querySelectorAll('a[href]').forEach(function(a) {
       var h = a.getAttribute('href');
-      var map = {'/m':'m-index.html','/m/worldview':'m-worldview.html','/m/relations':'m-relations.html','/m/documents':'m-documents.html'};
+      var map = {'/m/home':'m-home.html','/m':'m-index.html','/m/worldview':'m-worldview.html','/m/relations':'m-relations.html','/m/documents':'m-documents.html'};
       if (map[h]) a.href = map[h];
     });
   });
@@ -689,6 +689,10 @@ if (location.protocol === 'file:') {
 
 <!-- 底部导航 -->
 <nav class="bottom-nav">
+  <a href="/m/home" class="nav-item">
+    <span class="nav-icon">🏠</span>
+    <span class="nav-text">首页</span>
+  </a>
   <a href="/m" class="nav-item active">
     <span class="nav-icon">📖</span>
     <span class="nav-text">角色</span>
@@ -846,16 +850,41 @@ document.addEventListener('DOMContentLoaded', () => {
   loadCharacters();
 });
 
+// sessionStorage 缓存键
+const SKEY_CHARS = 'charCache';
+
+// 恢复缓存数据（立即显示，避免空白/加载动画）
+function _restoreCache(key, setter, renderFn) {
+  try {
+    const raw = sessionStorage.getItem(key);
+    if (raw) {
+      const data = JSON.parse(raw);
+      if (Array.isArray(data) && data.length > 0) {
+        setter(data);
+        renderFn();
+        document.getElementById('loadingState').style.display = 'none';
+        return true;
+      }
+    }
+  } catch(e) {}
+  return false;
+}
+function _saveCache(key, data) {
+  try { sessionStorage.setItem(key, JSON.stringify(data)); } catch(e) {}
+}
+function _clearCache(key) { try { sessionStorage.removeItem(key); } catch(e) {} }
+
 async function loadCharacters() {
+  const isCached = _restoreCache(SKEY_CHARS, d => { allCharacters = d; }, () => { buildRegionTabs(); applyFilter(); });
   try {
     const res = await fetch(API);
     allCharacters = await res.json();
-    document.getElementById('loadingState').style.display = 'none';
-    buildRegionTabs();
-    applyFilter();
+    _saveCache(SKEY_CHARS, allCharacters);
+    if (isCached) { buildRegionTabs(); applyFilter(); }
+    else { document.getElementById('loadingState').style.display = 'none'; buildRegionTabs(); applyFilter(); }
   } catch (e) {
     document.getElementById('loadingState').style.display = 'none';
-    showToast('加载失败，请确认后端已启动', 'error');
+    if (!isCached) showToast('加载失败，请确认后端已启动', 'error');
   }
 }
 
@@ -1424,6 +1453,7 @@ async function saveCharOrder() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ items: allCharacters.map((c, i) => ({ id: c.id, sort_order: i })) }),
     });
+    _saveCache(SKEY_CHARS, allCharacters);
   } catch(e) { /* 静默失败 */ }
 }
 

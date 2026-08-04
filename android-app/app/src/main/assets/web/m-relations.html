@@ -11,7 +11,7 @@ if (location.protocol === 'file:') {
   document.addEventListener('DOMContentLoaded', function() {
     document.querySelectorAll('a[href]').forEach(function(a) {
       var h = a.getAttribute('href');
-      var map = {'/m':'m-index.html','/m/worldview':'m-worldview.html','/m/relations':'m-relations.html','/m/documents':'m-documents.html'};
+      var map = {'/m/home':'m-home.html','/m':'m-index.html','/m/worldview':'m-worldview.html','/m/relations':'m-relations.html','/m/documents':'m-documents.html'};
       if (map[h]) a.href = map[h];
     });
   });
@@ -304,6 +304,7 @@ if (location.protocol === 'file:') {
 </div>
 
 <nav class="bottom-nav">
+  <a href="/m/home" class="nav-item"><span class="nav-icon">🏠</span><span class="nav-text">首页</span></a>
   <a href="/m" class="nav-item"><span class="nav-icon">📖</span><span class="nav-text">角色</span></a>
   <a href="/m/worldview" class="nav-item"><span class="nav-icon">🌍</span><span class="nav-text">世界观</span></a>
   <a href="/m/relations" class="nav-item active"><span class="nav-icon">🔗</span><span class="nav-text">关系网</span></a>
@@ -398,6 +399,7 @@ async function saveFamilies() {
   }
   closeFamilyModal();
   buildFamilyColors();
+  _saveCache(SKEY_CHARS, allCharacters);
   graphInit();
   renderRelList();
   showToast(`家族更新：${success} 成功${fail ? '，' + fail + ' 失败' : ''}`, fail ? 'error' : 'success');
@@ -412,11 +414,43 @@ document.addEventListener('DOMContentLoaded', () => {
   loadData();
 });
 
+// sessionStorage 缓存（跨页面瞬间恢复）
+const SKEY_CHARS = 'charCache';
+const SKEY_RELS = 'relCache';
+function _restoreCache(key, setter, renderFn) {
+  try {
+    const raw = sessionStorage.getItem(key);
+    if (raw) {
+      const data = JSON.parse(raw);
+      if (Array.isArray(data) && data.length > 0) {
+        setter(data);
+        if (renderFn) renderFn();
+        return true;
+      }
+    }
+  } catch(e) {}
+  return false;
+}
+function _saveCache(key, data) {
+  try { sessionStorage.setItem(key, JSON.stringify(data)); } catch(e) {}
+}
+function _clearCache(key) { try { sessionStorage.removeItem(key); } catch(e) {} }
+
 async function loadData() {
+  const charCached = _restoreCache(SKEY_CHARS, d => { allCharacters = d; });
+  const relCached = _restoreCache(SKEY_RELS, d => { allRelations = d; });
+  if (charCached && relCached) {
+    document.getElementById('loadingState').style.display = 'none';
+    buildTypeTabs();
+    renderRelList();
+    graphInit();
+  }
   try {
     const [relRes, charRes] = await Promise.all([fetch(API_REL), fetch(API_CHAR)]);
     allRelations = await relRes.json();
     allCharacters = await charRes.json();
+    _saveCache(SKEY_RELS, allRelations);
+    _saveCache(SKEY_CHARS, allCharacters);
 
     // 清理已不存在的选中 ID
     const currentIds = new Set(allRelations.map(r => r.id));
@@ -429,7 +463,7 @@ async function loadData() {
     graphInit();
   } catch(e) {
     document.getElementById('loadingState').style.display = 'none';
-    showToast('加载失败', 'error');
+    if (!charCached && !relCached) showToast('加载失败', 'error');
   }
 }
 
@@ -894,6 +928,7 @@ async function saveRelOrder() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ items: allRelations.map((r, i) => ({ id: r.id, sort_order: i })) }),
     });
+    _saveCache(SKEY_RELS, allRelations);
   } catch(e) { /* 静默失败 */ }
 }
 
