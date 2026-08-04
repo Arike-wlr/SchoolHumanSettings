@@ -114,6 +114,7 @@ if (location.protocol === 'file:') {
   .btn-export-trigger:active { background: var(--accent-pale); }
   .export-mode .btn-export-trigger { display: none; }
   .export-mode .sort-btn { display: none; }
+  .export-mode .type-tabs { display: none; }
 
   .empty { text-align: center; padding: 60px 20px; color: var(--text-light); }
   .empty .icon { font-size: 2.5rem; margin-bottom: 8px; opacity: .5; }
@@ -159,8 +160,6 @@ if (location.protocol === 'file:') {
   <p class="subtitle">角色之间的关系</p>
 </header>
 
-<div class="type-tabs" id="typeTabs"></div>
-
 <div class="toolbar">
   <span class="count">共 <strong id="relCount">…</strong> 条</span>
   <div class="search-wrap" id="searchWrap">
@@ -180,6 +179,8 @@ if (location.protocol === 'file:') {
   <button class="btn-export-primary" id="confirmExportBtn" onclick="confirmExport()" disabled>确认导出</button>
 </div>
 <button class="btn-export-trigger" id="exportBtn" onclick="enterExportMode()">📥 选择导出</button>
+
+<div class="type-tabs" id="typeTabs"></div>
 
 <!-- 关系图可视化 -->
 <div class="graph-section">

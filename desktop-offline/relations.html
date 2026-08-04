@@ -332,6 +332,7 @@
   body.export-mode .rel-item.selected {
     border-color: var(--accent); background: var(--accent-pale);
   }
+  body.export-mode .type-tabs { display: none; }
   body.export-mode .rel-item .drag-handle { display: none; }
   body.export-mode .rel-item .rel-actions { display: none; }
 
@@ -373,8 +374,6 @@
 </header>
 
 <div class="container">
-  <!-- 关系类型标签 -->
-  <div class="type-tabs" id="typeTabs"></div>
 
   <!-- 图形区域 -->
   <div class="graph-section">
@@ -420,6 +419,9 @@
       <button class="btn btn-outline btn-sm" id="exportBtn" onclick="enterExportMode()">📥 导出</button>
     </div>
   </div>
+
+  <!-- 关系类型标签 -->
+  <div class="type-tabs" id="typeTabs"></div>
 
   <div class="rel-list" id="relList"></div>
   <div class="empty" id="emptyState">
