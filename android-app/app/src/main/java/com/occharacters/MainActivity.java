@@ -139,6 +139,52 @@ public class MainActivity extends AppCompatActivity {
         public void saveFile(String base64Data, String fileName) {
             runOnUiThread(() -> doSaveFile(base64Data, fileName));
         }
+
+        /**
+         * 自动备份：把核心数据 JSON 写入 App 私有目录 files/data_backup.json。
+         * 私有目录不受"清理缓存/存储压力清理"影响（除非用户手动清除数据或卸载 App），
+         * 作为 IndexedDB 被系统误清的兜底。
+         */
+        @JavascriptInterface
+        public void saveBackup(String json) {
+            try {
+                java.io.File f = new java.io.File(getFilesDir(), "data_backup.json");
+                java.io.FileOutputStream fos = new java.io.FileOutputStream(f);
+                fos.write(json.getBytes("UTF-8"));
+                fos.close();
+            } catch (Exception e) {
+                // 备份失败不打断主流程
+            }
+        }
+
+        /** 读取自动备份内容；没有备份则返回空串 */
+        @JavascriptInterface
+        public String loadBackup() {
+            try {
+                java.io.File f = new java.io.File(getFilesDir(), "data_backup.json");
+                if (f.exists() && f.length() > 0) {
+                    java.io.FileInputStream fis = new java.io.FileInputStream(f);
+                    byte[] buf = new byte[(int) f.length()];
+                    int off = 0;
+                    while (off < buf.length) {
+                        int n = fis.read(buf, off, buf.length - off);
+                        if (n <= 0) break;
+                        off += n;
+                    }
+                    fis.close();
+                    return new String(buf, 0, off, "UTF-8");
+                }
+            } catch (Exception e) {
+                // ignore
+            }
+            return "";
+        }
+
+        /** 是否存在自动备份文件 */
+        @JavascriptInterface
+        public boolean hasBackup() {
+            return new java.io.File(getFilesDir(), "data_backup.json").exists();
+        }
     }
 
     private void doSaveFile(String base64Data, String fileName) {

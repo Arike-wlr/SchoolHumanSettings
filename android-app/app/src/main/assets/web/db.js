@@ -16,6 +16,27 @@ const SERVER_KEY = 'sync_server_url';  // 服务器地址存储 key
 
 let _db = null;
 
+// ===== 数据持久化加固 =====
+// 1) 请求"持久化存储"权限：在 Android WebView 中标记为持久后，
+//    系统/ROM 的自动清理和存储压力清理会更倾向跳过该站点的 IndexedDB，
+//    降低数据被无故清空的风险。
+(function requestPersistentStorage() {
+  if (navigator.storage && navigator.storage.persist) {
+    navigator.storage.persist().catch(function () {});
+  }
+})();
+
+// 2) 页面切后台/退出时触发一次无害只读事务，
+//    促使 WebView 尽快把尚未落盘的 IndexedDB 写入 flush 到磁盘，
+//    避免用户编辑完直接切后台/杀进程导致最后的写入丢失。
+document.addEventListener('visibilitychange', function () {
+  if (document.visibilityState === 'hidden' && _db) {
+    try {
+      _db.transaction(STORES.characters, 'readonly').objectStore(STORES.characters).getAll();
+    } catch (e) { /* ignore */ }
+  }
+});
+
 // 打开数据库
 function openDB() {
   return new Promise((resolve, reject) => {
@@ -51,7 +72,11 @@ async function tx(storeName, mode, fn) {
     const t = db.transaction(storeName, mode);
     const store = t.objectStore(storeName);
     let result;
-    t.oncomplete = () => resolve(result);
+    t.oncomplete = () => {
+      resolve(result);
+      // 写操作完成后自动触发原生文件备份（防抖合并）
+      if (mode === 'readwrite') scheduleBackup();
+    };
     t.onerror = () => reject(t.error);
     const r = fn(store);
     if (r) r.onsuccess = () => { result = r.result; };
@@ -272,3 +297,83 @@ const imageCacheDB = {
   // 清空缓存
   clear: () => clearStore(STORES.imageCache),
 };
+
+// ============= 原生文件备份（防数据丢失的双保险） =============
+// IndexedDB 在"系统存储空间不足被自动清理 / ROM 清理不常用 App 数据"时可能被清空。
+// 这里把核心数据（角色/世界/关系）定期写入 App 私有目录 files/data_backup.json，
+// 该目录不会被系统"清理缓存"影响；下次启动若检测到 IndexedDB 为空，可一键恢复。
+
+let _backupTimer = null;
+
+// 收集当前全部核心数据
+async function collectBackupData() {
+  const [chars, worlds, rels] = await Promise.all([
+    getAll(STORES.characters),
+    getAll(STORES.worldBuildings),
+    getAll(STORES.relations),
+  ]);
+  return JSON.stringify({
+    version: 1,
+    savedAt: Date.now(),
+    characters: chars,
+    worldBuildings: worlds,
+    relations: rels,
+  });
+}
+
+// 防抖保存备份（连续写操作 1.5s 内合并为一次）
+function scheduleBackup() {
+  if (!window.Android || !window.Android.saveBackup) return;
+  if (_backupTimer) clearTimeout(_backupTimer);
+  _backupTimer = setTimeout(async () => {
+    _backupTimer = null;
+    try {
+      window.Android.saveBackup(await collectBackupData());
+    } catch (e) { /* 备份失败不打断主流程 */ }
+  }, 1500);
+}
+
+// 页面切后台时立即备份，确保退出前数据已落盘
+document.addEventListener('visibilitychange', function () {
+  if (document.visibilityState === 'hidden' && window.Android && window.Android.saveBackup) {
+    if (_backupTimer) { clearTimeout(_backupTimer); _backupTimer = null; }
+    collectBackupData().then(function (json) {
+      try { window.Android.saveBackup(json); } catch (e) { }
+    });
+  }
+});
+
+// 启动恢复检查：IndexedDB 为空但存在原生备份时，询问用户是否恢复
+async function checkAndRestoreBackup() {
+  if (!window.Android || !window.Android.hasBackup || !window.Android.loadBackup) return;
+  try {
+    if (!window.Android.hasBackup()) return;
+    const chars = await getAll(STORES.characters);
+    if (chars.length > 0) return; // 有数据就不打扰
+    const json = window.Android.loadBackup();
+    if (!json) return;
+    const data = JSON.parse(json);
+    const list = data.characters || [];
+    if (!list.length) return;
+    const when = data.savedAt ? new Date(data.savedAt).toLocaleString() : '未知时间';
+    const ok = confirm('检测到本地备份（' + list.length + ' 个角色，备份于 ' + when + '）。\n\n当前数据为空，是否恢复？');
+    if (!ok) return;
+    await clearStore(STORES.characters);
+    await bulkInsert(STORES.characters, list);
+    if (data.worldBuildings && data.worldBuildings.length) {
+      await clearStore(STORES.worldBuildings);
+      await bulkInsert(STORES.worldBuildings, data.worldBuildings);
+    }
+    if (data.relations && data.relations.length) {
+      await clearStore(STORES.relations);
+      await bulkInsert(STORES.relations, data.relations);
+    }
+    alert('已从备份恢复 ' + list.length + ' 个角色！');
+    location.reload(); // 重新加载页面，让各视图从 IndexedDB 拉取数据
+  } catch (e) { /* 备份损坏等情况静默跳过 */ }
+}
+
+// 页面加载完成后执行恢复检查（此时各视图已初始化，若有备份则恢复后刷新）
+window.addEventListener('load', function () {
+  setTimeout(checkAndRestoreBackup, 500);
+});

@@ -256,9 +256,11 @@ body.home-active { background: linear-gradient(180deg, #3d2b1f 0%, #5a3e2b 40%, 
 .file-actions { display: flex; gap: 6px; flex-shrink: 0; }
 
 #view-documents .modal-overlay { background: rgba(0,0,0,.5); align-items: flex-end; justify-content: center; }
-#view-documents .modal { max-height: 92vh; border-radius: 16px 16px 0 0; animation: slideUp .25s ease-out; }
+#view-documents .modal { min-height: 0; max-height: 92vh; display: flex; flex-direction: column; border-radius: 16px 16px 0 0; animation: slideUp .25s ease-out; }
 @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
-#view-documents .modal-header { padding: 14px 16px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+#view-documents .modal-header { padding: 14px 16px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; flex-shrink: 0; }
+#view-documents .modal-body { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; padding-bottom: 24px; }
+#view-documents .modal-footer { flex-shrink: 0; }
 .modal-tag { font-size: .7rem; padding: 2px 8px; background: var(--accent-pale); color: var(--accent); border-radius: 10px; margin-left: 8px; flex-shrink: 0; }
 
 .doc-paragraph { font-size: .92rem; line-height: 1.8; margin: .6em 0; color: var(--text); }
