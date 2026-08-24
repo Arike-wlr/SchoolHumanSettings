@@ -112,6 +112,46 @@ APK 使用 debug 签名，安装时可能需要允许"未知来源"。
 | `SDK location not found` | 检查 `android-app/local.properties` 的 `sdk.dir` 路径 |
 | 下载 Gradle 失败 | 多试几次，或手动下载 [gradle-8.11.1-bin.zip](https://services.gradle.org/distributions/gradle-8.11.1-bin.zip) 解压到 `%USERPROFILE%\.gradle\wrappers\dists\gradle-8.11.1-bin\` |
 
+## 手机 ↔ 电脑同步（局域网）
+
+手机端 App 支持通过局域网与电脑上的后端双向同步数据（角色 / 世界设定 / 关系 / 文档 / 图片）。
+
+### 基本步骤
+
+1. 电脑上启动后端：`cd server && python backend.py`（监听 `0.0.0.0:8000`，局域网可达）
+2. 让手机和电脑处于**同一个局域网**：
+   - 手机和电脑连同一个路由器 WiFi；或
+   - 手机开热点，电脑连接该热点
+3. 在电脑上查询本机 IP：`ipconfig`（或 PowerShell：`Get-NetIPAddress -AddressFamily IPv4`），记下当前网络适配器的 IPv4 地址
+4. 手机浏览器访问 `http://<电脑IP>:8000` 验证连通性
+5. 打开 App → 同步 → 服务器地址填 `<电脑IP>:8000` → 测试 → 上传/下载
+
+### 常见问题
+
+| 现象 | 原因 | 解决 |
+|------|------|------|
+| 手机浏览器打不开 `http://电脑IP:8000`，但电脑本地 `http://127.0.0.1:8000` 正常 | Windows 防火墙将热点/WiFi 识别为"公用网络"，默认拦截入站连接 | 放行 8000 端口（见下方） |
+| 之前能连，换网络后连不上 | 电脑 IP 变了（换 WiFi / 换热点网段都会变） | 重新查 IP，更新同步设置里的地址 |
+| 手机端填 `localhost` / `127.0.0.1` | 手机上这些地址指向手机自己 | 填电脑的局域网 IP |
+| 手机热点仍连不上 | 手机热点开启了"AP 隔离 / 禁止设备互访" | 在手机热点设置中关闭 |
+
+### 放行防火墙 8000 端口
+
+方式一（图形界面）：
+1. Windows 安全中心 → 防火墙和网络保护 → 高级设置
+2. 入站规则 → 新建规则 → 端口 → TCP → 本地端口 `8000` → 允许连接 → 配置文件全选 → 命名保存
+
+方式二（管理员 PowerShell）：
+```powershell
+netsh advfirewall firewall add rule name="OC Backend 8000" dir=in action=allow protocol=TCP localport=8000
+```
+
+方式三（一键排查脚本，位于 `server/check_sync.ps1`）：
+```powershell
+powershell -ExecutionPolicy Bypass -File server/check_sync.ps1        # 只诊断
+powershell -ExecutionPolicy Bypass -File server/check_sync.ps1 -Fix   # 诊断 + 自动放行（需管理员）
+```
+
 ## 数据存储
 
 | 数据 | 存储位置 |
