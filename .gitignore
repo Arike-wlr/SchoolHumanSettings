@@ -64,6 +64,8 @@ apks/
 # android-app-spa/ 的 web 文件会被复制到 android-app/app/src/main/assets/web/
 # 以下为构建中间产物/工作缓存
 .codebuddy/
+.trae/
+.agents/
 
 # ============================================================
 # 构建工具临时文件
