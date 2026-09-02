@@ -312,6 +312,7 @@ VM.index = (function() {
     }).catch(function(){showToast('获取数据失败','error');});
   }
 
+  var _autoSaveInProgress = false;
   function doSubmitFinal(editId, data) {
     var allImages=currentImageUrls.concat(data.newUrls||[]);
     if(allImages.length>0){data.images=allImages;data.image_url=allImages[0];}
@@ -321,8 +322,10 @@ VM.index = (function() {
     var method=editId?'PUT':'POST';
     fetch(url,{method:method,headers:{'Content-Type':'application/json'},body:JSON.stringify(data)}).then(function(r){
       if(!r.ok)throw new Error();
+      _autoSaveInProgress = true;
       closeModal();resetImageUpload();loadCharacters();
       showToast(editId?'已更新':'已创建','success');
+      setTimeout(function(){ _autoSaveInProgress = false; }, 800);
     }).catch(function(){showToast('操作失败','error');});
   }
 
@@ -374,7 +377,24 @@ VM.index = (function() {
       closeDeleteModal();loadCharacters();showToast('已删除','success');
     }).catch(function(){showToast('删除失败','error');});
   }
-  function closeModal(){document.getElementById('indexModalOverlay').classList.remove('active');}
+  function closeModal(){
+    if (_autoSaveInProgress) {
+      // doSubmitFinal 成功后调用，直接关闭
+      document.getElementById('indexModalOverlay').classList.remove('active');
+      return;
+    }
+    var form=document.getElementById('indexCharForm');
+    if (form.checkValidity()) {
+      // 表单有效，自动保存
+      submitForm({preventDefault:function(){}});
+      setTimeout(function(){
+        document.getElementById('indexModalOverlay').classList.remove('active');
+      }, 500);
+      return;
+    }
+    // 表单无效，直接关闭（不保存）
+    document.getElementById('indexModalOverlay').classList.remove('active');
+  }
 
   function openDetailModal(id){
     fetch(API+'/'+id).then(function(r){return r.json();}).then(function(c){
@@ -560,6 +580,7 @@ VM.worldview = (function() {
   var detailEntryId = null;
   var selectedIds = new Set();
   var exportMode = false;
+  var _autoSaveInProgress = false;
 
   // 触控拖拽
   var _tdEnabled = false, _tdEl = null, _tdGhost = null, _tdIdx = -1;
@@ -717,13 +738,16 @@ VM.worldview = (function() {
       category: document.getElementById('worldCategoryInput').value.trim(),
       content: document.getElementById('worldContent').value.trim()
     };
+    if (!data.title) { showToast('标题不能为空', 'error'); return; }
     var url = editId ? API + '/' + editId : API;
     var method = editId ? 'PUT' : 'POST';
     fetch(url, { method: method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }).then(function(r) {
       if (!r.ok) throw new Error();
+      _autoSaveInProgress = true;
       closeModal();
       loadEntries();
       showToast(editId ? '已更新' : '已创建', 'success');
+      setTimeout(function() { _autoSaveInProgress = false; }, 800);
     }).catch(function() { showToast('操作失败', 'error'); });
   }
 
@@ -739,7 +763,28 @@ VM.worldview = (function() {
       closeDeleteModal(); loadEntries(); showToast('已删除', 'success');
     }).catch(function() { showToast('删除失败', 'error'); });
   }
-  function closeModal() { document.getElementById('worldModalOverlay').classList.remove('active'); }
+  function closeModal() {
+    if (_autoSaveInProgress) {
+      _autoSaveInProgress = false;
+      document.getElementById('worldModalOverlay').classList.remove('active');
+      return;
+    }
+    var title = document.getElementById('worldTitle').value.trim();
+    var content = document.getElementById('worldContent').value.trim();
+    if (title || content) {
+      submitForm({ preventDefault: function() {} });
+      setTimeout(function() {
+        document.getElementById('worldModalOverlay').classList.remove('active');
+      }, 500);
+      return;
+    }
+    document.getElementById('worldModalOverlay').classList.remove('active');
+  }
+
+  function cancelEdit() {
+    _autoSaveInProgress = false;
+    document.getElementById('worldModalOverlay').classList.remove('active');
+  }
 
   function openDetailModal(id) {
     fetch(API + '/' + id).then(function(r) { return r.json(); }).then(function(e) {
@@ -1046,6 +1091,7 @@ VM.relations = (function() {
   var activeType = '全部';
   var exportMode = false;
   var selectedIds = new Set();
+  var _autoSaveInProgress = false;
   var REL_TYPES = ['CP', '单箭头', '继承记忆', '参与组建', '师生', '朋友', '冤家', '亲属'];
   var familyEditMap = {};
 
@@ -1198,7 +1244,9 @@ VM.relations = (function() {
     var method = editId ? 'PUT' : 'POST';
     fetch(url, { method: method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }).then(function(r) {
       if (!r.ok) return r.json().then(function(e) { throw new Error(e.detail || '操作失败'); });
+      _autoSaveInProgress = true;
       closeModal(); loadData(); showToast(editId ? '已更新' : '已创建', 'success');
+      setTimeout(function() { _autoSaveInProgress = false; }, 800);
     }).catch(function(e) { showToast(e.message || '操作失败', 'error'); });
   }
 
@@ -1214,7 +1262,28 @@ VM.relations = (function() {
       closeDeleteModal(); loadData(); showToast('已删除', 'success');
     }).catch(function() { showToast('删除失败', 'error'); });
   }
-  function closeModal() { document.getElementById('relModalOverlay').classList.remove('active'); }
+  function closeModal() {
+    if (_autoSaveInProgress) {
+      _autoSaveInProgress = false;
+      document.getElementById('relModalOverlay').classList.remove('active');
+      return;
+    }
+    var fromId = document.getElementById('relFromChar').value;
+    var toId = document.getElementById('relToChar').value;
+    if (fromId && toId) {
+      submitForm({ preventDefault: function() {} });
+      setTimeout(function() {
+        document.getElementById('relModalOverlay').classList.remove('active');
+      }, 500);
+      return;
+    }
+    document.getElementById('relModalOverlay').classList.remove('active');
+  }
+
+  function cancelEdit() {
+    _autoSaveInProgress = false;
+    document.getElementById('relModalOverlay').classList.remove('active');
+  }
 
   function infoRow(l, v) {
     if (!v) return '';
