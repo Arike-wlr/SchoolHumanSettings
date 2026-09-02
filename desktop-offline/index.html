@@ -741,11 +741,15 @@
   }
 
   .detail-footer {
-    padding: 16px 28px 22px;
+    padding: 14px 28px 18px;
     display: flex;
     justify-content: flex-end;
     gap: 10px;
     border-top: 1px solid #f0e8dc;
+    position: sticky;
+    bottom: 0;
+    background: var(--card-bg);
+    z-index: 3;
   }
 
   /* ====== Toast ====== */
@@ -982,12 +986,12 @@
           <span id="detailStatus"></span>
         </div>
       </div>
-      <button class="detail-close" onclick="closeDetailModal()">✕</button>
     </div>
     <div class="detail-image" id="detailImage" style="display: none; padding: 0 20px; margin-bottom: 16px;"></div>
     <div class="detail-body" id="detailBody"></div>
     <div class="detail-footer">
-      <button class="btn btn-primary btn-sm" onclick="closeDetailModal()">关闭</button>
+      <button class="btn btn-ghost btn-sm" onclick="closeDetailModal()">关闭</button>
+      <button class="btn btn-primary btn-sm" onclick="detailEdit()">编辑</button>
     </div>
   </div>
 </div>
@@ -1557,8 +1561,9 @@ function closeDetailModal() {
 
 function detailEdit() {
   if (detailCharId) {
+    const id = detailCharId;
     closeDetailModal();
-    openEditModal(detailCharId);
+    openEditModal(id);
   }
 }
 

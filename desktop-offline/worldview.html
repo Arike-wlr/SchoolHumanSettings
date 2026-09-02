@@ -270,6 +270,10 @@
     font-size: .73rem; color: var(--accent); background: var(--accent-pale);
     padding: 2px 10px; border-radius: 20px; letter-spacing: .03em; font-weight: 500;
   }
+  .cat-group { margin: 8px 0 6px; grid-column: 1 / -1; }
+  .cat-group-title { font-family: var(--font-serif); font-size: 1.1rem; color: var(--accent); letter-spacing: .06em; margin: 0 0 12px; padding-bottom: 6px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px; }
+  .cat-group-title .tab-count { font-size: .75rem; opacity: .7; color: var(--text-light); margin-left: 3px; }
+  .card-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 16px; }
 
   .card-body {
     padding: 8px 22px; flex: 1; overflow: hidden;
@@ -403,8 +407,9 @@
   .detail-section .detail-value.muted { color: var(--text-light); font-style: italic; }
 
   .detail-footer {
-    padding: 16px 28px 22px; display: flex; justify-content: flex-end;
+    padding: 14px 28px 18px; display: flex; justify-content: flex-end;
     gap: 10px; border-top: 1px solid #e6efe9;
+    position: sticky; bottom: 0; background: var(--card-bg); z-index: 3;
   }
 
   /* ====== Toast ====== */
@@ -551,11 +556,11 @@
         <h2 id="detailTitle"></h2>
         <span class="cat-tag" id="detailCat" style="display:none;"></span>
       </div>
-      <button class="detail-close" onclick="closeDetailModal()">✕</button>
     </div>
     <div class="detail-body" id="detailBody"></div>
     <div class="detail-footer">
-      <button class="btn btn-primary btn-sm" onclick="closeDetailModal()">关闭</button>
+      <button class="btn btn-ghost btn-sm" onclick="closeDetailModal()">关闭</button>
+      <button class="btn btn-primary btn-sm" onclick="detailEdit()">编辑</button>
     </div>
   </div>
 </div>
@@ -692,7 +697,24 @@ function renderGrid(entries) {
   }
   noResult.style.display = 'none';
 
-  grid.innerHTML = entries.map(e => cardHTML(e)).join('');
+  if (activeCategory === '全部' && !searchVal) {
+    const groups = {};
+    for (const e of entries) {
+      const cat = e.category || '未分类';
+      if (!groups[cat]) groups[cat] = [];
+      groups[cat].push(e);
+    }
+    const orderedCats = Object.entries(groups).sort((a,b)=>b[1].length - a[1].length).map(x=>x[0]);
+    let html = '';
+    for (const cat of orderedCats) {
+      html += `<div class="cat-group"><h3 class="cat-group-title">${esc(cat)} <span class="tab-count">${groups[cat].length}</span></h3><div class="card-row">`;
+      html += groups[cat].map(e => cardHTML(e)).join('');
+      html += `</div></div>`;
+    }
+    grid.innerHTML = html;
+  } else {
+    grid.innerHTML = entries.map(e => cardHTML(e)).join('');
+  }
   if (exportMode) updateExportButtons();
 }
 
@@ -859,7 +881,11 @@ function closeDetailModal() {
 }
 
 function detailEdit() {
-  if (detailEntryId) { closeDetailModal(); openEditModal(detailEntryId); }
+  if (detailEntryId) {
+    const id = detailEntryId;
+    closeDetailModal();
+    openEditModal(id);
+  }
 }
 
 function detailDelete() {
