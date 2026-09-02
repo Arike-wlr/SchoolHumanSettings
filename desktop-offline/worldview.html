@@ -524,7 +524,7 @@
       </form>
     </div>
     <div class="modal-footer">
-      <button class="btn btn-ghost" type="button" onclick="closeModal()">取消</button>
+      <button class="btn btn-ghost" type="button" onclick="cancelEdit()">取消</button>
       <button class="btn btn-primary" type="button" id="submitBtn" onclick="submitForm(event)">确认添加</button>
     </div>
   </div>
@@ -804,9 +804,11 @@ async function submitForm(e) {
       body: JSON.stringify(data),
     });
     if (!res.ok) throw new Error();
+    _autoSaveInProgress = true;
     closeModal();
     loadEntries();
     showToast(editId ? '设定已更新' : '设定已创建', 'success');
+    setTimeout(function() { _autoSaveInProgress = false; }, 800);
   } catch (err) {
     showToast('操作失败，请重试', 'error');
   }
@@ -835,7 +837,26 @@ async function confirmDelete() {
 }
 
 // ====== Modal ======
+var _autoSaveInProgress = false;
 function closeModal() {
+  if (_autoSaveInProgress) {
+    _autoSaveInProgress = false;
+    document.getElementById('modalOverlay').classList.remove('active');
+    return;
+  }
+  const form = document.getElementById('entryForm');
+  if (form && form.checkValidity()) {
+    submitForm({ preventDefault: function() {} });
+    setTimeout(function() {
+      document.getElementById('modalOverlay').classList.remove('active');
+    }, 500);
+    return;
+  }
+  document.getElementById('modalOverlay').classList.remove('active');
+}
+
+function cancelEdit() {
+  _autoSaveInProgress = false;
   document.getElementById('modalOverlay').classList.remove('active');
 }
 

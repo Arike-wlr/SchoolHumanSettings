@@ -378,23 +378,34 @@ VM.index = (function() {
     }).catch(function(){showToast('删除失败','error');});
   }
   function closeModal(){
+    // 默认行为：直接关闭不保存
+    document.getElementById('indexModalOverlay').classList.remove('active');
+  }
+
+  function closeModalAutoSave(){
+    // ✕ 按钮和点击遮罩时调用：表单有效则自动保存
     if (_autoSaveInProgress) {
-      // doSubmitFinal 成功后调用，直接关闭
+      _autoSaveInProgress = false;
       document.getElementById('indexModalOverlay').classList.remove('active');
       return;
     }
     var form=document.getElementById('indexCharForm');
     if (form.checkValidity()) {
-      // 表单有效，自动保存
       submitForm({preventDefault:function(){}});
       setTimeout(function(){
         document.getElementById('indexModalOverlay').classList.remove('active');
       }, 500);
       return;
     }
-    // 表单无效，直接关闭（不保存）
     document.getElementById('indexModalOverlay').classList.remove('active');
   }
+
+  function cancelEdit() {
+    _autoSaveInProgress = false;
+    document.getElementById('indexModalOverlay').classList.remove('active');
+  }
+  window.cancelEditIndex = cancelEdit;
+  window.closeModalAutoSaveIndex = closeModalAutoSave;
 
   function openDetailModal(id){
     fetch(API+'/'+id).then(function(r){return r.json();}).then(function(c){
@@ -783,6 +794,10 @@ VM.worldview = (function() {
     }).catch(function() { showToast('删除失败', 'error'); });
   }
   function closeModal() {
+    document.getElementById('worldModalOverlay').classList.remove('active');
+  }
+
+  function closeModalAutoSave() {
     if (_autoSaveInProgress) {
       _autoSaveInProgress = false;
       document.getElementById('worldModalOverlay').classList.remove('active');
@@ -804,6 +819,8 @@ VM.worldview = (function() {
     _autoSaveInProgress = false;
     document.getElementById('worldModalOverlay').classList.remove('active');
   }
+  window.cancelEditWorld = cancelEdit;
+  window.closeModalAutoSaveWorld = closeModalAutoSave;
 
   function openDetailModal(id) {
     fetch(API + '/' + id).then(function(r) { return r.json(); }).then(function(e) {
@@ -1282,6 +1299,10 @@ VM.relations = (function() {
     }).catch(function() { showToast('删除失败', 'error'); });
   }
   function closeModal() {
+    document.getElementById('relModalOverlay').classList.remove('active');
+  }
+
+  function closeModalAutoSave() {
     if (_autoSaveInProgress) {
       _autoSaveInProgress = false;
       document.getElementById('relModalOverlay').classList.remove('active');
@@ -1303,6 +1324,8 @@ VM.relations = (function() {
     _autoSaveInProgress = false;
     document.getElementById('relModalOverlay').classList.remove('active');
   }
+  window.cancelEditRel = cancelEdit;
+  window.closeModalAutoSaveRel = closeModalAutoSave;
 
   function infoRow(l, v) {
     if (!v) return '';

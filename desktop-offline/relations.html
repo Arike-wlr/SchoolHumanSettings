@@ -474,7 +474,7 @@
       </form>
     </div>
     <div class="modal-footer">
-      <button class="btn btn-ghost" onclick="closeModal()">取消</button>
+      <button class="btn btn-ghost" onclick="cancelEdit()">取消</button>
       <button class="btn btn-primary" id="submitBtn" onclick="submitForm(event)">确认添加</button>
     </div>
   </div>
@@ -1744,16 +1744,41 @@ async function submitForm(e) {
       body: JSON.stringify(data),
     });
     if (!res.ok) { const err = await res.json(); throw new Error(err.detail || '操作失败'); }
+    _autoSaveInProgress = true;
     closeModal();
     selectedFromCharId = null;
     loadData();
     showToast(editId ? '关系已更新' : '关系已创建', 'success');
+    setTimeout(function() { _autoSaveInProgress = false; }, 800);
   } catch(e) {
     showToast(e.message || '操作失败', 'error');
   }
 }
 
 function closeModal() {
+  if (_autoSaveInProgress) {
+    _autoSaveInProgress = false;
+    selectedFromCharId = null;
+    document.getElementById('modalOverlay').classList.remove('active');
+    return;
+  }
+  var fromId = document.getElementById('fromChar').value;
+  var toId = document.getElementById('toChar').value;
+  if (fromId && toId) {
+    submitForm({ preventDefault: function() {} });
+    setTimeout(function() {
+      selectedFromCharId = null;
+      document.getElementById('modalOverlay').classList.remove('active');
+    }, 500);
+    return;
+  }
+  selectedFromCharId = null;
+  document.getElementById('modalOverlay').classList.remove('active');
+}
+
+function cancelEdit() {
+  _autoSaveInProgress = false;
+  selectedFromCharId = null;
   document.getElementById('modalOverlay').classList.remove('active');
 }
 
