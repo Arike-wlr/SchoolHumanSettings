@@ -1,7 +1,13 @@
 """
 高校拟人 OC 设定管理 - FastAPI 后端
+
+启动方式：
+    python backend.py                    # 使用默认端口 8000
+    python backend.py --port 8080        # 使用自定义端口
+    python backend.py --port=9000
 """
 
+import argparse
 import sqlite3
 import os
 import json
@@ -1234,4 +1240,10 @@ if os.path.exists(IMAGE_DIR):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    # 解析命令行参数
+    parser = argparse.ArgumentParser(description="高校拟人 OC 设定管理 - FastAPI 后端")
+    parser.add_argument("--port", type=int, default=8000, help="服务端口（默认 8000）")
+    args = parser.parse_args()
+
+    print(f"启动服务: http://0.0.0.0:{args.port}")
+    uvicorn.run(app, host="0.0.0.0", port=args.port)
