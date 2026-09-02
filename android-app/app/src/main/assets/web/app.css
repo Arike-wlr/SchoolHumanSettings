@@ -186,6 +186,10 @@ body.home-active { background: linear-gradient(180deg, #3d2b1f 0%, #5a3e2b 40%, 
 #view-worldview .card:active { transform: scale(.98); }
 #view-worldview .card-header { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; flex-wrap: wrap; }
 .cat-tag { font-size: .72rem; color: var(--accent); background: var(--accent-pale); padding: 2px 8px; border-radius: 10px; }
+ .cat-group { margin-bottom: 16px; }
+ .cat-group-title { font-family: var(--font-serif); font-size: 1.05rem; color: var(--accent); letter-spacing: .06em; padding-bottom: 6px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px; margin: 0 0 10px; }
+ .cat-group-title .tab-count { font-size: .75rem; opacity: .7; color: var(--text-light); margin-left: 3px; }
+ .card-row { display: grid; grid-template-columns: 1fr; gap: 10px; }
 .content-preview { font-size: .85rem; color: var(--text-light); line-height: 1.6; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 #view-worldview .card-actions { display: flex; gap: 8px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
 

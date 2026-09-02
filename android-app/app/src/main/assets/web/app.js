@@ -683,7 +683,26 @@ VM.worldview = (function() {
     noResult.style.display = 'none';
     var idxMap = {};
     entries.forEach(function(e) { idxMap[e.id] = allEntries.indexOf(e); });
-    grid.innerHTML = entries.map(function(e) { return cardHTML(e, idxMap[e.id]); }).join('');
+    if (activeCategory === '全部' && !sv) {
+      var groups = {};
+      for (var i = 0; i < entries.length; i++) {
+        var e = entries[i];
+        var cat = e.category || '未分类';
+        if (!groups[cat]) groups[cat] = [];
+        groups[cat].push(e);
+      }
+      var orderedCats = Object.keys(groups).sort(function(a,b){return groups[b].length - groups[a].length;});
+      var html = '';
+      for (var i = 0; i < orderedCats.length; i++) {
+        var cat = orderedCats[i];
+        html += '<div class="cat-group"><h3 class="cat-group-title">' + esc(cat) + ' <span class="tab-count">' + groups[cat].length + '</span></h3><div class="card-row">';
+        html += groups[cat].map(function(e) { return cardHTML(e, idxMap[e.id]); }).join('');
+        html += '</div></div>';
+      }
+      grid.innerHTML = html;
+    } else {
+      grid.innerHTML = entries.map(function(e) { return cardHTML(e, idxMap[e.id]); }).join('');
+    }
     if (exportMode) updateExportButtons();
   }
 
