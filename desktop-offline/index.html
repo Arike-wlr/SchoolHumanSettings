@@ -1168,7 +1168,6 @@ function cardHTML(c) {
   // 前4个字段（地区/诞生地/身高/生日）与图片并排，设定和"点击查看"放下方
   const topFields = `
     ${c.alias ? fieldRowShort('别名', c.alias) : ''}
-    ${c.birthplace ? fieldRowShort('诞生地', c.birthplace) : ''}
     ${c.height ? fieldRowShort('身高', c.height) : ''}
     ${c.birthday ? fieldRowShort('生日', c.birthday) : ''}
   `;
