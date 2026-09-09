@@ -1246,4 +1246,5 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     print(f"启动服务: http://0.0.0.0:{args.port}")
+    print(f"访问桌面版: http://localhost:{args.port}/")
     uvicorn.run(app, host="0.0.0.0", port=args.port)
