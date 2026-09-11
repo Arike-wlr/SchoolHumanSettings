@@ -36,7 +36,8 @@ async function handleApiRequest(url, init) {
       // 不带 projection 时保持现状全量响应（向后兼容，其它调用方与既有测试不变）。
       const projection = queryParams.get('projection');
       if (projection === 'list' || projection === 'names') {
-        return makeResponse(await listCharactersLiteShared(projection));
+        // slice：与默认全量分支一致，让调用方拿到独立数组（本地排序/编辑不影响共享读取）
+        return makeResponse((await listCharactersLiteShared(projection)).slice());
       }
       // 同一轮内与关系页共享这份角色读取；slice 让调用方拿到独立数组，
       // 之后本地排序/编辑不会影响本轮关系名称补全使用的数据。

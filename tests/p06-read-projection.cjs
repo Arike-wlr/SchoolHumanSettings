@@ -97,7 +97,8 @@ function sampleCharacters() {
       id: i + 1, name: '角色' + (i + 1), alias: '别名' + i, university: '高校' + (i % 7),
       region: '地区' + (i % 6), gender: (i % 2) ? '女' : '男', status: '存在',
       height: '16' + (i % 10), birthday: '01-0' + ((i % 9) + 1), setting: '设定文本'.repeat(6),
-      appearance: '外貌' + (i + 1), identity_period: '', birth_time: '', naming_rationale: '',
+      appearance: '外貌' + (i + 1), identity_period: '存在期' + (i + 1), birth_time: '诞生于' + (i + 1),
+      naming_rationale: '取名依据' + (i + 1), birthplace: '诞生地' + (i + 1),
       family: '家族' + (i % 8), sort_order: i, images, image_url: images[0] || '',
     });
   }
@@ -483,6 +484,58 @@ async function main() {
     }
     report.counts.leakage = { exportBytes: bytesOf(exportProj), backupBytes: bytesOf(backup) };
     ok('⑦-no-leak', '导出与基线逐字相同；备份/上传不含 thumbs 或投影字段');
+  }
+
+  // ================= ⑧ 字段覆盖守卫（防复发）：列表路径消费者读到的字段必须被投影覆盖 =================
+  // 首轮缺陷（CONTRACT rev10：`LITE_TEXT_FIELDS` 漏 `birthplace` ⇒ 导出丢"诞生地"）就是因为
+  // 字段表与消费方需求脱钩、且样本缺该字段导致假绿。这里把"消费方字段 ⊆ 投影字段表"变成机器检查。
+  {
+    const api = makeCtx();
+    await backfillThumbs(api);
+    const list = await api.json('/api/characters?projection=list');
+    const liteFields = new Set(api.fields);
+    // 允许的派生/非文本字段（不要求出现在 LITE_TEXT_FIELDS 中）
+    const ALLOWED_NON_TEXT = ['id', 'images', 'image_url', 'thumbs', 'firstRef', 'firstRefSig',
+      'images_count', 'needsOriginal', 'sort_order'];
+    // 守卫实现（抽成函数以便自检它真的能报错）
+    const checkCovered = fields => {
+      const missing = [...fields].filter(f => !liteFields.has(f) && !ALLOWED_NON_TEXT.includes(f));
+      assert.deepEqual(missing, [], '列表路径消费的字段必须有投影覆盖（缺：' + missing.join(',') + '）');
+    };
+    assert.throws(() => checkCovered(['__definitely_missing__']), '字段覆盖守卫必须能报错（守卫自检）');
+
+    // 取"角色页模块"的四个列表路径消费者（首次出现即 index 模块）；sanity 断言防止提取错模块
+    const consumers = [
+      { name: 'confirmExport', sanity: '姓名:' },
+      { name: 'cardHTML', sanity: 'card-name' },
+      { name: 'cardSig', sanity: 'imgSig' },
+      { name: 'applyFilter', sanity: 'indexSearchInput' },
+    ];
+    const consumerFields = new Set();
+    const perConsumer = {};
+    for (const c of consumers) {
+      const src = extractFunction(APP, c.name);
+      assert.ok(src.indexOf(c.sanity) !== -1, `提取到的 ${c.name} 必须是角色页模块的实现`);
+      const found = [...src.matchAll(/\bc\.([A-Za-z_][A-Za-z0-9_]*)/g)].map(m => m[1]);
+      perConsumer[c.name] = [...new Set(found)].sort();
+      found.forEach(f => consumerFields.add(f));
+    }
+    checkCovered(consumerFields);
+    const textFields = [...consumerFields].filter(f => !ALLOWED_NON_TEXT.includes(f)).sort();
+    assert.ok(textFields.length >= 14, '应覆盖到列表消费的全部文本字段，实际 ' + textFields.length);
+    for (const f of ['name', 'university', 'region', 'birthplace']) {
+      assert.ok(consumerFields.has(f), '守卫必须实际看到字段 ' + f);
+    }
+    // 端到端：消费者读到的文本字段必须在投影载荷上真实存在且与源记录一致
+    for (const proj of list) {
+      const full = api.charRow(proj.id);
+      for (const f of textFields) {
+        assert.equal(f in proj, f in full, `投影必须携带消费者字段 ${f} (id=${proj.id})`);
+        if (f in full) assert.equal(proj[f], full[f], `投影字段值必须一致 ${f} (id=${proj.id})`);
+      }
+    }
+    report.counts.fieldCoverage = { textFields, perConsumer };
+    ok('⑧-field-coverage', '列表路径消费字段 ⊆ 投影字段表（' + textFields.length + ' 项，含 birthplace）且投影载荷齐全；守卫自检可报错');
   }
 
   // ================= 版本与只读兼容 =================

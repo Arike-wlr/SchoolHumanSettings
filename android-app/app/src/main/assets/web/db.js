@@ -127,7 +127,10 @@ async function getAllKeys(storeName) {
 // 列表只需要文本字段 + 首图缩略图 + 图数；关系页只需要 id/name/学校/家族。
 // 投影把这两页的读取从"物化全部原图 base64"降到"只读所需字段"，而 images/image_url
 // 仍原样留在 characters 里，详情/导出/同步/备份一律走原图（D006）。
-const LITE_TEXT_FIELDS = ['name', 'alias', 'university', 'region', 'gender', 'status', 'height',
+// 本表必须覆盖**列表路径消费方的字段全集**（cardHTML/cardSig/applyFilter/confirmExport；
+// 见 CONTRACT rev10 的 F9），否则导出等产物会静默丢字段（首轮漏 birthplace 的教训）；
+// 由 tests/p06-read-projection.cjs 的 Gate ⑧ 机器守卫。
+const LITE_TEXT_FIELDS = ['name', 'alias', 'university', 'region', 'birthplace', 'gender', 'status', 'height',
   'birthday', 'appearance', 'identity_period', 'birth_time', 'naming_rationale', 'setting', 'family'];
 
 // 与 app.js 的 normalizeImages 同规则：images 数组长度；为空时看 image_url。
