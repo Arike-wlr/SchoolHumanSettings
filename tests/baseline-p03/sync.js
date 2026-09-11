@@ -215,7 +215,6 @@ function cacheServerUrls(record) {
   return urls;
 }
 
-// 一轮同步只做一次 imageCache 全表读取，之后所有查询都复用这份引用索引。
 async function loadImageCacheIndex() {
   const rows = imageCacheDB.listAll ? await imageCacheDB.listAll() : [];
   const byDataUrl = new Map();
@@ -224,17 +223,7 @@ async function loadImageCacheIndex() {
     if (row && row.dataUrl) byDataUrl.set(row.dataUrl, row);
     cacheServerUrls(row).forEach(url => byServerUrl.set(url, row));
   });
-  return {
-    rows,
-    byDataUrl,
-    byServerUrl,
-    // 本轮同步结束：释放索引引用，避免继续持有大图记录。
-    release() {
-      rows.length = 0;
-      byDataUrl.clear();
-      byServerUrl.clear();
-    },
-  };
+  return { rows, byDataUrl, byServerUrl };
 }
 
 function cacheRecordForData(index, dataUrl) {
@@ -313,7 +302,6 @@ async function convertServerImagesToDataUrl(characters, serverUrl, onProgress) {
     const images = imageList(c).map(ref => dataByRef.has(ref) ? dataByRef.get(ref) : ref);
     setImageList(c, images);
   }
-  cacheIndex.release();
   return { total: entries.size, skipped };
 }
 
@@ -390,11 +378,7 @@ async function convertDataUrlImagesToServerUrl(characters, serverUrl, onProgress
       if (!result || typeof result.image_url !== 'string' || !result.image_url) throw imageFailure('图片上传响应缺少 image_url', 'IMAGE_UPLOAD');
       const fullUrl = resolveServerImageUrl(base, result.image_url);
       await imageCacheDB.set(dataUrl, fullUrl, cacheIndex.rows);
-      const stored = cacheIndex.rows.find(row => row.dataUrl === dataUrl);
-      if (stored) {
-        cacheIndex.byDataUrl.set(dataUrl, stored);
-        cacheIndex.byServerUrl.set(fullUrl, stored);
-      }
+      cacheIndex.byDataUrl.set(dataUrl, cacheIndex.rows.find(row => row.dataUrl === dataUrl));
       serverRefByData.set(dataUrl, serverImageRef(fullUrl, base));
     } catch (error) {
       console.warn('图片上传失败:', error);

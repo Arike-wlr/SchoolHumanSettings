@@ -109,7 +109,6 @@ async function getById(storeName, id) {
 
 // 新增（不指定 id，自增）
 async function add(storeName, data) {
-  if (storeName === STORES.characters) invalidateCharactersShared();
   const db = await openDB();
   return new Promise((resolve, reject) => {
     const t = db.transaction(storeName, 'readwrite');
@@ -121,7 +120,6 @@ async function add(storeName, data) {
 
 // 更新（必须有 id）
 async function put(storeName, data) {
-  if (storeName === STORES.characters) invalidateCharactersShared();
   const db = await openDB();
   return new Promise((resolve, reject) => {
     const t = db.transaction(storeName, 'readwrite');
@@ -133,7 +131,6 @@ async function put(storeName, data) {
 
 // 删除
 async function del(storeName, id) {
-  if (storeName === STORES.characters) invalidateCharactersShared();
   const db = await openDB();
   return new Promise((resolve, reject) => {
     const t = db.transaction(storeName, 'readwrite');
@@ -145,7 +142,6 @@ async function del(storeName, id) {
 
 // 清空 store（用于同步覆盖）
 async function clearStore(storeName) {
-  if (storeName === STORES.characters) invalidateCharactersShared();
   const db = await openDB();
   return new Promise((resolve, reject) => {
     const t = db.transaction(storeName, 'readwrite');
@@ -157,7 +153,6 @@ async function clearStore(storeName) {
 
 // 批量插入（同步用）
 async function bulkInsert(storeName, items) {
-  if (storeName === STORES.characters) invalidateCharactersShared();
   const db = await openDB();
   return new Promise((resolve, reject) => {
     const t = db.transaction(storeName, 'readwrite');
@@ -173,44 +168,6 @@ async function bulkInsert(storeName, items) {
 
 // ============= 业务 API =============
 
-// ============= 派生缩略图的原子写入 =============
-// 缩略图是派生缓存，写入只允许改 thumbs、绝不整条覆盖记录——
-// 整条覆盖会回退并发的同步/编辑写入（data loss）。因此这里在同一事务内做 read-modify-write，
-// 不经过 put() 的整条替换；也不引入任何原生备份触发。
-// （既有事实：scheduleBackup 只挂在从未被调用的 tx() 上，常规 CRUD 本就不触发备份，
-//   备份只在页面隐藏时通过 visibilitychange 发生。）
-function firstImageRefOf(record) {
-  if (!record) return '';
-  let imgs = record.images;
-  if (typeof imgs === 'string') { try { imgs = JSON.parse(imgs); } catch (e) { imgs = []; } }
-  if (!Array.isArray(imgs)) imgs = [];
-  if (imgs.length === 0 && record.image_url) return record.image_url;
-  return imgs[0] || '';
-}
-
-// 仅当记录当前首图仍等于生成缩略图时所用的引用时才写入 thumbs（否则视为过期）。
-// 返回 'ok' | 'stale' | 'missing'。
-async function updateCharacterThumb(id, expectFirstImage, thumb) {
-  const db = await openDB();
-  return new Promise((resolve, reject) => {
-    const t = db.transaction(STORES.characters, 'readwrite');
-    const store = t.objectStore(STORES.characters);
-    const req = store.get(id);
-    req.onerror = () => reject(req.error || new Error('读取角色失败'));
-    req.onsuccess = () => {
-      const record = req.result;
-      if (!record) return resolve('missing');
-      // 生成期间记录被并发修改（同步/编辑）且首图已变：不得写入，交由后续 backfill 重生成。
-      if (firstImageRefOf(record) !== expectFirstImage) return resolve('stale');
-      if (Array.isArray(record.thumbs) && record.thumbs[0]) return resolve('ok');   // 已有，不重复写
-      record.thumbs = [thumb];
-      const putReq = store.put(record);
-      putReq.onerror = () => reject(putReq.error || new Error('写入缩略图失败'));
-      t.oncomplete = () => resolve('ok');   // 以事务提交为准
-    };
-  });
-}
-
 // ----- 角色 -----
 const charDB = {
   list: async () => {
@@ -220,23 +177,10 @@ const charDB = {
   get: (id) => getById(STORES.characters, id),
   create: (data) => add(STORES.characters, data),
   update: (data) => put(STORES.characters, data),
-  updateThumb: (id, expectFirstImage, thumb) => updateCharacterThumb(id, expectFirstImage, thumb),
   delete: (id) => del(STORES.characters, id),
   clear: () => clearStore(STORES.characters),
   bulkSet: (items) => bulkInsert(STORES.characters, items),
 };
-
-// ============= 同一轮共享的角色读取 =============
-// 同一轮并发请求（例如关系页同时取 /api/relations 与 /api/characters）只做一次角色全量读取，
-// 关系名称补全复用这份读取；读取结束后立即释放共享引用，任何角色写入都会使它失效。
-let _sharedCharList = null;
-function listCharactersShared() {
-  if (!_sharedCharList) {
-    _sharedCharList = charDB.list().finally(function () { _sharedCharList = null; });
-  }
-  return _sharedCharList;
-}
-function invalidateCharactersShared() { _sharedCharList = null; }
 
 // ----- 世界设定 -----
 const worldDB = {
@@ -337,79 +281,38 @@ const imageCacheDB = {
       return { ...c, serverUrl: c.serverUrl || urls[0] || '', serverUrls: urls };
     });
   },
-  // 通过 dataUrl 查找已缓存的服务器URL。
-  // hash 只是索引，完整 dataUrl 才是身份，且允许同一原图对应多个服务器地址。
-  // 用现有主键 get 逐级校验（hash 碰撞时按 _N 后缀），不为一两张图做全表读取。
-  async lookupByDataUrl(dataUrl) {
-    if (!dataUrl) return null;
-    const baseHash = imageHash(dataUrl);
-    let key = baseHash;
-    let suffix = 0;
-    for (;;) {
-      const record = await getById(STORES.imageCache, key);
-      if (!record) return null;
-      if (record.dataUrl === dataUrl) {
-        const urls = Array.isArray(record.serverUrls) ? record.serverUrls.slice() : [];
-        if (record.serverUrl && !urls.includes(record.serverUrl)) urls.unshift(record.serverUrl);
-        return { ...record, serverUrl: record.serverUrl || urls[0] || '', serverUrls: urls };
-      }
-      key = baseHash + '_' + (++suffix);
-      if (suffix > 1000) return null;
-    }
-  },
-  // 通过 dataUrl 查找（兼容入口，等价于主键校验查找）
+  // 通过 dataUrl 查找已缓存的服务器URL
   async getByDataUrl(dataUrl) {
-    return this.lookupByDataUrl(dataUrl);
+    const all = await this.listAll();
+    // hash 只是索引；完整 dataUrl 才是身份，且允许同一原图对应多个服务器地址。
+    return all.find(c => c.dataUrl === dataUrl);
   },
   // 通过 serverUrl 查找已缓存的 dataUrl
   async getByServerUrl(serverUrl) {
     const all = await this.listAll();
     return all.find(c => c.serverUrl === serverUrl || (Array.isArray(c.serverUrls) && c.serverUrls.includes(serverUrl)));
   },
-  // 存入缓存：本轮已有完整值索引时只用内存索引；没有索引时用主键 get 链定位，不读全表。
+  // 存入缓存
   async set(dataUrl, serverUrl, knownRecords) {
     if (!dataUrl || !serverUrl) return;
-    if (Array.isArray(knownRecords)) {
-      const existing = knownRecords.find(c => c.dataUrl === dataUrl);
-      if (existing) {
-        const urls = Array.isArray(existing.serverUrls) ? existing.serverUrls.slice() : [];
-        if (existing.serverUrl && !urls.includes(existing.serverUrl)) urls.unshift(existing.serverUrl);
-        if (!urls.includes(serverUrl)) urls.push(serverUrl);
-        existing.serverUrls = urls;
-        existing.serverUrl = existing.serverUrl || urls[0] || serverUrl;
-        await put(STORES.imageCache, existing);
-        return existing;
-      }
+    const all = Array.isArray(knownRecords) ? knownRecords : await this.listAll();
+    const existing = all.find(c => c.dataUrl === dataUrl);
+    if (existing) {
+      const urls = Array.isArray(existing.serverUrls) ? existing.serverUrls.slice() : [];
+      if (existing.serverUrl && !urls.includes(existing.serverUrl)) urls.unshift(existing.serverUrl);
+      if (!urls.includes(serverUrl)) urls.push(serverUrl);
+      existing.serverUrls = urls;
+      existing.serverUrl = existing.serverUrl || urls[0] || serverUrl;
+      await put(STORES.imageCache, existing);
+      return;
+    } else {
       const baseHash = imageHash(dataUrl);
       let key = baseHash;
       let suffix = 0;
-      while (knownRecords.some(c => c.hash === key && c.dataUrl !== dataUrl)) key = baseHash + '_' + (++suffix);
+      while (all.some(c => c.hash === key && c.dataUrl !== dataUrl)) key = baseHash + '_' + (++suffix);
       const record = { hash: key, dataUrl, serverUrl, serverUrls: [serverUrl] };
       await put(STORES.imageCache, record);
-      knownRecords.push(record);
-      return record;
-    }
-    const baseHash = imageHash(dataUrl);
-    let key = baseHash;
-    let suffix = 0;
-    for (;;) {
-      const record = await getById(STORES.imageCache, key);
-      if (!record) {
-        const created = { hash: key, dataUrl, serverUrl, serverUrls: [serverUrl] };
-        await put(STORES.imageCache, created);
-        return created;
-      }
-      if (record.dataUrl === dataUrl) {
-        const urls = Array.isArray(record.serverUrls) ? record.serverUrls.slice() : [];
-        if (record.serverUrl && !urls.includes(record.serverUrl)) urls.unshift(record.serverUrl);
-        if (!urls.includes(serverUrl)) urls.push(serverUrl);
-        record.serverUrls = urls;
-        record.serverUrl = record.serverUrl || urls[0] || serverUrl;
-        await put(STORES.imageCache, record);
-        return record;
-      }
-      key = baseHash + '_' + (++suffix);
-      if (suffix > 1000) throw new Error('图片缓存 hash 冲突过多');
+      if (Array.isArray(knownRecords)) knownRecords.push(record);
     }
   },
   // 清空缓存
@@ -433,19 +336,9 @@ async function collectBackupData() {
   return JSON.stringify({
     version: 1,
     savedAt: Date.now(),
-    characters: stripDerivedThumbs(chars),
+    characters: chars,
     worldBuildings: worlds,
     relations: rels,
-  });
-}
-
-// 派生缩略图（thumbs）不进备份：与恢复语义无关，只增体积；恢复后由渲染侧 backfill 重新生成。
-function stripDerivedThumbs(list) {
-  return list.map(c => {
-    if (!c || !c.thumbs) return c;
-    const copy = { ...c };
-    delete copy.thumbs;
-    return copy;
   });
 }
 

@@ -273,6 +273,7 @@ body.home-active { background: linear-gradient(180deg, #3d2b1f 0%, #5a3e2b 40%, 
 .doc-image { text-align: center; margin: 1em 0; }
 .doc-image img { max-width: 100%; height: auto; border-radius: 8px; box-shadow: 0 2px 12px rgba(0,0,0,.1); }
 .doc-image-caption { font-size: .8rem; color: var(--text-light); margin-top: 6px; }
+.image-repair-hint { display:flex; align-items:center; justify-content:center; min-height:48px; padding:6px; color:var(--text-light); font-size:.72rem; text-align:center; }
 .docx-html p { font-size: .92rem; line-height: 1.8; margin: .6em 0; color: var(--text); }
 .docx-html h1, .docx-html h2, .docx-html h3 { font-weight: 600; margin: 1em 0 .5em; color: var(--text); }
 .docx-html h1 { font-size: 1.2rem; } .docx-html h2 { font-size: 1.1rem; } .docx-html h3 { font-size: 1rem; }

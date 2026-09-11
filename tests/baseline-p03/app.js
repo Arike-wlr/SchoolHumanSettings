@@ -32,121 +32,31 @@ function saveExportFile(jsonStr, fileName, msg) {
     showToast(msg, 'success');
   }
 }
-/* ============================================================
-   视图间共享的内存数据（不再向 sessionStorage 序列化记录）
-   序列化含原图的角色记录既慢又会产生重复副本；改为保留内存引用，
-   由 window.appDataRevision（写入/同步后自增）判定是否仍然有效。
-   ============================================================ */
-var _sharedCharacters = { revision: -1, data: null };
-function _putSharedCharacters(data, revision) { _sharedCharacters = { revision: revision, data: data }; }
-function _getSharedCharacters(revision) {
-  return (_sharedCharacters.data && _sharedCharacters.revision === revision) ? _sharedCharacters.data : null;
-}
-
-/* ============================================================
-   列表 DOM 复用：按稳定 key 复用节点，只重建内容变化的节点；
-   数据不变时整个列表 DOM 保持不变，不做整表重建。
-   ============================================================ */
-function nodeFromHTML(html) {
-  var holder = document.createElement('div');
-  holder.innerHTML = html;
-  return holder.firstElementChild;
-}
-function renderKeyedList(container, items) {
-  var existing = {};
-  var i;
-  for (i = 0; i < container.children.length; i++) {
-    var old = container.children[i];
-    var oldKey = old.getAttribute && old.getAttribute('data-key');
-    if (oldKey) existing[oldKey] = old;
-  }
-  var kept = [];
-  var cursor = container.firstChild;
-  for (i = 0; i < items.length; i++) {
-    var item = items[i];
-    var node = existing[item.key];
-    if (!node) {
-      node = nodeFromHTML(item.html());
-    } else if (node.getAttribute('data-sig') !== item.sig) {
-      var fresh = nodeFromHTML(item.html());
-      container.replaceChild(fresh, node);
-      node = fresh;
+function _restoreCache(key, setter, renderFn) {
+  try {
+    var raw = sessionStorage.getItem(key);
+    if (raw) {
+      var data = JSON.parse(raw);
+      if (Array.isArray(data) && data.length > 0) {
+        setter(data);
+        if (renderFn) renderFn();
+        return true;
+      }
     }
-    node.setAttribute('data-key', item.key);
-    node.setAttribute('data-sig', item.sig);
-    kept.push(node);
-    if (node !== cursor) container.insertBefore(node, cursor);
-    cursor = node.nextSibling;
-  }
-  var keepKeys = {};
-  for (i = 0; i < kept.length; i++) keepKeys[kept[i].getAttribute('data-key')] = true;
-  var remaining = Array.prototype.slice.call(container.children);
-  for (i = 0; i < remaining.length; i++) {
-    if (!keepKeys[remaining[i].getAttribute('data-key')]) container.removeChild(remaining[i]);
-  }
+  } catch(e) {}
+  return false;
 }
-// 图片引用签名：不逐字比较可能上百 KB 的原图 data URL，只用长度+头尾判断是否变化。
-function imageRefSig(ref) {
-  var s = String(ref || '');
-  return s.length + '\u0001' + s.slice(0, 24) + '\u0001' + s.slice(-16);
-}
-
-/* ============================================================
-   卡片缩略图（派生缓存，见 D004）
-   列表卡片只显示 images[0]，且显示盒仅 88×64 CSS px。直接内嵌原图 base64
-   会把上百 MiB 文本塞进 DOM 并触发全分辨率解码。这里按“显示盒 × devicePixelRatio”
-   等比降采样，保证 cover 裁剪后无需放大；原图 images 原样保留供详情/导出/同步。
-   ============================================================ */
-var CARD_BOX_W = 88, CARD_BOX_H = 64;
-
-// 目标尺寸：两维都不小于显示物理像素（cover 后不放大）；源图更小则不放大。
-function thumbTargetSize(w, h, dpr) {
-  var s = Math.max((CARD_BOX_W * dpr) / w, (CARD_BOX_H * dpr) / h);
-  if (!isFinite(s) || s <= 0 || s > 1) s = 1;
-  return { w: Math.max(1, Math.round(w * s)), h: Math.max(1, Math.round(h * s)) };
-}
-
-// 缩略图是否含透明通道（决定 PNG/JPEG）；取不到像素时保守用 PNG。
-function thumbCanvasHasAlpha(ctx, w, h) {
-  try {
-    var d = ctx.getImageData(0, 0, w, h).data;
-    for (var i = 3; i < d.length; i += 4) { if (d[i] < 255) return true; }
-    return false;
-  } catch (e) { return true; }
-}
-
-// 由 data URL / Blob 生成卡片缩略图 data URL；失败返回空串（调用方回退原图）。
-async function makeCardThumb(source) {
-  // 老 WebView 无 createImageBitmap：不生成缩略图，卡片继续用原图（行为不变，仅无收益）。
-  if (typeof createImageBitmap !== 'function') return '';
-  var blob = (source instanceof Blob) ? source : dataUrlToBlob(source);
-  var bmp = null;
-  try {
-    // 每张图只解码一次：直接由已解码位图让画布降采样，不再为取宽高做第二次全分辨率解码。
-    bmp = await createImageBitmap(blob);
-    var dpr = (typeof window !== 'undefined' && window.devicePixelRatio) ? window.devicePixelRatio : 1;
-    var t = thumbTargetSize(bmp.width, bmp.height, dpr);
-    var canvas = document.createElement('canvas');
-    canvas.width = t.w; canvas.height = t.h;
-    var ctx = canvas.getContext('2d');
-    if ('imageSmoothingEnabled' in ctx) ctx.imageSmoothingEnabled = true;
-    if ('imageSmoothingQuality' in ctx) ctx.imageSmoothingQuality = 'high';
-    ctx.drawImage(bmp, 0, 0, t.w, t.h);
-    return thumbCanvasHasAlpha(ctx, t.w, t.h)
-      ? canvas.toDataURL('image/png')
-      : canvas.toDataURL('image/jpeg', 0.92);
-  } catch (e) {
-    return '';
-  } finally {
-    if (bmp && bmp.close) bmp.close();
-  }
-}
-
-// 首图缩略图（并行数组，本阶段只填 index 0）。
-function cardThumbOf(c) {
-  if (!c || !Array.isArray(c.thumbs)) return '';
-  return (typeof c.thumbs[0] === 'string' && c.thumbs[0]) ? c.thumbs[0] : '';
-}
+ function _saveCache(key, data) {
+   try {
+     var safe = Array.isArray(data) ? data.map(function(item) {
+       var copy = Object.assign({}, item);
+       if (Array.isArray(copy.images)) copy.images = copy.images.filter(function(ref) { return !/^data:/i.test(String(ref || '')); });
+       if (/^data:/i.test(String(copy.image_url || ''))) copy.image_url = '';
+       return copy;
+     }) : data;
+     sessionStorage.setItem(key, JSON.stringify(safe));
+   } catch(e) {}
+ }
 
 /* ============================================================
    导航
@@ -194,6 +104,7 @@ function markAppDataChanged() { window.appDataRevision = (window.appDataRevision
 // ======================== 角色设定 ========================
 VM.index = (function() {
   var API = '/api/characters';
+  var SKEY = 'charCache';
   var deleteTargetId = null;
   var allCharacters = [];
   var activeRegion = '全部';
@@ -205,9 +116,6 @@ VM.index = (function() {
   var detailImages = [];
   var detailImageIdx = 0;
   var loadGeneration = 0;
-  var loadedRevision = -1;   // 已加载完成的数据版本（同版本返回不再查询/重绘）
-  var loadingRevision = -1;  // 同版本请求在途标记，避免重复发起
-  var regionTabsSig = null;
 
   function normalizeImages(c) {
     var imgs = c.images;
@@ -261,44 +169,22 @@ VM.index = (function() {
     document.getElementById('indexImage').value = '';
   }
 
-  var _detailView = null;
-
-  // 结构只创建一次；切换图片只更新主图 src、计数与缩略图选中态。
   function renderDetailImage() {
     var imgs = detailImages;
     var wrap = document.getElementById('indexDetailImage');
-    _detailView = null;
     if (!imgs || imgs.length===0) { wrap.style.display='none'; wrap.innerHTML=''; return; }
     var btn='width:32px;height:32px;border-radius:50%;border:1px solid var(--border);background:var(--bg);cursor:pointer;font-size:18px;line-height:1;color:var(--text);flex-shrink:0;';
     var sp='<span style="display:inline-block;width:32px;flex-shrink:0;"></span>';
     var prev=detailImageIdx>0?'<button onclick="VM.index.detailImageGo('+(detailImageIdx-1)+')" style="'+btn+'">‹</button>':sp;
     var next=detailImageIdx<imgs.length-1?'<button onclick="VM.index.detailImageGo('+(detailImageIdx+1)+')" style="'+btn+'">›</button>':sp;
-    var multi=imgs.length>1;
-    var cnt=multi?'<div id="indexDetailCounter" style="font-size:0.75rem;color:var(--text-light);margin-top:4px;"></div>':'';
-    var thumbs=multi?imgs.map(function(u,i){var src=safeImageSrc(u);return src?'<img data-thumb="'+i+'" src="'+src+'" onclick="VM.index.detailImageGo('+i+')" style="width:42px;height:42px;object-fit:cover;border-radius:4px;cursor:pointer;border:2px solid transparent;">':'<div data-thumb="'+i+'" class="image-repair-hint" onclick="VM.index.detailImageGo('+i+')" style="cursor:pointer;">图片不可用</div>';}).join(''):'';
-    wrap.innerHTML='<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">'+prev+'<div style="flex:1;text-align:center;min-width:0;">'+
-      '<img id="indexDetailMain" style="max-width:100%;max-height:240px;border-radius:6px;object-fit:contain;display:none;">'+
-      '<div id="indexDetailHint" class="image-repair-hint" style="display:none;">图片不可用，请重新同步</div>'+cnt+'</div>'+next+'</div>'+
-      (thumbs?'<div style="display:flex;gap:6px;justify-content:center;flex-wrap:wrap;">'+thumbs+'</div>':'');
+    var cnt=imgs.length>1?'<div style="font-size:0.75rem;color:var(--text-light);margin-top:4px;">'+(detailImageIdx+1)+' / '+imgs.length+'</div>':'';
+    var thumbs=imgs.length>1?imgs.map(function(u,i){var src=safeImageSrc(u);return src?'<img src="'+src+'" onclick="VM.index.detailImageGo('+i+')" style="width:42px;height:42px;object-fit:cover;border-radius:4px;cursor:pointer;border:2px solid '+(i===detailImageIdx?'var(--primary)':'transparent')+';">':imageRepairHint();}).join(''):'';
+    var mainSrc=safeImageSrc(imgs[detailImageIdx]);
+    wrap.innerHTML='<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">'+prev+'<div style="flex:1;text-align:center;min-width:0;">'+(mainSrc?'<img src="'+mainSrc+'" style="max-width:100%;max-height:240px;border-radius:6px;object-fit:contain;">':imageRepairHint())+cnt+'</div>'+next+'</div>'+(thumbs?'<div style="display:flex;gap:6px;justify-content:center;flex-wrap:wrap;">'+thumbs+'</div>':'');
     wrap.style.display='block';
-    _detailView={imgs:imgs,main:document.getElementById('indexDetailMain'),hint:document.getElementById('indexDetailHint'),counter:document.getElementById('indexDetailCounter'),thumbs:multi?wrap.querySelectorAll('[data-thumb]'):[]};
-    updateDetailImage();
   }
 
-  function updateDetailImage() {
-    if (!_detailView) return;
-    var idx = detailImageIdx;
-    var src = safeImageSrc(_detailView.imgs[idx]);
-    if (src) { _detailView.main.src = src; _detailView.main.style.display=''; _detailView.hint.style.display='none'; }
-    else { _detailView.main.removeAttribute('src'); _detailView.main.style.display='none'; _detailView.hint.style.display=''; }
-    if (_detailView.counter) _detailView.counter.textContent = (idx+1)+' / '+_detailView.imgs.length;
-    for (var i = 0; i < _detailView.thumbs.length; i++) {
-      var el = _detailView.thumbs[i];
-      if (el.tagName === 'IMG') el.style.borderColor = (i === idx) ? 'var(--primary)' : 'transparent';
-    }
-  }
-
-  function detailImageGo(idx) { if (idx>=0 && idx<detailImages.length) { detailImageIdx=idx; updateDetailImage(); } }
+  function detailImageGo(idx) { if (idx>=0 && idx<detailImages.length) { detailImageIdx=idx; renderDetailImage(); } }
 
   function groupByRegion(chars) {
     var g = {};
@@ -312,9 +198,6 @@ VM.index = (function() {
     var ordered=Object.entries(g).filter(function(e){return e[1].length>0;}).sort(function(a,b){return b[1].length-a[1].length;}).map(function(e){return e[0];});
     var h='<button class="region-tab'+(activeRegion==='全部'?' active':'')+'" data-region="全部" onclick="VM.index.selectRegion(\'全部\')">全部<span class="tab-count">'+allCharacters.length+'</span></button>';
     for (var i=0;i<ordered.length;i++) { var r=ordered[i]; h+='<button class="region-tab'+(activeRegion===r?' active':'')+'" data-region="'+esc(r)+'" onclick="VM.index.selectRegion(\''+esc(r)+'\')">'+esc(r)+'<span class="tab-count">'+g[r].length+'</span></button>'; }
-    var sig=activeRegion+'\u0001'+h;
-    if (sig===regionTabsSig) return;   // 未变化：保留现有 tab DOM
-    regionTabsSig=sig;
     ct.innerHTML=h;
   }
 
@@ -326,17 +209,14 @@ VM.index = (function() {
     applyFilter();
   }
 
-  var searchTimer = null;
   function onSearch() {
     var v=document.getElementById('indexSearchInput').value.trim();
     document.getElementById('indexSearchWrap').classList.toggle('has-value', v.length>0);
-    if(searchTimer)clearTimeout(searchTimer);
-    searchTimer=setTimeout(function(){searchTimer=null;applyFilter();},120);   // 输入防抖，避免每个字符都重建列表
+    applyFilter();
   }
   function clearSearch() {
     document.getElementById('indexSearchInput').value='';
     document.getElementById('indexSearchWrap').classList.remove('has-value');
-    if(searchTimer){clearTimeout(searchTimer);searchTimer=null;}
     applyFilter();
   }
 
@@ -358,11 +238,10 @@ VM.index = (function() {
     var tp=t.length>80?t.substring(0,80)+'…':t;
     var ni=normalizeImages(c);
     var ic=ni.length, cu=ni[0]||'';
-    var cv=cardThumbOf(c)||cu;   // 优先派生缩略图；缺失时回退原图（行为不变）
     var ph='';
     if(cu&&cu.trim()!==''){
       var bd=ic>1?'<span style="position:absolute;right:2px;bottom:2px;background:rgba(0,0,0,0.65);color:#fff;font-size:10px;padding:1px 4px;border-radius:7px;line-height:1.3;">共'+ic+'张</span>':'';
-      ph='<div style="flex-shrink:0;width:88px;position:relative;align-self:stretch;margin-right:4px;margin-top:4px;min-height:64px;"><div style="width:88px;height:100%;border-radius:4px;overflow:hidden;border:1px solid var(--border);background:#f8f9fa;">'+(safeImageSrc(cv)?'<img src="'+safeImageSrc(cv)+'" alt="'+esc(c.name)+'" loading="lazy" style="width:100%;height:100%;object-fit:cover;">':imageRepairHint())+'</div>'+bd+'</div>';
+      ph='<div style="flex-shrink:0;width:88px;position:relative;align-self:stretch;margin-right:4px;margin-top:4px;min-height:64px;"><div style="width:88px;height:100%;border-radius:4px;overflow:hidden;border:1px solid var(--border);background:#f8f9fa;">'+(safeImageSrc(cu)?'<img src="'+safeImageSrc(cu)+'" alt="'+esc(c.name)+'" loading="lazy" style="width:100%;height:100%;object-fit:cover;">':imageRepairHint())+'</div>'+bd+'</div>';
     }
     var tf='';
     if(c.alias) tf+='<div class="field-row"><span class="field-label">别名</span><span class="field-value">'+esc(c.alias)+'</span></div>';
@@ -381,16 +260,6 @@ VM.index = (function() {
       '<div class="card-actions"><button class="btn-action" onclick="event.stopPropagation();VM.index.openEditModal('+c.id+')">编辑</button><button class="btn-action danger" onclick="event.stopPropagation();VM.index.openDeleteModal('+c.id+',\''+esc(c.name)+'\')">删除</button></div></div>';
   }
 
-  // 卡片签名：覆盖 cardHTML 用到的全部字段，签名相同就不重建该节点。
-  function cardSig(c, gIdx) {
-    var imgs = normalizeImages(c);
-    var imgSig = '';
-    for (var i = 0; i < imgs.length; i++) imgSig += imageRefSig(imgs[i]) + '|';
-    return [c.id, gIdx, c.name, c.alias, c.university, c.region, c.gender, c.status, c.height, c.birthday,
-      c.setting, c.appearance, c.identity_period, c.birth_time, c.naming_rationale,
-      imgSig, imageRefSig(cardThumbOf(c)), (exportMode && selectedIds.has(c.id)) ? 'sel' : ''].join('\u0001');
-  }
-
   function renderGrid(chars) {
     var grid=document.getElementById('charGrid');
     var empty=document.getElementById('indexEmptyState');
@@ -398,107 +267,40 @@ VM.index = (function() {
     var cnt=document.getElementById('charCount');
     var sv=document.getElementById('indexSearchInput').value.trim();
     cnt.textContent=(sv||activeRegion!=='全部')?chars.length+'/'+allCharacters.length:allCharacters.length;
-    if(allCharacters.length===0){renderKeyedList(grid,[]);empty.style.display='block';nr.style.display='none';return;}
+    if(allCharacters.length===0){grid.innerHTML='';empty.style.display='block';nr.style.display='none';return;}
     empty.style.display='none';
-    if(chars.length===0&&(sv||activeRegion!=='全部')){renderKeyedList(grid,[]);nr.style.display='block';return;}
+    if(chars.length===0&&(sv||activeRegion!=='全部')){grid.innerHTML='';nr.style.display='block';return;}
     nr.style.display='none';
     var im={};
-    for(var i=0;i<allCharacters.length;i++){im[allCharacters[i].id]=i;}
-    var items=[];
-    function pushCard(c){
-      items.push({key:'c:'+c.id,sig:cardSig(c,im[c.id]),html:(function(c){return function(){return cardHTML(c,im[c.id]);};})(c)});
-    }
+    chars.forEach(function(c){im[c.id]=allCharacters.indexOf(c);});
     if(activeRegion==='全部'&&!sv){
       var g=groupByRegion(chars);
+      var h='';
       var ord=Object.entries(g).filter(function(e){return e[1].length>0;}).sort(function(a,b){return b[1].length-a[1].length;}).map(function(e){return e[0];});
-      for(var k=0;k<ord.length;k++){
-        var r=ord[k];
-        items.push({key:'d:'+r,sig:'d'+r+g[r].length,html:(function(r,len){return function(){return '<div class="region-divider">'+esc(r)+' · '+len+'位</div>';};})(r,g[r].length)});
-        g[r].forEach(pushCard);
+      for(var i=0;i<ord.length;i++){
+        var r=ord[i];
+        h+='<div class="region-divider">'+esc(r)+' · '+g[r].length+'位</div>';
+        h+=g[r].map(function(c){return cardHTML(c,im[c.id]);}).join('');
       }
+      grid.innerHTML=h;
     } else {
-      chars.forEach(pushCard);
+      grid.innerHTML=chars.map(function(c){return cardHTML(c,im[c.id]);}).join('');
     }
-    renderKeyedList(grid,items);
   }
 
-  // ---- 首图缩略图 backfill（D004）----
-  // 异步、分批、不阻塞首屏：等首屏渲染完成后再逐张生成，批次间让出主线程。
-  // 期间卡片回退原图（行为不变）；只处理“有首图、缺首图缩略图”的角色，且只生成首图。
-  var thumbBackfill = { running: false, revision: -1 };
-
-  function thumbBackfillCandidates() {
-    var out = [];
-    for (var i = 0; i < allCharacters.length; i++) {
-      var c = allCharacters[i];
-      if (cardThumbOf(c)) continue;
-      if (/^data:image\//i.test(normalizeImages(c)[0] || '')) out.push(c);
-    }
-    return out;
-  }
-
-  function scheduleThumbBackfill() {
-    if (thumbBackfill.running) return;
-    var queue = thumbBackfillCandidates();
-    if (queue.length === 0) return;
-    thumbBackfill.running = true;
-    thumbBackfill.revision = window.appDataRevision || 0;
-    setTimeout(function () { runThumbBatch(queue, 0); }, 300);   // 首屏先画出来再开工
-  }
-
-  // 同步进行中避让：`_syncInFlight` 是 sync.js 的顶层 let（跨脚本全局词法绑定，不在 window 上），
-  // 用防御式引用；取不到就当作“未同步中”，正确性由 updateThumb 的原子读-改-写兜底。
-  function syncBusy() {
-    try { return (typeof _syncInFlight !== 'undefined') && !!_syncInFlight; } catch (e) { return false; }
-  }
-  var THUMB_SYNC_WAIT_MS = 250, THUMB_SYNC_MAX_WAIT = 40;   // 最多让路约 10s，避免同步异常时无限等待
-
-  function runThumbBatch(queue, index, waited) {
-    // 数据版本变了（写入/同步）：放弃本轮，避免把陈旧记录写回。
-    if ((window.appDataRevision || 0) !== thumbBackfill.revision) { thumbBackfill.running = false; return; }
-    if (index >= queue.length) { thumbBackfill.running = false; return; }
-    if (syncBusy() && (waited || 0) < THUMB_SYNC_MAX_WAIT) {
-      setTimeout(function () { runThumbBatch(queue, index, (waited || 0) + 1); }, THUMB_SYNC_WAIT_MS);
-      return;
-    }
-    var c = queue[index];
-    var ref = normalizeImages(c)[0] || '';
-    makeCardThumb(ref).then(function (thumb) {
-      if (!thumb || (window.appDataRevision || 0) !== thumbBackfill.revision) return;
-      // 原子读-改-写：只改 thumbs，且仅当记录当前首图未变；绝不整条覆盖（否则会回退并发同步/编辑）。
-      return charDB.updateThumb(c.id, ref, thumb).then(function (result) {
-        if (result === 'ok') { c.thumbs = [thumb]; applyFilter(); }
-      });
-    }).catch(function () { /* 单张失败不打断，卡片继续用原图 */ }).then(function () {
-      setTimeout(function () { runThumbBatch(queue, index + 1, 0); }, 16);   // 批次间让出主线程
-    });
-  }
-
-  function loadCharacters(force) {
-    var revision = window.appDataRevision || 0;
-    // 未变更返回：同版本数据已经加载过，直接沿用内存数据与现有 DOM。
-    if (!force && loadedRevision === revision) {
-      document.getElementById('indexLoadingState').style.display = 'none';
-      return;
-    }
-    if (!force && loadingRevision === revision) return;   // 同版本请求已在途
-    loadingRevision = revision;
+  function loadCharacters() {
     var generation = ++loadGeneration;
+    var revision = window.appDataRevision || 0;
+    var ck=_restoreCache(SKEY,function(d){allCharacters=d;},function(){buildRegionTabs();applyFilter();});
     fetch(API).then(function(r){return r.json();}).then(function(data){
       if (generation !== loadGeneration || revision !== (window.appDataRevision || 0)) return;
-      loadingRevision = -1;
-      allCharacters = data;
-      loadedRevision = revision;
-      _putSharedCharacters(allCharacters, revision);
-      document.getElementById('indexLoadingState').style.display = 'none';
-      buildRegionTabs();
-      applyFilter();
-      scheduleThumbBackfill();   // 首屏已渲染，异步补首图缩略图
+      allCharacters=data;_saveCache(SKEY,allCharacters);
+      if(ck){buildRegionTabs();applyFilter();}
+      else{document.getElementById('indexLoadingState').style.display='none';buildRegionTabs();applyFilter();}
     }).catch(function(){
       if (generation !== loadGeneration || revision !== (window.appDataRevision || 0)) return;
-      loadingRevision = -1;
       document.getElementById('indexLoadingState').style.display='none';
-      if(loadedRevision !== revision)showToast('加载失败，请确认后端已启动','error');
+      if(!ck)showToast('加载失败，请确认后端已启动','error');
     });
   }
 
@@ -543,19 +345,12 @@ VM.index = (function() {
     if(allImages.length>0){data.images=allImages;data.image_url=allImages[0];}
     else{data.images=[];data.image_url='';}
     delete data.newUrls;
-    // 首图变了才清派生缩略图：api-shim 的 PUT 会合并旧记录，不清会留下陈旧缩略图；
-    // 首图没变则保留，避免只改文字字段时卡片短暂回退原图。
-    if(editId){
-      var prev=null;
-      for(var pi=0;pi<allCharacters.length;pi++){if(String(allCharacters[pi].id)===String(editId)){prev=allCharacters[pi];break;}}
-      if(prev&&(normalizeImages(prev)[0]||'')!==(allImages[0]||''))data.thumbs=[];
-    }
     var url=editId?API+'/'+editId:API;
     var method=editId?'PUT':'POST';
     fetch(url,{method:method,headers:{'Content-Type':'application/json'},body:JSON.stringify(data)}).then(function(r){
       if(!r.ok)throw new Error();
       _autoSaveInProgress = true;
-      closeModal();resetImageUpload();markAppDataChanged();loadCharacters();
+      closeModal();resetImageUpload();loadCharacters();
       showToast(editId?'已更新':'已创建','success');
       setTimeout(function(){ _autoSaveInProgress = false; }, 800);
     }).catch(function(){showToast('操作失败','error');});
@@ -606,7 +401,7 @@ VM.index = (function() {
   function confirmDelete(){
     if(!deleteTargetId)return;
     fetch(API+'/'+deleteTargetId,{method:'DELETE'}).then(function(){
-      closeDeleteModal();markAppDataChanged();loadCharacters();showToast('已删除','success');
+      closeDeleteModal();loadCharacters();showToast('已删除','success');
     }).catch(function(){showToast('删除失败','error');});
   }
   function closeModal(){
@@ -776,7 +571,7 @@ VM.index = (function() {
 
   function saveCharOrder() {
     fetch(API + '/reorder', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items: allCharacters.map(function(c, i) { return { id: c.id, sort_order: i }; }) }) }).catch(function() {});
-    markAppDataChanged();   // 顺序已变：其它视图下次进入时重新取数据
+    _saveCache(SKEY, allCharacters);
   }
 
   function moveCharUp(id){
@@ -814,6 +609,7 @@ VM.index = (function() {
 // ======================== 世界设定 ========================
 VM.worldview = (function() {
   var API = '/api/world-buildings';
+  var SKEY = 'worldCache';
   var MAIN_CATS = ['意识体世界设定', '人物背景故事'];
   var allEntries = [];
   var activeMainCategory = '意识体世界设定';
@@ -824,29 +620,21 @@ VM.worldview = (function() {
   var exportMode = false;
   var _autoSaveInProgress = false;
   var loadGeneration = 0;
-  var loadedKey = null;    // "大类@数据版本"：同一版本同一大类返回时不重新查询/重绘
-  var loadingKey = null;
 
   // 触控拖拽
   var _tdEnabled = false, _tdEl = null, _tdGhost = null, _tdIdx = -1;
   var _tdStartY = 0, _tdStartX = 0, _tdCurY = 0, _tdTimer = null, _tdListEl = null;
 
-  function loadEntries(force) {
-    var revision = window.appDataRevision || 0;
-    var key = activeMainCategory + '@' + revision;
-    if (!force && loadedKey === key) {
-      document.getElementById('worldLoadingState').style.display = 'none';
-      return;
-    }
-    if (!force && loadingKey === key) return;
-    loadingKey = key;
+  function loadEntries() {
     var generation = ++loadGeneration;
+    var revision = window.appDataRevision || 0;
+    var ck = _restoreCache(SKEY, function(d) { allEntries = d; }, function() { buildCatTabs(); applyFilter(); });
+    if (ck) document.getElementById('worldLoadingState').style.display = 'none';
     var q = activeMainCategory ? '?main_category=' + encodeURIComponent(activeMainCategory) : '';
     fetch(API + q).then(function(r) { return r.json(); }).then(function(data) {
       if (generation !== loadGeneration || revision !== (window.appDataRevision || 0)) return;
-      loadingKey = null;
       allEntries = data;
-      loadedKey = key;
+      _saveCache(SKEY, allEntries);
       document.getElementById('worldLoadingState').style.display = 'none';
       var currentIds = new Set();
       allEntries.forEach(function(e) { currentIds.add(e.id); });
@@ -856,9 +644,8 @@ VM.worldview = (function() {
       updateEmptyText();
     }).catch(function() {
       if (generation !== loadGeneration || revision !== (window.appDataRevision || 0)) return;
-      loadingKey = null;
       document.getElementById('worldLoadingState').style.display = 'none';
-      if (loadedKey !== key) showToast('加载失败', 'error');
+      if (!ck) showToast('加载失败', 'error');
     });
   }
 
@@ -906,18 +693,15 @@ VM.worldview = (function() {
     applyFilter();
   }
 
-  var searchTimer = null;
   function onSearch() {
     var val = document.getElementById('worldSearchInput').value.trim();
     document.getElementById('worldSearchWrap').classList.toggle('has-value', val.length > 0);
-    if (searchTimer) clearTimeout(searchTimer);
-    searchTimer = setTimeout(function() { searchTimer = null; applyFilter(); }, 120);   // 输入防抖
+    applyFilter();
   }
 
   function clearSearch() {
     document.getElementById('worldSearchInput').value = '';
     document.getElementById('worldSearchWrap').classList.remove('has-value');
-    if (searchTimer) { clearTimeout(searchTimer); searchTimer = null; }
     applyFilter();
   }
 
@@ -929,12 +713,6 @@ VM.worldview = (function() {
     renderGrid(f);
   }
 
-  // 卡片签名：覆盖 cardHTML 用到的字段与展示状态，签名相同不重建节点。
-  function worldCardSig(e, gi) {
-    return [e.id, gi, e.title, e.category, e.content, e.main_category, activeMainCategory,
-      (exportMode && selectedIds.has(e.id)) ? 'sel' : ''].join('\u0001');
-  }
-
   function renderGrid(entries) {
     var grid = document.getElementById('entryGrid');
     var empty = document.getElementById('worldEmptyState');
@@ -942,16 +720,12 @@ VM.worldview = (function() {
     var count = document.getElementById('worldEntryCount');
     var sv = document.getElementById('worldSearchInput').value.trim();
     count.textContent = (sv || activeCategory !== '全部') ? entries.length + '/' + allEntries.length : allEntries.length;
-    if (allEntries.length === 0) { renderKeyedList(grid, []); empty.style.display = 'block'; noResult.style.display = 'none'; return; }
+    if (allEntries.length === 0) { grid.innerHTML = ''; empty.style.display = 'block'; noResult.style.display = 'none'; return; }
     empty.style.display = 'none';
-    if (entries.length === 0 && (sv || activeCategory !== '全部')) { renderKeyedList(grid, []); noResult.style.display = 'block'; return; }
+    if (entries.length === 0 && (sv || activeCategory !== '全部')) { grid.innerHTML = ''; noResult.style.display = 'block'; return; }
     noResult.style.display = 'none';
     var idxMap = {};
-    for (var i = 0; i < allEntries.length; i++) idxMap[allEntries[i].id] = i;
-    var items = [];
-    function pushCard(e) {
-      items.push({ key: 'e:' + e.id, sig: worldCardSig(e, idxMap[e.id]), html: (function(e) { return function() { return cardHTML(e, idxMap[e.id]); }; })(e) });
-    }
+    entries.forEach(function(e) { idxMap[e.id] = allEntries.indexOf(e); });
     if (activeCategory === '全部' && !sv) {
       var groups = {};
       for (var i = 0; i < entries.length; i++) {
@@ -961,18 +735,17 @@ VM.worldview = (function() {
         groups[cat].push(e);
       }
       var orderedCats = Object.keys(groups).sort(function(a,b){return groups[b].length - groups[a].length;});
+      var html = '';
       for (var i = 0; i < orderedCats.length; i++) {
-        var cat = orderedCats[i], list = groups[cat];
-        var groupSig = 'g' + cat + '|' + list.map(function(e) { return worldCardSig(e, idxMap[e.id]); }).join('~');
-        items.push({ key: 'g:' + cat, sig: groupSig, html: (function(cat, list) { return function() {
-          return '<div class="cat-group"><h3 class="cat-group-title">' + esc(cat) + ' <span class="tab-count">' + list.length + '</span></h3><div class="card-row">' +
-            list.map(function(e) { return cardHTML(e, idxMap[e.id]); }).join('') + '</div></div>';
-        }; })(cat, list) });
+        var cat = orderedCats[i];
+        html += '<div class="cat-group"><h3 class="cat-group-title">' + esc(cat) + ' <span class="tab-count">' + groups[cat].length + '</span></h3><div class="card-row">';
+        html += groups[cat].map(function(e) { return cardHTML(e, idxMap[e.id]); }).join('');
+        html += '</div></div>';
       }
+      grid.innerHTML = html;
     } else {
-      entries.forEach(pushCard);
+      grid.innerHTML = entries.map(function(e) { return cardHTML(e, idxMap[e.id]); }).join('');
     }
-    renderKeyedList(grid, items);
     if (exportMode) updateExportButtons();
   }
 
@@ -1034,7 +807,6 @@ VM.worldview = (function() {
       if (!r.ok) throw new Error();
       _autoSaveInProgress = true;
       closeModal();
-      markAppDataChanged();
       loadEntries();
       showToast(editId ? '已更新' : '已创建', 'success');
       setTimeout(function() { _autoSaveInProgress = false; }, 800);
@@ -1050,7 +822,7 @@ VM.worldview = (function() {
   function confirmDelete() {
     if (!deleteTargetId) return;
     fetch(API + '/' + deleteTargetId, { method: 'DELETE' }).then(function() {
-      closeDeleteModal(); markAppDataChanged(); loadEntries(); showToast('已删除', 'success');
+      closeDeleteModal(); loadEntries(); showToast('已删除', 'success');
     }).catch(function() { showToast('删除失败', 'error'); });
   }
   function closeModal() {
@@ -1208,7 +980,7 @@ VM.worldview = (function() {
   }
   function saveWorldOrder() {
     fetch(API + '/reorder', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items: allEntries.map(function(e, i) { return { id: e.id, sort_order: i }; }) }) }).catch(function() {});
-    markAppDataChanged();   // 顺序已变：其它视图下次进入时重新取数据
+    _saveCache(SKEY, allEntries);
   }
 
   document.getElementById('worldDeleteOverlay').addEventListener('click', function(ev) { if (ev.target === this) closeDeleteModal(); });
@@ -1236,7 +1008,6 @@ VM.documents = (function() {
   var currentViewFile = '';
   var loadGeneration = 0;
   var viewerGeneration = 0;
-  var viewerObjectUrl = null;
 
   function onFileSelect(e) { if (e.target.files.length > 0) uploadFiles(e.target.files); e.target.value = ''; }
 
@@ -1306,14 +1077,11 @@ VM.documents = (function() {
     document.getElementById('docViewerTitle').textContent = fn;
     var ext = fn.split('.').pop().toLowerCase();
     document.getElementById('docViewerTag').textContent = ext.toUpperCase();
-    releaseViewerObjectUrl();
     if (location.protocol === 'file:' && typeof docDB !== 'undefined') {
       docDB.get(fn).then(function(doc) {
         if (generation !== viewerGeneration) return;
-        if (doc && doc.blob) {
-          viewerObjectUrl = URL.createObjectURL(doc.blob);
-          document.getElementById('docViewerDownload').href = viewerObjectUrl;
-        } else document.getElementById('docViewerDownload').href = '#';
+        if (doc && doc.blob) document.getElementById('docViewerDownload').href = URL.createObjectURL(doc.blob);
+        else document.getElementById('docViewerDownload').href = '#';
       }).catch(function() { document.getElementById('docViewerDownload').href = '#'; });
     } else {
       document.getElementById('docViewerDownload').href = API + '/' + en;
@@ -1369,14 +1137,9 @@ VM.documents = (function() {
     }
   }
 
-  function releaseViewerObjectUrl() {
-    if (viewerObjectUrl) { URL.revokeObjectURL(viewerObjectUrl); viewerObjectUrl = null; }
-  }
-
   function closeViewer() {
     document.getElementById('docViewerOverlay').classList.remove('active');
     currentViewFile = '';
-    releaseViewerObjectUrl();   // 关闭时释放 Blob URL，避免长期占用内存
   }
 
   document.getElementById('docDeleteOverlay').addEventListener('click', function(ev) { if (ev.target === this) closeDeleteModal(); });
@@ -1396,6 +1159,8 @@ VM.documents = (function() {
 VM.relations = (function() {
   var API_REL = '/api/relations';
   var API_CHAR = '/api/characters';
+  var SKEY_CHARS = 'charCache';
+  var SKEY_RELS = 'relCache';
   var allRelations = [];
   var allCharacters = [];
   var deleteTargetId = null;
@@ -1423,11 +1188,6 @@ VM.relations = (function() {
   var gTouchStartX = 0, gTouchStartY = 0, gTouchMoved = false;
   var G_DBL_TAP_DELAY = 300, G_DBL_TAP_MOVE_TOL = 10;
   var loadGeneration = 0;
-  var loadedRevision = -1;    // 已加载完成的数据版本（同版本返回不再查询/重绘）
-  var loadingRevision = -1;
-  var gNodeIndex = new Map();       // id → node：替代每步线性 find
-  var gNodeFams = new Map();        // id → 家族数组：替代每步重复拆分字符串
-  var gLayout = { epoch: 0, timer: null, step: 0, total: 300, budgetMs: 8, running: false, paused: false };
 
   function splitFamilies(s) { return (s || '').split(/[、,，]/).map(function(x) { return x.trim(); }).filter(Boolean); }
   function buildFamilyColors() {
@@ -1442,28 +1202,20 @@ VM.relations = (function() {
     var fams = splitFamilies(n.family);
     return fams.length > 0 ? (gFamilyColorMap[fams[0]] || '#8b5e3c') : '#8b5e3c';
   }
-  function nodeFamilies(n) { return gNodeFams.get(n.id) || splitFamilies(n.family); }
+  function nodeFamilies(n) { return splitFamilies(n.family); }
 
-  function loadData(force) {
-    var revision = window.appDataRevision || 0;
-    // 未变更返回：同版本数据已加载过，沿用内存数据与现有 DOM，并恢复被隐藏页暂停的布局。
-    if (!force && loadedRevision === revision) {
-      document.getElementById('relLoadingState').style.display = 'none';
-      resumeLayout();
-      return;
-    }
-    if (!force && loadingRevision === revision) return;
-    loadingRevision = revision;
+  function loadData() {
     var generation = ++loadGeneration;
-    // 角色数据优先复用其它视图（如角色页）已加载的内存快照，不重复全量查询。
-    var sharedChars = _getSharedCharacters(revision);
-    var charsPromise = sharedChars ? Promise.resolve(sharedChars.slice()) : fetch(API_CHAR).then(function(r) { return r.json(); });
-    Promise.all([fetch(API_REL).then(function(r) { return r.json(); }), charsPromise]).then(function(arr) {
+    var revision = window.appDataRevision || 0;
+    var cc = _restoreCache(SKEY_CHARS, function(d) { allCharacters = d; });
+    var rc = _restoreCache(SKEY_RELS, function(d) { allRelations = d; });
+    if (cc && rc) { document.getElementById('relLoadingState').style.display = 'none'; buildTypeTabs(); renderRelList(); graphInit(); }
+    Promise.all([fetch(API_REL), fetch(API_CHAR)]).then(function(arr) {
+      return Promise.all([arr[0].json(), arr[1].json()]);
+    }).then(function(arr) {
       if (generation !== loadGeneration || revision !== (window.appDataRevision || 0)) return;
-      loadingRevision = -1;
       allRelations = arr[0]; allCharacters = arr[1];
-      if (!sharedChars) _putSharedCharacters(allCharacters, revision);
-      loadedRevision = revision;
+      _saveCache(SKEY_RELS, allRelations); _saveCache(SKEY_CHARS, allCharacters);
       var ci = new Set(); allRelations.forEach(function(r) { ci.add(r.id); });
       selectedIds.forEach(function(id) { if (!ci.has(id)) selectedIds.delete(id); });
       if (exportMode) updateExportButtons();
@@ -1471,35 +1223,9 @@ VM.relations = (function() {
       buildTypeTabs(); renderRelList(); graphInit();
     }).catch(function() {
       if (generation !== loadGeneration || revision !== (window.appDataRevision || 0)) return;
-      loadingRevision = -1;
       document.getElementById('relLoadingState').style.display = 'none';
-      if (loadedRevision !== revision) showToast('加载失败', 'error');
+      if (!cc && !rc) showToast('加载失败', 'error');
     });
-  }
-
-  function relCardHTML(r, gi) {
-    var fn = r.from_name || '角色#' + r.from_char_id;
-    var tn = r.to_name || '角色#' + r.to_char_id;
-    var tc = r.relation_type === 'CP' ? 'cp' : r.relation_type === '师生' ? '师生' : '';
-    var th = r.relation_type ? '<span class="rel-type ' + tc + '">' + esc(r.relation_type) + '</span>' : '';
-    var ar = ['CP', '朋友', '冤家', '亲属'].indexOf(r.relation_type) !== -1 ? '⇄' : '→';
-    return '<div class="rel-card' + (selectedIds.has(r.id) ? ' selected' : '') + '" data-drag-id="' + r.id + '" data-drag-idx="' + gi + '" data-rel-id="' + r.id + '">' +
-      '<input type="checkbox" class="rel-check" ' + (selectedIds.has(r.id) ? 'checked' : '') + ' onchange="VM.relations.toggleCardSelect(' + r.id + ',this.checked)" onclick="event.stopPropagation()">' +
-      '<div class="rel-names" onclick="' + (exportMode ? 'VM.relations.toggleCardClick(' + r.id + ')' : 'VM.relations.openEditModal(' + r.id + ')') + '">' +
-      '<button class="sort-btn" title="上移" onclick="event.stopPropagation();VM.relations.moveRelUp(' + r.id + ');return false;">↑</button>' +
-      '<button class="sort-btn" title="下移" onclick="event.stopPropagation();VM.relations.moveRelDown(' + r.id + ');return false;">↓</button>' +
-      '<span class="rel-name">' + esc(fn) + '</span>' +
-      '<span class="rel-arrow">' + ar + '</span>' +
-      '<span class="rel-name">' + esc(tn) + '</span>' + th +
-      '</div>' +
-      (r.description ? '<div class="rel-desc">' + esc(r.description) + '</div>' : '') +
-      '<div class="card-actions"><button class="btn-action" onclick="event.stopPropagation();VM.relations.openEditModal(' + r.id + ')">编辑</button><button class="btn-action danger" onclick="event.stopPropagation();VM.relations.openDeleteModal(' + r.id + ',\'' + esc(fn) + ' ' + ar + ' ' + esc(tn) + '\')">删除</button></div></div>';
-  }
-
-  // 关系卡签名：覆盖展示字段、序号与选择/导出状态。
-  function relSig(r, gi) {
-    return [r.id, gi, r.from_name, r.to_name, r.relation_type, r.description,
-      exportMode ? 'exp' : '', (selectedIds.has(r.id) ? 'sel' : '')].join('\u0001');
   }
 
   function renderRelList() {
@@ -1515,31 +1241,40 @@ VM.relations = (function() {
       return fn.indexOf(sv) !== -1 || tn.indexOf(sv) !== -1;
     });
     count.textContent = (sv || activeType !== '全部') ? f.length + '/' + allRelations.length : allRelations.length;
-    if (allRelations.length === 0) { renderKeyedList(list, []); empty.style.display = 'block'; noResult.style.display = 'none'; return; }
+    if (allRelations.length === 0) { list.innerHTML = ''; empty.style.display = 'block'; noResult.style.display = 'none'; return; }
     empty.style.display = 'none';
-    if (f.length === 0 && (sv || activeType !== '全部')) { renderKeyedList(list, []); noResult.style.display = 'block'; return; }
+    if (f.length === 0 && (sv || activeType !== '全部')) { list.innerHTML = ''; noResult.style.display = 'block'; return; }
     noResult.style.display = 'none';
-    var idxMap = {};
-    for (var i = 0; i < allRelations.length; i++) idxMap[allRelations[i].id] = i;
-    var items = f.map(function(r) {
-      var gi = idxMap[r.id];
-      return { key: 'r:' + r.id, sig: relSig(r, gi), html: (function(r, gi) { return function() { return relCardHTML(r, gi); }; })(r, gi) };
-    });
-    renderKeyedList(list, items);
+    var idxMap = f.map(function(r) { return allRelations.indexOf(r); });
+    list.innerHTML = f.map(function(r, i) {
+      var fn = r.from_name || '角色#' + r.from_char_id;
+      var tn = r.to_name || '角色#' + r.to_char_id;
+      var tc = r.relation_type === 'CP' ? 'cp' : r.relation_type === '师生' ? '师生' : '';
+      var th = r.relation_type ? '<span class="rel-type ' + tc + '">' + esc(r.relation_type) + '</span>' : '';
+      var ar = ['CP', '朋友', '冤家', '亲属'].indexOf(r.relation_type) !== -1 ? '⇄' : '→';
+      return '<div class="rel-card' + (selectedIds.has(r.id) ? ' selected' : '') + '" data-drag-id="' + r.id + '" data-drag-idx="' + idxMap[i] + '" data-rel-id="' + r.id + '">' +
+        '<input type="checkbox" class="rel-check" ' + (selectedIds.has(r.id) ? 'checked' : '') + ' onchange="VM.relations.toggleCardSelect(' + r.id + ',this.checked)" onclick="event.stopPropagation()">' +
+        '<div class="rel-names" onclick="' + (exportMode ? 'VM.relations.toggleCardClick(' + r.id + ')' : 'VM.relations.openEditModal(' + r.id + ')') + '">' +
+        '<button class="sort-btn" title="上移" onclick="event.stopPropagation();VM.relations.moveRelUp(' + r.id + ');return false;">↑</button>' +
+        '<button class="sort-btn" title="下移" onclick="event.stopPropagation();VM.relations.moveRelDown(' + r.id + ');return false;">↓</button>' +
+        '<span class="rel-name">' + esc(fn) + '</span>' +
+        '<span class="rel-arrow">' + ar + '</span>' +
+        '<span class="rel-name">' + esc(tn) + '</span>' + th +
+        '</div>' +
+        (r.description ? '<div class="rel-desc">' + esc(r.description) + '</div>' : '') +
+        '<div class="card-actions"><button class="btn-action" onclick="event.stopPropagation();VM.relations.openEditModal(' + r.id + ')">编辑</button><button class="btn-action danger" onclick="event.stopPropagation();VM.relations.openDeleteModal(' + r.id + ',\'' + esc(fn) + ' ' + ar + ' ' + esc(tn) + '\')">删除</button></div></div>';
+    }).join('');
     if (exportMode) updateExportButtons();
   }
 
-  var searchTimer = null;
   function onSearch() {
     var v = document.getElementById('relSearchInput').value.trim();
     document.getElementById('relSearchWrap').classList.toggle('has-value', v.length > 0);
-    if (searchTimer) clearTimeout(searchTimer);
-    searchTimer = setTimeout(function() { searchTimer = null; renderRelList(); }, 120);   // 输入防抖
+    renderRelList();
   }
   function clearSearch() {
     document.getElementById('relSearchInput').value = '';
     document.getElementById('relSearchWrap').classList.remove('has-value');
-    if (searchTimer) { clearTimeout(searchTimer); searchTimer = null; }
     renderRelList();
   }
 
@@ -1593,7 +1328,7 @@ VM.relations = (function() {
     fetch(url, { method: method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }).then(function(r) {
       if (!r.ok) return r.json().then(function(e) { throw new Error(e.detail || '操作失败'); });
       _autoSaveInProgress = true;
-      closeModal(); markAppDataChanged(); loadData(); showToast(editId ? '已更新' : '已创建', 'success');
+      closeModal(); loadData(); showToast(editId ? '已更新' : '已创建', 'success');
       setTimeout(function() { _autoSaveInProgress = false; }, 800);
     }).catch(function(e) { showToast(e.message || '操作失败', 'error'); });
   }
@@ -1607,7 +1342,7 @@ VM.relations = (function() {
   function confirmDelete() {
     if (!deleteTargetId) return;
     fetch(API_REL + '/' + deleteTargetId, { method: 'DELETE' }).then(function() {
-      closeDeleteModal(); markAppDataChanged(); loadData(); showToast('已删除', 'success');
+      closeDeleteModal(); loadData(); showToast('已删除', 'success');
     }).catch(function() { showToast('删除失败', 'error'); });
   }
   function closeModal() {
@@ -1720,7 +1455,7 @@ VM.relations = (function() {
   function finishFamilySave(success, fail) {
     closeFamilyModal();
     buildFamilyColors();
-    markAppDataChanged();   // 家族已改：其它视图下次进入时重新取数据
+    _saveCache(SKEY_CHARS, allCharacters);
     graphInit(); renderRelList();
     showToast('家族更新：' + success + ' 成功' + (fail ? '，' + fail + ' 失败' : ''), fail ? 'error' : 'success');
   }
@@ -1850,69 +1585,10 @@ VM.relations = (function() {
   }
   function saveRelOrder() {
     fetch(API_REL + '/reorder', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items: allRelations.map(function(r, i) { return { id: r.id, sort_order: i }; }) }) }).catch(function() {});
-    markAppDataChanged();   // 顺序已变：其它视图下次进入时重新取数据
+    _saveCache(SKEY_RELS, allRelations);
   }
 
   // ====== Graph ======
-  // 预先建立节点/家族索引：布局每步不再做线性 find，也不再重复拆分家族字符串。
-  function indexGraphNodes() {
-    gNodeIndex = new Map();
-    gNodeFams = new Map();
-    for (var i = 0; i < gNodes.length; i++) {
-      var n = gNodes[i];
-      gNodeIndex.set(n.id, n);
-      gNodeFams.set(n.id, splitFamilies(n.family));
-    }
-  }
-
-  function nowMs() { return (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now(); }
-
-  function layoutVisible() {
-    var view = document.getElementById('view-relations');
-    return !view || view.style.display !== 'none';   // 隐藏页不持续布局
-  }
-
-  function cancelLayout() {
-    gLayout.epoch++;
-    gLayout.running = false;
-    gLayout.paused = false;
-    if (gLayout.timer !== null) { clearTimeout(gLayout.timer); gLayout.timer = null; }
-  }
-
-  // 每块约 8ms，然后让出事件循环，避免长时间阻塞主线程；epoch 变化即取消旧布局。
-  function layoutTick(epoch) {
-    if (epoch !== gLayout.epoch || !gLayout.running) return;
-    gLayout.timer = null;
-    if (!layoutVisible()) { gLayout.paused = true; return; }
-    var started = nowMs();
-    while (gLayout.step < gLayout.total) {
-      gSimulateStep(1 - gLayout.step / gLayout.total);
-      gLayout.step++;
-      if (nowMs() - started >= gLayout.budgetMs) break;
-    }
-    if (gLayout.step >= gLayout.total) {
-      gLayout.running = false;
-      graphDraw();
-      return;
-    }
-    gLayout.timer = setTimeout(function() { layoutTick(epoch); }, 0);
-  }
-
-  function startLayout() {
-    cancelLayout();
-    gLayout.running = true;
-    gLayout.step = 0;
-    layoutTick(gLayout.epoch);
-  }
-
-  // 重新进入页面时恢复被暂停的布局（进度保留）。
-  function resumeLayout() {
-    if (!gLayout.running || !gLayout.paused) return;
-    gLayout.paused = false;
-    var epoch = gLayout.epoch;
-    gLayout.timer = setTimeout(function() { layoutTick(epoch); }, 0);
-  }
-
   function gSimulateStep(cooling) {
     var k = 110, repulsion = 6000, spring = 0.015, cg = 0.001;
     for (var i = 0; i < gNodes.length; i++) {
@@ -1926,8 +1602,8 @@ VM.relations = (function() {
       }
     }
     gEdges.forEach(function(e) {
-      var a = gNodeIndex.get(e.from);
-      var b = gNodeIndex.get(e.to);
+      var a = gNodes.find(function(n) { return n.id === e.from; });
+      var b = gNodes.find(function(n) { return n.id === e.to; });
       if (!a || !b) return;
       var dx = b.x - a.x, dy = b.y - a.y, dist = Math.sqrt(dx * dx + dy * dy) || 0.1;
       var force = (dist - k) * spring * cooling, fx = (dx / dist) * force, fy = (dy / dist) * force;
@@ -1938,12 +1614,8 @@ VM.relations = (function() {
     for (var i = 0; i < gNodes.length; i++) {
       for (var j = i + 1; j < gNodes.length; j++) {
         var a = gNodes[i], b = gNodes[j];
-        var aFams = gNodeFams.get(a.id) || [], bFams = gNodeFams.get(b.id) || [];
-        var linked = false;
-        for (var fa = 0; fa < aFams.length && !linked; fa++) {
-          if (bFams.indexOf(aFams[fa]) !== -1) linked = true;
-        }
-        if (!linked) continue;
+        var aFams = nodeFamilies(a), bFams = nodeFamilies(b);
+        if (!aFams.some(function(f) { return bFams.indexOf(f) !== -1; })) continue;
         var dx = b.x - a.x, dy = b.y - a.y, dist = Math.sqrt(dx * dx + dy * dy) || 0.1;
         var force = (dist - famK) * famSpring * cooling, fx = (dx / dist) * force, fy = (dy / dist) * force;
         if (!a.fixed) { a.vx += fx; a.vy += fy; }
@@ -2022,7 +1694,7 @@ VM.relations = (function() {
     drawFamilyClusters();
     var lo = computeLabelOffsets(gEdges);
     gEdges.forEach(function(e, i) {
-      var a = gNodeIndex.get(e.from), b = gNodeIndex.get(e.to);
+      var a = gNodes.find(function(n) { return n.id === e.from; }), b = gNodes.find(function(n) { return n.id === e.to; });
       if (!a || !b) return;
       var isB = ['CP', '朋友', '冤家', '亲属'].indexOf(e.type) !== -1, isT = e.type === '师生';
       var color = isB ? '#c2185b' : isT ? '#1565c0' : '#8b5e3c';
@@ -2130,8 +1802,6 @@ VM.relations = (function() {
     gCanvas.width = gW * gDpr; gCanvas.height = gH * gDpr;
     gCanvas.style.width = gW + 'px'; gCanvas.style.height = gH + 'px';
     gCtx = gCanvas.getContext('2d'); gCtx.setTransform(gDpr, 0, 0, gDpr, 0, 0);
-    // 本轮 edges 先设置好，初次布局才会用到本轮关系。
-    gEdges = allRelations.map(function(r) { return { from: r.from_char_id, to: r.to_char_id, type: r.relation_type || '' }; });
     var existingIds = new Set(gNodes.map(function(n) { return n.id; }));
     var currentIds = new Set(allCharacters.map(function(c) { return c.id; }));
     var needRelayout = existingIds.size !== currentIds.size;
@@ -2147,13 +1817,11 @@ VM.relations = (function() {
         else { x = (gW - bigW) / 2 + Math.random() * bigW; y = (gH - bigH) / 2 + Math.random() * bigH; }
         return { id: c.id, name: c.name, family: c.family || '', x: x, y: y, vx: 0, vy: 0, fixed: false };
       });
-      indexGraphNodes();
-      startLayout();   // 300 步按时间预算分块执行，期间让出事件循环
+      for (var it = 0; it < 300; it++) gSimulateStep(1 - it / 300);
     } else {
-      allCharacters.forEach(function(c) { var n = gNodeIndex.get(c.id) || gNodes.find(function(n) { return n.id === c.id; }); if (n) { n.name = c.name; n.family = c.family || ''; } });
-      indexGraphNodes();
-      if (gLayout.running) resumeLayout(); else graphDraw();
+      allCharacters.forEach(function(c) { var n = gNodes.find(function(n) { return n.id === c.id; }); if (n) { n.name = c.name; n.family = c.family || ''; } });
     }
+    gEdges = allRelations.map(function(r) { return { from: r.from_char_id, to: r.to_char_id, type: r.relation_type || '' }; });
     if (!gCanvas._bound) {
       gCanvas.addEventListener('touchstart', onTouchStart, { passive: false });
       gCanvas.addEventListener('touchmove', onTouchMove, { passive: false });
@@ -2179,9 +1847,8 @@ VM.relations = (function() {
       else { x = (gW - bigW) / 2 + Math.random() * bigW; y = (gH - bigH) / 2 + Math.random() * bigH; }
       return { id: c.id, name: c.name, family: c.family || '', x: x, y: y, vx: 0, vy: 0, fixed: false };
     });
-    gEdges = allRelations.map(function(r) { return { from: r.from_char_id, to: r.to_char_id, type: r.relation_type || '' }; });
-    indexGraphNodes();
-    startLayout();   // 重置：取消旧 generation，按 300 步重新分块布局
+    for (var it = 0; it < 300; it++) gSimulateStep(1 - it / 300);
+    graphDraw();
   }
 
   window.addEventListener('resize', function() {

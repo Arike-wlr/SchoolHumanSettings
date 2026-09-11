@@ -32,9 +32,7 @@ async function handleApiRequest(url, init) {
   try {
     // ---- 角色 ----
     if (path === '/api/characters' && method === 'GET') {
-      // 同一轮内与关系页共享这份角色读取；slice 让调用方拿到独立数组，
-      // 之后本地排序/编辑不会影响本轮关系名称补全使用的数据。
-      return makeResponse((await listCharactersShared()).slice());
+      return makeResponse(await charDB.list());
     }
     if (path === '/api/characters' && method === 'POST') {
       const data = JSON.parse(body);
@@ -106,8 +104,8 @@ async function handleApiRequest(url, init) {
     // ---- 关系 ----
     if (path.startsWith('/api/relations')) {
       if (path === '/api/relations' && method === 'GET') {
-        // 并行查询关系和角色；角色读取与本轮 /api/characters 共享，避免重复全量读。
-        const [rels, chars] = await Promise.all([relDB.list(), listCharactersShared()]);
+        // 并行查询关系和角色，避免串行等待
+        const [rels, chars] = await Promise.all([relDB.list(), charDB.list()]);
         const charMap = {};
         chars.forEach(c => { charMap[c.id] = c.name; });
         rels.forEach(r => {
@@ -253,9 +251,6 @@ async function handleApiRequest(url, init) {
 
 // ============================================================
 // 构造 mock Response
-// JSON 响应延迟序列化：不再对含原图的大列表提前 JSON.stringify，
-// 由 json()/text()/blob() 按需处理，避免 list→JSON→parse 的重复复制。
-// 传入的 data 都是本轮新读取/新建的对象（不共享 IndexedDB 内部存储对象）。
 // ============================================================
 function makeResponse(data, status = 200, contentType) {
   const ok = status >= 200 && status < 300;
@@ -264,28 +259,16 @@ function makeResponse(data, status = 200, contentType) {
   else if (data instanceof Blob) headers.set('Content-Type', data.type || 'application/octet-stream');
   else headers.set('Content-Type', 'application/json');
 
-  if (data instanceof Blob || typeof data === 'string') {
-    return new Response(data, { status, headers, ok });
+  let bodyStr;
+  if (data instanceof Blob) {
+    bodyStr = data;
+  } else if (typeof data === 'string') {
+    bodyStr = data;
+  } else {
+    bodyStr = JSON.stringify(data);
   }
 
-  let textCache = null;
-  const body = {
-    ok,
-    status,
-    statusText: '',
-    headers,
-    url: '',
-    async json() { return data; },
-    async text() {
-      if (textCache === null) textCache = JSON.stringify(data);
-      return textCache;
-    },
-    async blob() {
-      return new Blob([await body.text()], { type: headers.get('Content-Type') || 'application/json' });
-    },
-    clone() { return makeResponse(data, status, contentType); },
-  };
-  return body;
+  return new Response(bodyStr, { status, headers, ok });
 }
 
 // ============================================================
