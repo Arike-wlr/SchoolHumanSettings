@@ -282,19 +282,31 @@ function makeIdb() {
       const db = {
         objectStoreNames: { contains: name => stores.has(name) },
         createObjectStore: (name, opts) => { stores.set(name, { keyPath: opts.keyPath, rows: new Map() }); return {}; },
-        transaction: (name, mode) => ({
-          objectStore: () => {
+        transaction: (nameOrNames, mode) => {
+          // P06：支持多 store 事务（角色写入与派生投影同事务）与 getAllKeys；
+          // 请求完成后触发 oncomplete，供 db.js 的"以事务提交为准"路径使用。
+          const names = Array.isArray(nameOrNames) ? nameOrNames : [nameOrNames];
+          const t = { oncomplete: null, onerror: null, onabort: null };
+          const reqFor = value => {
+            const r = { result: value };
+            setImmediate(() => { if (r.onsuccess) r.onsuccess(); if (t.oncomplete) t.oncomplete(); });
+            return r;
+          };
+          t.objectStore = (which) => {
+            const name = which || names[0];
             const meta = stores.get(name);
             return {
-              getAll: () => { bump('getAll', name); return request([...meta.rows.values()].map(v => structuredClone(v))); },
-              get: key => { bump('get', name); const v = meta.rows.get(key); return request(v === undefined ? undefined : structuredClone(v)); },
-              put: value => { bump('put', name); meta.rows.set(value[meta.keyPath], structuredClone(value)); return request(value[meta.keyPath]); },
-              add: value => { bump('put', name); const key = value[meta.keyPath] || meta.rows.size + 1; meta.rows.set(key, structuredClone(value)); return request(key); },
-              delete: key => { meta.rows.delete(key); return request(undefined); },
-              clear: () => { if (name === 'imageCache') clearCalls++; meta.rows.clear(); return request(undefined); },
+              getAll: () => { bump('getAll', name); return reqFor([...meta.rows.values()].map(v => structuredClone(v))); },
+              getAllKeys: () => reqFor([...meta.rows.keys()]),
+              get: key => { bump('get', name); const v = meta.rows.get(key); return reqFor(v === undefined ? undefined : structuredClone(v)); },
+              put: value => { bump('put', name); meta.rows.set(value[meta.keyPath], structuredClone(value)); return reqFor(value[meta.keyPath]); },
+              add: value => { bump('put', name); const key = value[meta.keyPath] || meta.rows.size + 1; meta.rows.set(key, structuredClone(value)); return reqFor(key); },
+              delete: key => { meta.rows.delete(key); return reqFor(undefined); },
+              clear: () => { if (name === 'imageCache') clearCalls++; meta.rows.clear(); return reqFor(undefined); },
             };
-          },
-        }),
+          };
+          return t;
+        },
       };
       req.result = db;
       if (req.onupgradeneeded) req.onupgradeneeded({ target: req });
@@ -395,19 +407,30 @@ function makeApiHarness(which, rows) {
       const db = {
         objectStoreNames: { contains: name => stores.has(name) },
         createObjectStore: (name, opts) => { stores.set(name, { keyPath: opts.keyPath, rows: new Map() }); return {}; },
-        transaction: name => ({
-          objectStore: () => {
+        transaction: nameOrNames => {
+          // P06：支持多 store 事务（角色写入与派生投影同事务）与 getAllKeys/oncomplete。
+          const names = Array.isArray(nameOrNames) ? nameOrNames : [nameOrNames];
+          const t = { oncomplete: null, onerror: null, onabort: null };
+          const reqFor = value => {
+            const r = { result: value };
+            setImmediate(() => { if (r.onsuccess) r.onsuccess(); if (t.oncomplete) t.oncomplete(); });
+            return r;
+          };
+          t.objectStore = (which) => {
+            const name = which || names[0];
             const meta = stores.get(name);
             return {
-              getAll: () => { bump('getAll', name); return request([...meta.rows.values()].map(v => structuredClone(v))); },
-              get: key => { bump('get', name); const v = meta.rows.get(key); return request(v === undefined ? undefined : structuredClone(v)); },
-              put: value => { bump('put', name); meta.rows.set(value[meta.keyPath], structuredClone(value)); return request(value[meta.keyPath]); },
-              add: value => { bump('put', name); const key = value[meta.keyPath] || meta.rows.size + 1; meta.rows.set(key, structuredClone(value)); return request(key); },
-              delete: key => { meta.rows.delete(key); return request(undefined); },
-              clear: () => { meta.rows.clear(); return request(undefined); },
+              getAll: () => { bump('getAll', name); return reqFor([...meta.rows.values()].map(v => structuredClone(v))); },
+              getAllKeys: () => reqFor([...meta.rows.keys()]),
+              get: key => { bump('get', name); const v = meta.rows.get(key); return reqFor(v === undefined ? undefined : structuredClone(v)); },
+              put: value => { bump('put', name); meta.rows.set(value[meta.keyPath], structuredClone(value)); return reqFor(value[meta.keyPath]); },
+              add: value => { bump('put', name); const key = value[meta.keyPath] || meta.rows.size + 1; meta.rows.set(key, structuredClone(value)); return reqFor(key); },
+              delete: key => { meta.rows.delete(key); return reqFor(undefined); },
+              clear: () => { meta.rows.clear(); return reqFor(undefined); },
             };
-          },
-        }),
+          };
+          return t;
+        },
       };
       req.result = db;
       if (req.onupgradeneeded) req.onupgradeneeded({ target: req });

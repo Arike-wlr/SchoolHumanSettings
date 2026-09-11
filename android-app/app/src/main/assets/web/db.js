@@ -4,9 +4,10 @@
 // ============================================================
 
 const DB_NAME = 'oc_characters_db';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const STORES = {
-  characters: 'characters',       // 角色
+  characters: 'characters',       // 角色（原图 images/image_url 原样存储）
+  characterLite: 'characterLite', // 角色列表/关系页的轻量读取投影（纯派生数据，可删可重建，见 D006）
   worldBuildings: 'worldBuildings', // 世界设定
   relations: 'relations',         // 关系
   documents: 'documents',         // 文档（存 Blob）
@@ -48,6 +49,10 @@ function openDB() {
       const db = e.target.result;
       if (!db.objectStoreNames.contains(STORES.characters)) {
         db.createObjectStore(STORES.characters, { keyPath: 'id', autoIncrement: true });
+      }
+      // P06：轻量投影 store（只新增，不动既有 store/keyPath/数据；不迁移、不重写角色记录）
+      if (!db.objectStoreNames.contains(STORES.characterLite)) {
+        db.createObjectStore(STORES.characterLite, { keyPath: 'id' });
       }
       if (!db.objectStoreNames.contains(STORES.worldBuildings)) {
         db.createObjectStore(STORES.worldBuildings, { keyPath: 'id', autoIncrement: true });
@@ -107,9 +112,211 @@ async function getById(storeName, id) {
   });
 }
 
+// 只取主键（不物化记录值）：投影读取靠它找出缺投影的角色，避免全表读取原图字节。
+async function getAllKeys(storeName) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const t = db.transaction(storeName, 'readonly');
+    const req = t.objectStore(storeName).getAllKeys();
+    req.onsuccess = () => resolve(req.result || []);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+// ============= P06：角色轻量投影（派生数据，可删可重建） =============
+// 列表只需要文本字段 + 首图缩略图 + 图数；关系页只需要 id/name/学校/家族。
+// 投影把这两页的读取从"物化全部原图 base64"降到"只读所需字段"，而 images/image_url
+// 仍原样留在 characters 里，详情/导出/同步/备份一律走原图（D006）。
+const LITE_TEXT_FIELDS = ['name', 'alias', 'university', 'region', 'gender', 'status', 'height',
+  'birthday', 'appearance', 'identity_period', 'birth_time', 'naming_rationale', 'setting', 'family'];
+
+// 与 app.js 的 normalizeImages 同规则：images 数组长度；为空时看 image_url。
+function liteImageRefs(record) {
+  let imgs = record ? record.images : null;
+  if (typeof imgs === 'string') { try { imgs = JSON.parse(imgs); } catch (e) { imgs = []; } }
+  if (!Array.isArray(imgs)) imgs = [];
+  if (imgs.length === 0 && record && record.image_url) imgs = [record.image_url];
+  return imgs;
+}
+
+// 与 app.js 的 imageRefSig 同公式（O(1)：长度 + 头尾），供"首图是否变化"判断。
+function liteFirstRefSig(ref) {
+  const s = String(ref || '');
+  return s.length + '\u0001' + s.slice(0, 24) + '\u0001' + s.slice(-16);
+}
+
+// 由完整角色记录构造投影记录；文本字段保持"存在性"（不补空串），保证导出与基线一致。
+function buildCharacterLite(record) {
+  if (!record || record.id === undefined || record.id === null) return null;
+  const refs = liteImageRefs(record);
+  const first = refs[0] || '';
+  const thumbs = (Array.isArray(record.thumbs) && record.thumbs[0]) ? [record.thumbs[0]] : [];
+  const isDataUrl = /^data:/i.test(first);
+  const lite = {
+    id: record.id,
+    sort_order: record.sort_order,
+    images_count: refs.length,
+    firstRefSig: liteFirstRefSig(first),
+    firstRef: (!isDataUrl && first) ? first : '',   // 短引用可直接给卡片；data URL 由读路径按需补
+    needsOriginal: !!(isDataUrl && thumbs.length === 0),
+    thumbs,
+  };
+  for (const f of LITE_TEXT_FIELDS) {
+    if (f in record) lite[f] = record[f];
+  }
+  return lite;
+}
+
+// 投影批量补写：同一事务内先查再写，只补"仍缺投影"的记录，
+// 避免用读取期间已过期的投影覆盖并发写入产生的新投影。
+async function putCharacterLiteIfAbsent(list) {
+  if (!Array.isArray(list) || list.length === 0) return 0;
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    let written = 0;
+    const t = db.transaction(STORES.characterLite, 'readwrite');
+    const store = t.objectStore(STORES.characterLite);
+    t.oncomplete = () => resolve(written);
+    t.onerror = () => reject(t.error);
+    t.onabort = () => reject(t.error || new Error('投影写入事务中止'));
+    for (const lite of list) {
+      const req = store.get(lite.id);
+      req.onsuccess = () => {
+        if (req.result) return;   // 已有投影（可能来自更新的写入）：不动
+        store.put(lite);
+        written++;
+      };
+    }
+  });
+}
+
+// 投影读取 + 自愈：不物化 characters 全量值（只用 getAllKeys + 必要的单条 get）；
+// 缺投影的记录即时投影并落库，旧数据无需重写、无需重新同步。
+function yieldToMain() { return new Promise(resolve => setTimeout(resolve, 0)); }
+
+async function readCharacterLiteAll(options) {
+  const needFirstRef = !(options && options.needFirstRef === false);   // names 投影不需要原图引用
+  const liteAll = await getAll(STORES.characterLite);
+  const byId = new Map();
+  liteAll.forEach(r => { if (r && r.id !== undefined && r.id !== null) byId.set(r.id, r); });
+  const keys = await getAllKeys(STORES.characters);
+  const missing = keys.filter(k => !byId.has(k));
+  const repaired = [];
+  for (let i = 0; i < missing.length; i++) {
+    const record = await getById(STORES.characters, missing[i]);
+    const lite = record ? buildCharacterLite(record) : null;
+    if (lite) { byId.set(lite.id, lite); repaired.push(lite); }
+    if ((i + 1) % 8 === 0) await yieldToMain();   // 分批让出主线程，不长时间占用
+  }
+  if (repaired.length) await putCharacterLiteIfAbsent(repaired);
+  if (needFirstRef) {
+    // 缺缩略图的 data URL 首图：按记录补一次原图引用，保证卡片回退原图（UI 与基线一致）。
+    for (const lite of byId.values()) {
+      if (!lite.needsOriginal) continue;
+      const record = await getById(STORES.characters, lite.id);
+      if (record) lite.firstRef = firstImageRefOf(record);
+    }
+  }
+  return [...byId.values()].sort((a, b) => (a.sort_order ?? Infinity) - (b.sort_order ?? Infinity));
+}
+
+// 投影只读入口（派生数据；整体清空后由读路径自愈重建 —— 回滚/恢复路径）
+const charLiteDB = {
+  listAll: () => getAll(STORES.characterLite),
+  clear: () => clearStore(STORES.characterLite),
+};
+
+// ============= 角色写入：源记录与派生投影在同一事务内维护 =============
+// 投影是派生数据；写入必须与源记录同事务，且只写派生 store，绝不整条覆盖源记录。
+
+async function addCharacter(data) {
+  invalidateCharactersShared();
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const t = db.transaction([STORES.characters, STORES.characterLite], 'readwrite');
+    const liteStore = t.objectStore(STORES.characterLite);
+    let newId;
+    t.oncomplete = () => resolve(newId);
+    t.onerror = () => reject(t.error);
+    t.onabort = () => reject(t.error || new Error('角色新增事务中止'));
+    const req = t.objectStore(STORES.characters).add(data);
+    req.onsuccess = () => {
+      newId = req.result;                                       // 自增 id 由请求结果回填
+      const lite = buildCharacterLite({ ...data, id: newId });
+      if (lite) liteStore.put(lite);
+    };
+  });
+}
+
+async function putCharacter(data) {
+  invalidateCharactersShared();
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const t = db.transaction([STORES.characters, STORES.characterLite], 'readwrite');
+    const liteStore = t.objectStore(STORES.characterLite);
+    let key;
+    t.oncomplete = () => resolve(key);
+    t.onerror = () => reject(t.error);
+    t.onabort = () => reject(t.error || new Error('角色更新事务中止'));
+    const req = t.objectStore(STORES.characters).put(data);
+    req.onsuccess = () => {
+      key = req.result;
+      const lite = buildCharacterLite(data);
+      if (lite) liteStore.put(lite);
+    };
+  });
+}
+
+async function delCharacter(id) {
+  invalidateCharactersShared();
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const t = db.transaction([STORES.characters, STORES.characterLite], 'readwrite');
+    t.oncomplete = () => resolve();
+    t.onerror = () => reject(t.error);
+    t.onabort = () => reject(t.error || new Error('角色删除事务中止'));
+    t.objectStore(STORES.characters).delete(id);
+    t.objectStore(STORES.characterLite).delete(id);
+  });
+}
+
+async function clearCharacters() {
+  invalidateCharactersShared();
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const t = db.transaction([STORES.characters, STORES.characterLite], 'readwrite');
+    t.oncomplete = () => resolve();
+    t.onerror = () => reject(t.error);
+    t.onabort = () => reject(t.error || new Error('角色清空事务中止'));
+    t.objectStore(STORES.characters).clear();
+    t.objectStore(STORES.characterLite).clear();
+  });
+}
+
+async function bulkInsertCharacters(items) {
+  invalidateCharactersShared();
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const t = db.transaction([STORES.characters, STORES.characterLite], 'readwrite');
+    const cStore = t.objectStore(STORES.characters);
+    const liteStore = t.objectStore(STORES.characterLite);
+    t.oncomplete = () => resolve();
+    t.onerror = () => reject(t.error);
+    t.onabort = () => reject(t.error || new Error('角色批量写入事务中止'));
+    for (const item of items) {
+      // 保留原 id
+      cStore.put(item);
+      const lite = buildCharacterLite(item);   // 无 id 的条目交给读路径自愈
+      if (lite) liteStore.put(lite);
+    }
+  });
+}
+
+// ============= 通用 CRUD（角色走上面的同事务版本；其它 store 保持原语义） =============
+
 // 新增（不指定 id，自增）
 async function add(storeName, data) {
-  if (storeName === STORES.characters) invalidateCharactersShared();
+  if (storeName === STORES.characters) return addCharacter(data);
   const db = await openDB();
   return new Promise((resolve, reject) => {
     const t = db.transaction(storeName, 'readwrite');
@@ -121,7 +328,7 @@ async function add(storeName, data) {
 
 // 更新（必须有 id）
 async function put(storeName, data) {
-  if (storeName === STORES.characters) invalidateCharactersShared();
+  if (storeName === STORES.characters) return putCharacter(data);
   const db = await openDB();
   return new Promise((resolve, reject) => {
     const t = db.transaction(storeName, 'readwrite');
@@ -133,7 +340,7 @@ async function put(storeName, data) {
 
 // 删除
 async function del(storeName, id) {
-  if (storeName === STORES.characters) invalidateCharactersShared();
+  if (storeName === STORES.characters) return delCharacter(id);
   const db = await openDB();
   return new Promise((resolve, reject) => {
     const t = db.transaction(storeName, 'readwrite');
@@ -145,7 +352,7 @@ async function del(storeName, id) {
 
 // 清空 store（用于同步覆盖）
 async function clearStore(storeName) {
-  if (storeName === STORES.characters) invalidateCharactersShared();
+  if (storeName === STORES.characters) return clearCharacters();
   const db = await openDB();
   return new Promise((resolve, reject) => {
     const t = db.transaction(storeName, 'readwrite');
@@ -157,7 +364,7 @@ async function clearStore(storeName) {
 
 // 批量插入（同步用）
 async function bulkInsert(storeName, items) {
-  if (storeName === STORES.characters) invalidateCharactersShared();
+  if (storeName === STORES.characters) return bulkInsertCharacters(items);
   const db = await openDB();
   return new Promise((resolve, reject) => {
     const t = db.transaction(storeName, 'readwrite');
@@ -190,11 +397,26 @@ function firstImageRefOf(record) {
 
 // 仅当记录当前首图仍等于生成缩略图时所用的引用时才写入 thumbs（否则视为过期）。
 // 返回 'ok' | 'stale' | 'missing'。
+// 同一事务内同步更新轻量投影的 thumbs/needsOriginal（只改字段；投影不存在则不创建，等读路径自愈）。
 async function updateCharacterThumb(id, expectFirstImage, thumb) {
   const db = await openDB();
   return new Promise((resolve, reject) => {
-    const t = db.transaction(STORES.characters, 'readwrite');
+    const t = db.transaction([STORES.characters, STORES.characterLite], 'readwrite');
     const store = t.objectStore(STORES.characters);
+    const liteStore = t.objectStore(STORES.characterLite);
+    const syncLite = () => {
+      const liteReq = liteStore.get(id);
+      liteReq.onsuccess = () => {
+        const lite = liteReq.result;
+        if (!lite) return;                    // 缺投影交给读路径自愈
+        lite.thumbs = [thumb];
+        lite.needsOriginal = false;
+        liteStore.put(lite);
+      };
+    };
+    t.oncomplete = () => resolve('ok');       // 以事务提交为准
+    t.onerror = () => reject(t.error || new Error('缩略图事务失败'));
+    t.onabort = () => reject(t.error || new Error('缩略图事务中止'));
     const req = store.get(id);
     req.onerror = () => reject(req.error || new Error('读取角色失败'));
     req.onsuccess = () => {
@@ -202,11 +424,11 @@ async function updateCharacterThumb(id, expectFirstImage, thumb) {
       if (!record) return resolve('missing');
       // 生成期间记录被并发修改（同步/编辑）且首图已变：不得写入，交由后续 backfill 重生成。
       if (firstImageRefOf(record) !== expectFirstImage) return resolve('stale');
-      if (Array.isArray(record.thumbs) && record.thumbs[0]) return resolve('ok');   // 已有，不重复写
+      if (Array.isArray(record.thumbs) && record.thumbs[0]) { syncLite(); return; }   // 已有：只补齐投影
       record.thumbs = [thumb];
       const putReq = store.put(record);
       putReq.onerror = () => reject(putReq.error || new Error('写入缩略图失败'));
-      t.oncomplete = () => resolve('ok');   // 以事务提交为准
+      syncLite();
     };
   });
 }
@@ -236,7 +458,27 @@ function listCharactersShared() {
   }
   return _sharedCharList;
 }
-function invalidateCharactersShared() { _sharedCharList = null; }
+// 同一轮共享的轻量投影读取（list / names 各自只做一次）；结束后立即释放引用，
+// 任何角色写入都会使它失效（与 _sharedCharList 同一套语义）。
+let _sharedCharLite = { list: null, names: null };
+function listCharactersLiteShared(shape) {
+  const key = shape === 'names' ? 'names' : 'list';
+  if (!_sharedCharLite[key]) {
+    _sharedCharLite[key] = readCharacterLiteAll({ needFirstRef: key === 'list' })
+      .then(function (list) {
+        if (key === 'names') {
+          return list.map(function (c) {
+            return { id: c.id, name: c.name, university: c.university, family: c.family };
+          });
+        }
+        return list;
+      })
+      .finally(function () { _sharedCharLite[key] = null; });
+  }
+  return _sharedCharLite[key];
+}
+
+function invalidateCharactersShared() { _sharedCharList = null; _sharedCharLite = { list: null, names: null }; }
 
 // ----- 世界设定 -----
 const worldDB = {

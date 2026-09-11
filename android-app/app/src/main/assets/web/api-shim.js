@@ -32,6 +32,12 @@ async function handleApiRequest(url, init) {
   try {
     // ---- 角色 ----
     if (path === '/api/characters' && method === 'GET') {
+      // P06：两个热路径显式选择轻量投影（列表只读列表字段；names 只读 id/name/学校/家族）。
+      // 不带 projection 时保持现状全量响应（向后兼容，其它调用方与既有测试不变）。
+      const projection = queryParams.get('projection');
+      if (projection === 'list' || projection === 'names') {
+        return makeResponse(await listCharactersLiteShared(projection));
+      }
       // 同一轮内与关系页共享这份角色读取；slice 让调用方拿到独立数组，
       // 之后本地排序/编辑不会影响本轮关系名称补全使用的数据。
       return makeResponse((await listCharactersShared()).slice());
@@ -106,10 +112,11 @@ async function handleApiRequest(url, init) {
     // ---- 关系 ----
     if (path.startsWith('/api/relations')) {
       if (path === '/api/relations' && method === 'GET') {
-        // 并行查询关系和角色；角色读取与本轮 /api/characters 共享，避免重复全量读。
-        const [rels, chars] = await Promise.all([relDB.list(), listCharactersShared()]);
+        // P06：名称补全只需要 id/name —— 读轻量投影（与本轮 /api/characters?projection=names 共享），
+        // 不再为了 id→name 物化角色记录里的原图字节。
+        const [rels, names] = await Promise.all([relDB.list(), listCharactersLiteShared('names')]);
         const charMap = {};
-        chars.forEach(c => { charMap[c.id] = c.name; });
+        names.forEach(c => { charMap[c.id] = c.name; });
         rels.forEach(r => {
           r.from_name = charMap[r.from_char_id] || '';
           r.to_name = charMap[r.to_char_id] || '';
@@ -293,18 +300,29 @@ function makeResponse(data, status = 200, contentType) {
 // ============================================================
 async function persistReorder(storeName, items) {
   const db = await openDB();
+  const isCharacters = storeName === STORES.characters;
+  if (isCharacters) invalidateCharactersShared();
   return new Promise((resolve, reject) => {
-    const t = db.transaction(storeName, 'readwrite');
+    // P06：角色排序必须与轻量投影的 sort_order 同事务更新，否则列表顺序会与基线不一致。
+    const t = db.transaction(isCharacters ? [storeName, STORES.characterLite] : storeName, 'readwrite');
     const store = t.objectStore(storeName);
+    const liteStore = isCharacters ? t.objectStore(STORES.characterLite) : null;
     t.oncomplete = () => resolve();
     t.onerror = () => reject(t.error);
+    t.onabort = () => reject(t.error || new Error('排序写入事务中止'));
     for (const item of items) {
       const getReq = store.get(item.id);
       getReq.onsuccess = () => {
-        if (getReq.result) {
-          getReq.result.sort_order = item.sort_order;
-          store.put(getReq.result);
-        }
+        if (!getReq.result) return;
+        getReq.result.sort_order = item.sort_order;
+        store.put(getReq.result);
+        if (!liteStore) return;
+        const liteReq = liteStore.get(item.id);
+        liteReq.onsuccess = () => {
+          if (!liteReq.result) return;                     // 缺投影交给读路径自愈
+          liteReq.result.sort_order = item.sort_order;     // 只改字段，不整条覆盖
+          liteStore.put(liteReq.result);
+        };
       };
     }
   });

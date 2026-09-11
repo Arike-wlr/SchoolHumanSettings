@@ -94,10 +94,11 @@ function makeCardEnv() {
     extractFunction(APP, 'cardThumbOf'),
     extractFunction(APP, 'thumbTargetSize'),
     extractFunction(APP, 'normalizeImages'),
+    extractFunction(APP, 'listImageRefs'),
     extractFunction(APP, 'cardHTML'),
     extractFunction(APP, 'cardSig'),
     'var selectedIds = new Set(); var exportMode = false;',
-    'globalThis.__api = { esc, safeImageSrc, imageRepairHint, imageRefSig, cardThumbOf, thumbTargetSize, normalizeImages, cardHTML, cardSig, selectedIds };',
+    'globalThis.__api = { esc, safeImageSrc, imageRepairHint, imageRefSig, cardThumbOf, thumbTargetSize, normalizeImages, listImageRefs, cardHTML, cardSig, selectedIds };',
   ];
   vm.runInContext(parts.join('\n'), ctx);
   return ctx.__api;
@@ -152,6 +153,7 @@ function makeBackfillEnv(chars, opts) {
     extractFunction(APP, 'imageRefSig'),
     extractFunction(APP, 'cardThumbOf'),
     extractFunction(APP, 'normalizeImages'),
+    extractFunction(APP, 'listImageRefs'),
     'var THUMB_SYNC_WAIT_MS = 250, THUMB_SYNC_MAX_WAIT = 40;',
     'var thumbBackfill = { running: false, revision: -1 };',
     extractFunction(APP, 'syncBusy'),
@@ -181,9 +183,11 @@ function makeRealDbEnv() {
         objectStoreNames: { contains: n => stores.has(n) },
         createObjectStore: (n, o) => { if (!stores.has(n)) stores.set(n, { keyPath: o.keyPath, rows: new Map() }); return {}; },
         transaction: (name) => {
-          const meta = stores.get(name);
+          // 支持多 store 事务（P06：角色写入与派生投影同事务）
+          const names = Array.isArray(name) ? name : [name];
+          names.forEach(n => { if (!stores.has(n)) stores.set(n, { keyPath: 'id', rows: new Map() }); });
           const t = { oncomplete: null, onerror: null, onabort: null };
-          t.objectStore = () => ({
+          const api = meta => ({
             get: k => { const r = { result: structuredClone(meta.rows.get(k)) }; soon(() => { if (r.onsuccess) r.onsuccess(); }); return r; },
             put: v => {
               meta.rows.set(v[meta.keyPath], structuredClone(v));
@@ -195,7 +199,9 @@ function makeRealDbEnv() {
             delete: k => { meta.rows.delete(k); const r = {}; soon(() => { if (r.onsuccess) r.onsuccess(); }); return r; },
             clear: () => { meta.rows.clear(); const r = {}; soon(() => { if (r.onsuccess) r.onsuccess(); }); return r; },
             getAll: () => { const r = { result: [...meta.rows.values()].map(v => structuredClone(v)) }; soon(() => { if (r.onsuccess) r.onsuccess(); }); return r; },
+            getAllKeys: () => { const r = { result: [...meta.rows.keys()] }; soon(() => { if (r.onsuccess) r.onsuccess(); }); return r; },
           });
+          t.objectStore = (which) => api(stores.get(which || names[0]));
           return t;
         },
       };
@@ -380,6 +386,7 @@ async function main() {
       fetch: async (url, init) => { ctx.__sent = init && init.body; return { ok: true }; },
     });
     const parts = [
+      extractFunction(APP, 'imageRefSig'),
       extractFunction(APP, 'normalizeImages'),
       extractFunction(APP, 'doSubmitFinal'),
       'globalThis.__submit = doSubmitFinal;',

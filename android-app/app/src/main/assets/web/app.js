@@ -37,10 +37,15 @@ function saveExportFile(jsonStr, fileName, msg) {
    序列化含原图的角色记录既慢又会产生重复副本；改为保留内存引用，
    由 window.appDataRevision（写入/同步后自增）判定是否仍然有效。
    ============================================================ */
-var _sharedCharacters = { revision: -1, data: null };
-function _putSharedCharacters(data, revision) { _sharedCharacters = { revision: revision, data: data }; }
-function _getSharedCharacters(revision) {
-  return (_sharedCharacters.data && _sharedCharacters.revision === revision) ? _sharedCharacters.data : null;
+var _sharedCharacters = { revision: -1, shape: null, data: null };
+// shape：'list' = 列表投影（含全部文本字段）、'names' = 关系页 names 投影（只有 id/name/学校/家族）。
+// list 记录可满足 names 的需求；names 记录**不得**被列表复用（否则列表缺文本字段）。
+function _putSharedCharacters(data, revision, shape) { _sharedCharacters = { revision: revision, shape: shape || 'list', data: data }; }
+function _getSharedCharacters(revision, shape) {
+  if (!_sharedCharacters.data || _sharedCharacters.revision !== revision) return null;
+  if (_sharedCharacters.shape === shape) return _sharedCharacters.data;
+  if (shape === 'names' && _sharedCharacters.shape === 'list') return _sharedCharacters.data;
+  return null;
 }
 
 /* ============================================================
@@ -217,6 +222,25 @@ VM.index = (function() {
     return imgs;
   }
 
+  // 列表渲染用的图片引用视图（P06）：
+  // - 完整记录（单条 GET / 默认全量接口）走 normalizeImages；
+  // - 轻量投影没有 images，用 images_count + firstRef 复现等价视图：
+  //   长度 = 真实图片数（徽标“共N张”用），[0] = 可用的首图引用
+  //   （有缩略图时用缩略图，缺失时由投影读路径补原图引用）。
+  // 详情/编辑/导出/同步仍一律使用完整记录与原图。
+  function listImageRefs(c) {
+    if (!c) return [];
+    if (Array.isArray(c.images)) return normalizeImages(c);
+    var n = (typeof c.images_count === 'number' && c.images_count > 0) ? c.images_count : 0;
+    if (n === 0) return [];
+    var out = new Array(n);
+    // [0] 必须是"卡片可用的首图引用"：优先原始引用（缩略图缺失时由读路径补），
+    // 其次缩略图 —— cardHTML 用 [0] 判断"是否有图"，用 thumbs[0] 决定实际 src。
+    out[0] = c.firstRef || (Array.isArray(c.thumbs) ? (c.thumbs[0] || '') : '');
+    for (var i = 1; i < n; i++) out[i] = '';
+    return out;
+  }
+
   function handleImageUpload(event) {
     var files = Array.from(event.target.files || []);
     if (files.length === 0) return;
@@ -356,7 +380,7 @@ VM.index = (function() {
     var cx=st==='已消逝'?' perished':st==='普通人'?' ordinary':'';
     var t=c.setting||'';
     var tp=t.length>80?t.substring(0,80)+'…':t;
-    var ni=normalizeImages(c);
+    var ni=listImageRefs(c);
     var ic=ni.length, cu=ni[0]||'';
     var cv=cardThumbOf(c)||cu;   // 优先派生缩略图；缺失时回退原图（行为不变）
     var ph='';
@@ -383,7 +407,7 @@ VM.index = (function() {
 
   // 卡片签名：覆盖 cardHTML 用到的全部字段，签名相同就不重建该节点。
   function cardSig(c, gIdx) {
-    var imgs = normalizeImages(c);
+    var imgs = listImageRefs(c);
     var imgSig = '';
     for (var i = 0; i < imgs.length; i++) imgSig += imageRefSig(imgs[i]) + '|';
     return [c.id, gIdx, c.name, c.alias, c.university, c.region, c.gender, c.status, c.height, c.birthday,
@@ -432,7 +456,7 @@ VM.index = (function() {
     for (var i = 0; i < allCharacters.length; i++) {
       var c = allCharacters[i];
       if (cardThumbOf(c)) continue;
-      if (/^data:image\//i.test(normalizeImages(c)[0] || '')) out.push(c);
+      if (/^data:image\//i.test(listImageRefs(c)[0] || '')) out.push(c);
     }
     return out;
   }
@@ -462,7 +486,7 @@ VM.index = (function() {
       return;
     }
     var c = queue[index];
-    var ref = normalizeImages(c)[0] || '';
+    var ref = listImageRefs(c)[0] || '';
     makeCardThumb(ref).then(function (thumb) {
       if (!thumb || (window.appDataRevision || 0) !== thumbBackfill.revision) return;
       // 原子读-改-写：只改 thumbs，且仅当记录当前首图未变；绝不整条覆盖（否则会回退并发同步/编辑）。
@@ -484,12 +508,13 @@ VM.index = (function() {
     if (!force && loadingRevision === revision) return;   // 同版本请求已在途
     loadingRevision = revision;
     var generation = ++loadGeneration;
-    fetch(API).then(function(r){return r.json();}).then(function(data){
+    // P06：列表只需要"列表字段 + 首图缩略图 + 图数"，显式请求轻量投影。
+    fetch(API + '?projection=list').then(function(r){return r.json();}).then(function(data){
       if (generation !== loadGeneration || revision !== (window.appDataRevision || 0)) return;
       loadingRevision = -1;
       allCharacters = data;
       loadedRevision = revision;
-      _putSharedCharacters(allCharacters, revision);
+      _putSharedCharacters(allCharacters, revision, 'list');
       document.getElementById('indexLoadingState').style.display = 'none';
       buildRegionTabs();
       applyFilter();
@@ -548,7 +573,11 @@ VM.index = (function() {
     if(editId){
       var prev=null;
       for(var pi=0;pi<allCharacters.length;pi++){if(String(allCharacters[pi].id)===String(editId)){prev=allCharacters[pi];break;}}
-      if(prev&&(normalizeImages(prev)[0]||'')!==(allImages[0]||''))data.thumbs=[];
+      // 首图是否变化用 O(1) 签名比较：投影记录带 firstRefSig，完整记录回退到现算（P06）。
+      if(prev){
+        var prevSig=prev.firstRefSig||imageRefSig(normalizeImages(prev)[0]||'');
+        if(prevSig!==imageRefSig(allImages[0]||''))data.thumbs=[];
+      }
     }
     var url=editId?API+'/'+editId:API;
     var method=editId?'PUT':'POST';
@@ -1455,14 +1484,15 @@ VM.relations = (function() {
     if (!force && loadingRevision === revision) return;
     loadingRevision = revision;
     var generation = ++loadGeneration;
-    // 角色数据优先复用其它视图（如角色页）已加载的内存快照，不重复全量查询。
-    var sharedChars = _getSharedCharacters(revision);
-    var charsPromise = sharedChars ? Promise.resolve(sharedChars.slice()) : fetch(API_CHAR).then(function(r) { return r.json(); });
+    // 角色数据优先复用其它视图（如角色页）已加载的内存快照，不重复查询。
+    // P06：关系名补全只需要 id/name/学校/家族 —— 请求 names 投影（list 投影同样满足）。
+    var sharedChars = _getSharedCharacters(revision, 'names');
+    var charsPromise = sharedChars ? Promise.resolve(sharedChars.slice()) : fetch(API_CHAR + '?projection=names').then(function(r) { return r.json(); });
     Promise.all([fetch(API_REL).then(function(r) { return r.json(); }), charsPromise]).then(function(arr) {
       if (generation !== loadGeneration || revision !== (window.appDataRevision || 0)) return;
       loadingRevision = -1;
       allRelations = arr[0]; allCharacters = arr[1];
-      if (!sharedChars) _putSharedCharacters(allCharacters, revision);
+      if (!sharedChars) _putSharedCharacters(allCharacters, revision, 'names');
       loadedRevision = revision;
       var ci = new Set(); allRelations.forEach(function(r) { ci.add(r.id); });
       selectedIds.forEach(function(id) { if (!ci.has(id)) selectedIds.delete(id); });
