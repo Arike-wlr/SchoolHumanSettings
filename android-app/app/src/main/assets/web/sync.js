@@ -911,8 +911,13 @@ async function getSyncDiff(direction) {
   // 只用已有缓存证明已知图片相同；未知图片保守列为待核验，不触发下载或业务写入。
   const cacheIndex = await loadImageCacheIndex();
   const comparableServerChars = await canonicalizeRecordsForDiff(serverChars, url, false, cacheIndex);
-  const comparableLocalChars = await canonicalizeRecordsForDiff(
-    localChars, url, true, cacheIndex, { trustDataCache: isDownload });
+  // 预览必须与实际执行同一口径。本地图片存的是 data URL，只要能通过本机图片缓存
+  // 证明它对应"当前服务器上的同一个 URL"，就不算变更。
+  // 这里原先是 { trustDataCache: isDownload }：upload 方向等于把所有本地 data URL
+  // 都当成"服务器上没有"，于是每个带图角色每次预览都被报成"✏ 修改"（80 个角色里的那 17 个），
+  // 而点确认后执行 uploadToServer 走的是信任缓存的路径，结果一项都不改 —— 纯虚报。
+  // 真正"服务器上的图已不在（404）"由执行的 verifyUploadImageMappings 兜底重传。
+  const comparableLocalChars = await canonicalizeRecordsForDiff(localChars, url, true, cacheIndex);
   const charDiff = computeRecordDiff(
     isDownload ? comparableServerChars : comparableLocalChars,
     isDownload ? comparableLocalChars : comparableServerChars,

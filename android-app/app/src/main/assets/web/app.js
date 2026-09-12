@@ -481,6 +481,14 @@ VM.index = (function() {
     // 数据版本变了（写入/同步）：放弃本轮，避免把陈旧记录写回。
     if ((window.appDataRevision || 0) !== thumbBackfill.revision) { thumbBackfill.running = false; return; }
     if (index >= queue.length) { thumbBackfill.running = false; return; }
+    // 页面已不可见（切后台/退出）：立刻停下解码与写库。
+    // 应用退到后台后 WebView 仍会跑定时器，这里不停就会在"用户以为已经退出"的时候
+    // 继续 createImageBitmap 解码原图 + 写 IndexedDB，正好和退出备份撞在一起把内存顶爆。
+    // 未生成的首图缩略图不丢，下次进入时 scheduleThumbBackfill 会重新排队。
+    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+      thumbBackfill.running = false;
+      return;
+    }
     if (syncBusy() && (waited || 0) < THUMB_SYNC_MAX_WAIT) {
       setTimeout(function () { runThumbBatch(queue, index, (waited || 0) + 1); }, THUMB_SYNC_WAIT_MS);
       return;

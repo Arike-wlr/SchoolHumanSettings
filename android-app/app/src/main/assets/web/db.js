@@ -30,10 +30,14 @@ let _db = null;
 // 2) 页面切后台/退出时触发一次无害只读事务，
 //    促使 WebView 尽快把尚未落盘的 IndexedDB 写入 flush 到磁盘，
 //    避免用户编辑完直接切后台/杀进程导致最后的写入丢失。
+//    注意：这里必须用 count()，只提交一个只读事务、不物化任何记录。
+//    之前用 getAll()，会在切后台瞬间把 characters 全表（含全部 base64 原图）
+//    物化成一个 JS 数组（结果还没人用），低内存机上正好撞上"退出"这一下 OOM。
+//    （不要用 openKeyCursor：游标不 continue 会让事务一直挂着。）
 document.addEventListener('visibilitychange', function () {
   if (document.visibilityState === 'hidden' && _db) {
     try {
-      _db.transaction(STORES.characters, 'readonly').objectStore(STORES.characters).getAll();
+      _db.transaction(STORES.characters, 'readonly').objectStore(STORES.characters).count();
     } catch (e) { /* ignore */ }
   }
 });
@@ -119,6 +123,17 @@ async function getAllKeys(storeName) {
     const t = db.transaction(storeName, 'readonly');
     const req = t.objectStore(storeName).getAllKeys();
     req.onsuccess = () => resolve(req.result || []);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+// 只取条数（不物化记录值）：仅用于"是否为空"这类判断，绝不返回记录体本身。
+async function countAll(storeName) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const t = db.transaction(storeName, 'readonly');
+    const req = t.objectStore(storeName).count();
+    req.onsuccess = () => resolve(req.result || 0);
     req.onerror = () => reject(req.error);
   });
 }
@@ -721,8 +736,11 @@ async function checkAndRestoreBackup() {
   if (!window.Android || !window.Android.hasBackup || !window.Android.loadBackup) return;
   try {
     if (!window.Android.hasBackup()) return;
-    const chars = await getAll(STORES.characters);
-    if (chars.length > 0) return; // 有数据就不打扰
+    // 只判断"有没有数据"，用 count 而不是 getAll：
+    // 启动路径上 getAll 会把全部角色（含 base64 原图）读进内存，
+    // 有数据的机器冷启动会被这一下顶到 OOM —— 这就是"退出再进入闪退"的启动侧峰值。
+    const charCount = await countAll(STORES.characters);
+    if (charCount > 0) return; // 有数据就不打扰
     const json = window.Android.loadBackup();
     if (!json) return;
     const data = JSON.parse(json);

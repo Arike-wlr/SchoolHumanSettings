@@ -64,9 +64,9 @@ public class MainActivity extends AppCompatActivity {
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
         // 离线优先：优先使用缓存
         settings.setCacheMode(WebSettings.LOAD_DEFAULT);
-        // 关键：每次启动清空 WebView 缓存，确保加载 APK 内最新资源
-        // 否则更新 APK 后仍会命中旧的 sync.js / db.js，导致改动不生效
-        webView.clearCache(true);
+        // 缓存策略：只在覆盖安装后的第一次启动清一次缓存，保证加载 APK 内最新资源；
+        // 不再每次启动都全量清缓存——那是同步磁盘 IO，会在启动内存峰值上再叠一层。
+        clearCacheIfAppUpdated();
 
         webView.setWebViewClient(new WebViewClient() {
             @Override
@@ -133,6 +133,78 @@ public class MainActivity extends AppCompatActivity {
         webView.loadUrl("file:///android_asset/web/index.html");
     }
 
+    /**
+     * 只在"本次安装/覆盖安装"后的第一次启动清空 WebView 缓存。
+     * 用 lastUpdateTime 而不是 versionCode：即使忘了升 versionCode，
+     * 覆盖安装也会刷新资源，不会继续命中旧的 db.js / app.js。
+     * 同时避免每次冷启动都做全量清缓存。
+     */
+    private void clearCacheIfAppUpdated() {
+        try {
+            long stamp = getPackageManager().getPackageInfo(getPackageName(), 0).lastUpdateTime;
+            android.content.SharedPreferences sp = getSharedPreferences("app_cache", MODE_PRIVATE);
+            if (sp.getLong("cleared_update_time", -1L) != stamp) {
+                webView.clearCache(true);
+                sp.edit().putLong("cleared_update_time", stamp).apply();
+            }
+        } catch (Exception e) {
+            // 取安装时间失败时保守处理：清一次，保证资源刷新
+            try { webView.clearCache(true); } catch (Exception ignore) { }
+        }
+    }
+
+    @Override
+    protected void onPause() {
+        if (webView != null) {
+            webView.onPause();
+        }
+        super.onPause();
+    }
+
+    @Override
+    protected void onStop() {
+        // 放在 onStop 而非 onPause：先让页面 hidden 那一刻触发的退出备份跑完，
+        // 再冻结 JS 定时器，避免应用退到后台后还继续解码图片、写 IndexedDB。
+        if (webView != null) {
+            webView.pauseTimers();
+        }
+        super.onStop();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (webView != null) {
+            webView.resumeTimers();
+            webView.onResume();
+        }
+    }
+
+    @Override
+    protected void onDestroy() {
+        // 关键：WebView 不 destroy 会连同 Activity、JS 定时器、已解码图片一起泄漏。
+        // 低内存机型上「退出再进入」= 进程里叠出第二个 WebView，内存翻倍后 OOM 闪退。
+        if (webView != null) {
+            try {
+                webView.stopLoading();
+                webView.loadUrl("about:blank");   // 解除对当前页面/Activity 的引用
+                webView.setWebChromeClient(null);
+                webView.setWebViewClient(null);
+                webView.removeAllViews();
+                android.view.ViewGroup parent = (android.view.ViewGroup) webView.getParent();
+                if (parent != null) parent.removeView(webView);
+                webView.destroy();
+            } catch (Exception ignore) {
+                // destroy 失败不影响退出流程
+            }
+            webView = null;
+        }
+        filePathCallback = null;
+        pendingFileBytes = null;
+        pendingFileName = null;
+        super.onDestroy();
+    }
+
     /** JS 可调用的原生方法：弹出保存对话框并写入文件 */
     public class JsBridge {
         @JavascriptInterface
@@ -144,40 +216,48 @@ public class MainActivity extends AppCompatActivity {
          * 自动备份：把核心数据 JSON 写入 App 私有目录 files/data_backup.json。
          * 私有目录不受"清理缓存/存储压力清理"影响（除非用户手动清除数据或卸载 App），
          * 作为 IndexedDB 被系统误清的兜底。
+         * 这里用 OutputStreamWriter 流式写：json 往往很大（内含 base64 原图），
+         * getBytes() 会再复制一份等大的 byte[]，是切后台 OOM 的常见诱因。
          */
         @JavascriptInterface
         public void saveBackup(String json) {
+            if (json == null) return;
+            java.io.OutputStreamWriter writer = null;
             try {
                 java.io.File f = new java.io.File(getFilesDir(), "data_backup.json");
-                java.io.FileOutputStream fos = new java.io.FileOutputStream(f);
-                fos.write(json.getBytes("UTF-8"));
-                fos.close();
+                writer = new java.io.OutputStreamWriter(
+                        new java.io.FileOutputStream(f), java.nio.charset.StandardCharsets.UTF_8);
+                writer.write(json);
             } catch (Exception e) {
                 // 备份失败不打断主流程
+            } finally {
+                if (writer != null) {
+                    try { writer.close(); } catch (Exception ignore) { }
+                }
             }
         }
 
-        /** 读取自动备份内容；没有备份则返回空串 */
+        /** 读取自动备份内容；没有备份则返回空串（同样流式读，避免 byte[] + String 双份） */
         @JavascriptInterface
         public String loadBackup() {
+            java.io.File f = new java.io.File(getFilesDir(), "data_backup.json");
+            if (!f.exists() || f.length() == 0) return "";
+            java.io.InputStreamReader reader = null;
             try {
-                java.io.File f = new java.io.File(getFilesDir(), "data_backup.json");
-                if (f.exists() && f.length() > 0) {
-                    java.io.FileInputStream fis = new java.io.FileInputStream(f);
-                    byte[] buf = new byte[(int) f.length()];
-                    int off = 0;
-                    while (off < buf.length) {
-                        int n = fis.read(buf, off, buf.length - off);
-                        if (n <= 0) break;
-                        off += n;
-                    }
-                    fis.close();
-                    return new String(buf, 0, off, "UTF-8");
-                }
+                reader = new java.io.InputStreamReader(
+                        new java.io.FileInputStream(f), java.nio.charset.StandardCharsets.UTF_8);
+                StringBuilder sb = new StringBuilder((int) Math.min(f.length(), 1 << 20));
+                char[] buf = new char[65536];
+                int n;
+                while ((n = reader.read(buf)) > 0) sb.append(buf, 0, n);
+                return sb.toString();
             } catch (Exception e) {
-                // ignore
+                return "";
+            } finally {
+                if (reader != null) {
+                    try { reader.close(); } catch (Exception ignore) { }
+                }
             }
-            return "";
         }
 
         /** 是否存在自动备份文件 */
