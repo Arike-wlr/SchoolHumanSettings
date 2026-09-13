@@ -18,6 +18,9 @@ const WEB = path.join(root, 'android-app/app/src/main/assets/web');
 const APP = fs.readFileSync(path.join(WEB, 'app.js'), 'utf8');
 const DB = fs.readFileSync(path.join(WEB, 'db.js'), 'utf8');
 const SYNC = fs.readFileSync(path.join(WEB, 'sync.js'), 'utf8');
+// 图片字节仓库：app.js / db.js 现在经由它的引用判定与取字节函数访问图片；
+// 未提供 window.Android 时它退化为原样 data URL，故本套件行为与改造前一致。
+const STORE = fs.readFileSync(path.join(WEB, 'image-store.js'), 'utf8');
 
 // ---------------------------------------------------------------- 源码切片
 // 按名字提取函数体。需跳过字符串、注释与**正则字面量**——源码里有 /'/g、/^data:image\//i
@@ -86,6 +89,7 @@ function character(over) {
 function makeCardEnv() {
   const ctx = vm.createContext({ window: { devicePixelRatio: 1 }, Set, Math, String, Number, Array, Object, RegExp, isFinite });
   const parts = [
+    STORE,
     'var CARD_BOX_W = 88, CARD_BOX_H = 64;',
     extractFunction(APP, 'esc'),
     extractFunction(APP, 'safeImageSrc'),
@@ -150,6 +154,7 @@ function makeBackfillEnv(chars, opts) {
     },
   });
   const parts = [
+    STORE,
     extractFunction(APP, 'imageRefSig'),
     extractFunction(APP, 'cardThumbOf'),
     extractFunction(APP, 'normalizeImages'),
@@ -226,6 +231,7 @@ function makeRealDbEnv() {
     structuredClone, setImmediate, Promise, Set, Map, JSON, Date, RegExp,
     Object, Array, String, Number, Math, isFinite, Blob, Error,
   });
+  vm.runInContext(STORE, ctx);
   vm.runInContext(DB, ctx);
   vm.runInContext('globalThis.__db = { charDB };', ctx);
 
@@ -507,6 +513,7 @@ async function main() {
       },
     });
     vm.runInContext([
+      STORE,
       'var CARD_BOX_W = 88, CARD_BOX_H = 64;',
       extractFunction(APP, 'thumbTargetSize'),
       extractFunction(APP, 'thumbCanvasHasAlpha'),

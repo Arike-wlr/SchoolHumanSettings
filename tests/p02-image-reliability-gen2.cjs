@@ -8,6 +8,8 @@ const root = path.resolve(__dirname, '..');
 const syncSource = fs.readFileSync(path.join(root, 'android-app/app/src/main/assets/web/sync.js'), 'utf8');
 const dbSource = fs.readFileSync(path.join(root, 'android-app/app/src/main/assets/web/db.js'), 'utf8');
 const appSource = fs.readFileSync(path.join(root, 'android-app/app/src/main/assets/web/app.js'), 'utf8');
+// 图片字节仓库：sync.js / db.js 依赖它的引用判定与存储函数；无原生接口时退化为原样 data URL。
+const storeSource = fs.readFileSync(path.join(root, 'android-app/app/src/main/assets/web/image-store.js'), 'utf8');
 const PNG_DATA = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
 const PNG_URL = 'data:image/png;base64,' + PNG_DATA;
 
@@ -43,6 +45,7 @@ function makeSync(fetchImpl, cache = makeCache(), extras = {}) {
     localStorage: { getItem: () => 'current', setItem: () => {} }, window: {}, navigator: {}, document: {},
     createImageBitmap: async () => ({ close() {} }), ...extras,
   });
+  vm.runInContext(storeSource, context);
   vm.runInContext(syncSource, context);
   return { context, cache };
 }
@@ -86,6 +89,7 @@ function makeIdbContext() {
   const context = vm.createContext({ console, URL, Map, Set, Blob, TextDecoder, structuredClone, setTimeout, clearTimeout,
     navigator: { storage: { persist: async () => true } }, document, window: { addEventListener() {} }, localStorage: { getItem: () => 'old', setItem() {} },
     indexedDB: { open }, confirm: () => false, location: { reload() {} }, alert() {}, setTimeout, clearTimeout });
+  vm.runInContext(storeSource, context);
   vm.runInContext(dbSource, context);
   vm.runInContext('globalThis.__imageCacheDB = imageCacheDB;', context);
   return { context, stores, get clearCalls() { return clearCalls; } };

@@ -28,6 +28,8 @@ const BASELINE = {
   sync: readText(path.join(BASE, 'sync.js')),
   shim: readText(path.join(BASE, 'api-shim.js')),
 };
+// 当前实现新增的图片字节仓库；只在 live 沙箱里注入（基线快照不含它，保持原样）。
+const STORE = readText(path.join(WEB, 'image-store.js'));
 
 const CHAR_SECTION = '// ======================== 角色设定';
 const WORLD_SECTION = '// ======================== 世界设定';
@@ -330,6 +332,7 @@ function makeIdb() {
       localStorage: { getItem: () => 'old', setItem() {} },
       indexedDB: { open }, confirm: () => false, location: { reload() {} }, alert() {},
     });
+    if (which === 'live') vm.runInContext(STORE, ctx);
     vm.runInContext((which === 'live' ? LIVE : BASELINE).db, ctx);
     vm.runInContext('globalThis.__db = { imageCacheDB, charDB, worldDB, relDB, docDB, imageHash, openDB,' +
       ' listCharactersShared: (typeof listCharactersShared === "function" ? listCharactersShared : null) };', ctx);
@@ -369,6 +372,7 @@ function makeSyncContext(idb, fetchImpl) {
     window: {}, navigator: {}, document: { addEventListener() {} },
     createImageBitmap: async () => ({ close() {} }),
   });
+  vm.runInContext(STORE, ctx);
   vm.runInContext(LIVE.sync, ctx);
   return ctx;
 }
@@ -439,6 +443,7 @@ function makeApiHarness(which, rows) {
     return req;
   }
   ctx.indexedDB = { open };
+  if (which === 'live') vm.runInContext(STORE, ctx);
   vm.runInContext((which === 'live' ? LIVE : BASELINE).db, ctx);
   vm.runInContext((which === 'live' ? LIVE : BASELINE).shim, ctx);
   return {
@@ -485,6 +490,7 @@ function makeAppHarness(which, options) {
     localStorage: { getItem: () => '', setItem() {} },
     navigator: {}, location: { protocol: 'file:' },
   });
+  if (which === 'live') vm.runInContext(STORE, ctx);
   vm.runInContext(head + indexModule, ctx);
   const grid = dom.el('charGrid');
   // htmlChars/creations 统计"这一轮构建了多少 HTML / 节点"，对整表重建与增量复用都可比。
@@ -550,6 +556,7 @@ function makeGraphHarness(which) {
     localStorage: { getItem: () => '', setItem() {} },
     navigator: {}, location: { protocol: 'file:' },
   });
+  if (which === 'live') vm.runInContext(STORE, ctx);
   vm.runInContext(head + relModule, ctx);
   return { ctx, dom, timers, draws: () => dom.ctxCalls.clearRect };
 }

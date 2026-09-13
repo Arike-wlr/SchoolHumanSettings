@@ -3,8 +3,10 @@
    ============================================================ */
  function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
  function safeImageSrc(src) {
-   var value = String(src || '').trim();
-   return /^(?:data:image\/|blob:|https?:\/\/)/i.test(value) ? value : '';
+   // img:// 引用是本地图片仓库的内容指纹，这里换算成 WebView 能直接加载的 https 地址
+   // （由原生 WebViewAssetLoader 从磁盘流式提供，字节不经过 JS 堆）；
+   // data:/blob:/https 原样放行，其余一律拒绝。所有渲染路径都从这里出去。
+   return imageRefToSrcSafe(String(src || '').trim());
  }
  function imageRepairHint() { return '<div class="image-repair-hint">图片不可用，请重新同步</div>'; }
 function showToast(msg, type) {
@@ -120,11 +122,14 @@ function thumbCanvasHasAlpha(ctx, w, h) {
   } catch (e) { return true; }
 }
 
-// 由 data URL / Blob 生成卡片缩略图 data URL；失败返回空串（调用方回退原图）。
+// 由 img:// 引用 / data URL / Blob 生成卡片缩略图 data URL；失败返回空串（调用方回退原图）。
 async function makeCardThumb(source) {
   // 老 WebView 无 createImageBitmap：不生成缩略图，卡片继续用原图（行为不变，仅无收益）。
   if (typeof createImageBitmap !== 'function') return '';
-  var blob = (source instanceof Blob) ? source : dataUrlToBlob(source);
+  // 引用形态的图片去仓库取字节（原生直接读盘），data URL 就地解码。
+  // 无论哪种都只解码一次，p05 的"每张图 createImageBitmap=1"约束依旧成立。
+  var blob = (source instanceof Blob) ? source
+    : (isImageRef(source) ? await imageRefToBlob(source) : dataUrlToBlob(source));
   var bmp = null;
   try {
     // 每张图只解码一次：直接由已解码位图让画布降采样，不再为取宽高做第二次全分辨率解码。
@@ -294,9 +299,10 @@ VM.index = (function() {
     _detailView = null;
     if (!imgs || imgs.length===0) { wrap.style.display='none'; wrap.innerHTML=''; return; }
     var btn='width:32px;height:32px;border-radius:50%;border:1px solid var(--border);background:var(--bg);cursor:pointer;font-size:18px;line-height:1;color:var(--text);flex-shrink:0;';
-    var sp='<span style="display:inline-block;width:32px;flex-shrink:0;"></span>';
-    var prev=detailImageIdx>0?'<button onclick="VM.index.detailImageGo('+(detailImageIdx-1)+')" style="'+btn+'">‹</button>':sp;
-    var next=detailImageIdx<imgs.length-1?'<button onclick="VM.index.detailImageGo('+(detailImageIdx+1)+')" style="'+btn+'">›</button>':sp;
+    // 左右按钮常驻 DOM：切换时只改可见性，绝不能把目标索引写死进 onclick——
+    // 结构不再重建，写死索引会让"翻到第二张后按钮依旧指向第 2 张"，表现就是翻不动。
+    var prev='<button id="indexDetailPrev" onclick="VM.index.detailImageStep(-1)" style="'+btn+'" title="上一张">‹</button>';
+    var next='<button id="indexDetailNext" onclick="VM.index.detailImageStep(1)" style="'+btn+'" title="下一张">›</button>';
     var multi=imgs.length>1;
     var cnt=multi?'<div id="indexDetailCounter" style="font-size:0.75rem;color:var(--text-light);margin-top:4px;"></div>':'';
     var thumbs=multi?imgs.map(function(u,i){var src=safeImageSrc(u);return src?'<img data-thumb="'+i+'" src="'+src+'" onclick="VM.index.detailImageGo('+i+')" style="width:42px;height:42px;object-fit:cover;border-radius:4px;cursor:pointer;border:2px solid transparent;">':'<div data-thumb="'+i+'" class="image-repair-hint" onclick="VM.index.detailImageGo('+i+')" style="cursor:pointer;">图片不可用</div>';}).join(''):'';
@@ -305,7 +311,7 @@ VM.index = (function() {
       '<div id="indexDetailHint" class="image-repair-hint" style="display:none;">图片不可用，请重新同步</div>'+cnt+'</div>'+next+'</div>'+
       (thumbs?'<div style="display:flex;gap:6px;justify-content:center;flex-wrap:wrap;">'+thumbs+'</div>':'');
     wrap.style.display='block';
-    _detailView={imgs:imgs,main:document.getElementById('indexDetailMain'),hint:document.getElementById('indexDetailHint'),counter:document.getElementById('indexDetailCounter'),thumbs:multi?wrap.querySelectorAll('[data-thumb]'):[]};
+    _detailView={imgs:imgs,main:document.getElementById('indexDetailMain'),hint:document.getElementById('indexDetailHint'),counter:document.getElementById('indexDetailCounter'),thumbs:multi?wrap.querySelectorAll('[data-thumb]'):[],prev:document.getElementById('indexDetailPrev'),next:document.getElementById('indexDetailNext')};
     updateDetailImage();
   }
 
@@ -316,6 +322,9 @@ VM.index = (function() {
     if (src) { _detailView.main.src = src; _detailView.main.style.display=''; _detailView.hint.style.display='none'; }
     else { _detailView.main.removeAttribute('src'); _detailView.main.style.display='none'; _detailView.hint.style.display=''; }
     if (_detailView.counter) _detailView.counter.textContent = (idx+1)+' / '+_detailView.imgs.length;
+    // 用 visibility 而非 display：保持两侧占位宽度，切换时主图不会左右跳动。
+    if (_detailView.prev) _detailView.prev.style.visibility = idx > 0 ? 'visible' : 'hidden';
+    if (_detailView.next) _detailView.next.style.visibility = idx < _detailView.imgs.length - 1 ? 'visible' : 'hidden';
     for (var i = 0; i < _detailView.thumbs.length; i++) {
       var el = _detailView.thumbs[i];
       if (el.tagName === 'IMG') el.style.borderColor = (i === idx) ? 'var(--primary)' : 'transparent';
@@ -323,6 +332,14 @@ VM.index = (function() {
   }
 
   function detailImageGo(idx) { if (idx>=0 && idx<detailImages.length) { detailImageIdx=idx; updateDetailImage(); } }
+
+  // 相对翻页：按钮只传 ±1，边界在这里兜住（到头时按钮已隐藏，越界也直接返回）。
+  function detailImageStep(delta) {
+    var next = detailImageIdx + delta;
+    if (next < 0 || next >= detailImages.length) return;
+    detailImageIdx = next;
+    updateDetailImage();
+  }
 
   function groupByRegion(chars) {
     var g = {};
@@ -456,7 +473,9 @@ VM.index = (function() {
     for (var i = 0; i < allCharacters.length; i++) {
       var c = allCharacters[i];
       if (cardThumbOf(c)) continue;
-      if (/^data:image\//i.test(listImageRefs(c)[0] || '')) out.push(c);
+      // img:// 引用也要纳入：它的卡片 src 指向的是**原图**（引用很短，投影直接给卡片），
+      // 不生成缩略图就会让每张卡片都加载整张原图，长列表下解码内存会炸 —— 正是本次要治的病。
+      if (/^data:image\//i.test(listImageRefs(c)[0] || '') || isImageRef(listImageRefs(c)[0])) out.push(c);
     }
     return out;
   }
@@ -840,7 +859,7 @@ VM.index = (function() {
     openCreateModal:openCreateModal, openEditModal:openEditModal, submitForm:submitForm,
     openDeleteModal:openDeleteModal, closeDeleteModal:closeDeleteModal, confirmDelete:confirmDelete,
     closeModal:closeModal, closeDetailModal:closeDetailModal, detailEdit:detailEdit,
-    handleImageUpload:handleImageUpload, removeImageItem:removeImageItem, detailImageGo:detailImageGo,
+    handleImageUpload:handleImageUpload, removeImageItem:removeImageItem, detailImageGo:detailImageGo, detailImageStep:detailImageStep,
     handleCardClick:handleCardClick,
     enterExportMode:enterExportMode, cancelExport:cancelExport,
     toggleCardSelect:toggleCardSelect, toggleSelectAll:toggleSelectAll, confirmExport:confirmExport,
@@ -2252,4 +2271,93 @@ VM.relations = (function() {
     graphZoom: graphZoom, graphReset: graphReset
   };
 })();
+
+// ======================== 诊断日志 ========================
+// 闪退排查用：原生把崩溃堆栈写进 App 私有目录，这里只负责展示与导出，
+// 全程不依赖电脑 / adb。入口在首页 footer 的「诊断日志」。
+var diagLogText = '';
+
+function diagNativeReady() {
+  return typeof Android !== 'undefined' && Android && Android.readCrashLog;
+}
+
+// 首页入口上的红点：只在确实有崩溃记录时才亮
+function refreshDiagBadge() {
+  var dot = document.getElementById('diagBadge');
+  if (!dot) return;
+  var has = false;
+  try { has = !!(diagNativeReady() && Android.hasCrashLog && Android.hasCrashLog()); } catch (e) { }
+  dot.style.display = has ? 'inline-block' : 'none';
+}
+
+function openDiagModal() {
+  var overlay = document.getElementById('diagOverlay');
+  var info = document.getElementById('diagInfo');
+  var pre = document.getElementById('diagContent');
+  if (!overlay) return;
+  diagLogText = '';
+  if (!diagNativeReady()) {
+    // 浏览器里直接打开时没有原生桥接
+    info.textContent = '当前运行在浏览器环境，没有原生崩溃日志。';
+    pre.textContent = '（无）';
+  } else {
+    try { info.textContent = Android.deviceInfo ? Android.deviceInfo() : ''; } catch (e) { info.textContent = ''; }
+    var full = '';
+    try { full = Android.readCrashLog() || ''; } catch (e) { full = ''; }
+    diagLogText = full;
+    var MAX_SHOW = 20000;
+    if (!full) {
+      pre.textContent = '还没有崩溃记录。\n\n如果刚闪退过这里仍然为空，说明进程是在原生层被系统直接终止的（例如内存不足），那种情况没有堆栈，下次启动时才会补记一条。';
+    } else if (full.length > MAX_SHOW) {
+      // 日志可能上百 KB，全量塞进 DOM 会卡住页面；崩溃现场在尾部，显示尾段即可
+      pre.textContent = '……（日志较长，此处只显示最后 ' + MAX_SHOW + ' 字符，点「导出日志」可拿完整内容）\n\n' + full.slice(-MAX_SHOW);
+    } else {
+      pre.textContent = full;
+    }
+  }
+  overlay.classList.add('active');
+}
+
+function closeDiagModal() {
+  var overlay = document.getElementById('diagOverlay');
+  if (overlay) overlay.classList.remove('active');
+}
+
+function exportDiagLog() {
+  if (!diagLogText) { showToast('没有可导出的日志', 'error'); return; }
+  var header = '校拟设定簿 崩溃诊断日志\n导出时间: ' + new Date().toLocaleString() + '\n\n';
+  var text = header + diagLogText;
+  var fileName = 'crash_log_' + new Date().toISOString().slice(0, 10) + '.txt';
+  if (typeof Android !== 'undefined' && Android.saveFile) {
+    var blob = new Blob([text], { type: 'text/plain' });
+    var reader = new FileReader();
+    reader.onloadend = function() { Android.saveFile(reader.result, fileName); };
+    reader.readAsDataURL(blob);
+    showToast('请选择保存位置', 'success');
+  } else {
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([text], { type: 'text/plain' }));
+    a.download = fileName;
+    a.click();
+    setTimeout(function() { URL.revokeObjectURL(a.href); }, 1000);
+  }
+}
+
+function clearDiagLog() {
+  if (!confirm('确定清空崩溃日志？')) return;
+  try { if (diagNativeReady() && Android.clearCrashLog) Android.clearCrashLog(); } catch (e) { }
+  diagLogText = '';
+  document.getElementById('diagContent').textContent = '（已清空）';
+  refreshDiagBadge();
+  showToast('已清空', 'success');
+}
+
+(function bindDiagOverlay() {
+  var overlay = document.getElementById('diagOverlay');
+  if (overlay) overlay.addEventListener('click', function(e) { if (e.target === this) closeDiagModal(); });
+})();
+
+// 进首页时刷新红点，让"上次崩过"一眼可见
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', refreshDiagBadge);
+else refreshDiagBadge();
 

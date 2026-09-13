@@ -7,6 +7,9 @@ const vm = require('node:vm');
 
 const root = path.resolve(__dirname, '..');
 const sourcePath = path.join(root, 'android-app/app/src/main/assets/web/sync.js');
+// 图片字节仓库：sync.js 依赖它的 isImageRef / imageRefToBlob 等；
+// 无原生接口时它整体退化为原样 data URL，行为与改造前一致。
+const STORE = fs.readFileSync(path.join(root, 'android-app/app/src/main/assets/web/image-store.js'), 'utf8');
 const PNG = Buffer.from('89504e470d0a1a0a00000000', 'hex');
 const JPEG = Buffer.from('ffd8ffe000000000ffd9', 'hex');
 
@@ -31,6 +34,9 @@ function response(status, bytes, type) {
 
 function makeContext(fetchImpl, cacheStore, cacheWrites = [], extras = {}) {
   const cache = {
+    // 一轮同步只读取一次全表（与 db.js 的 imageCacheDB.listAll 对齐）；
+    // 返回行带 serverUrls，供 sync.js 的引用索引建映射。
+    listAll: async () => [...cacheStore.values()].map(item => ({ dataUrl: item.dataUrl, serverUrl: item.serverUrl, serverUrls: [item.serverUrl] })),
     getByServerUrl: async url => cacheStore.get(url) || null,
     getByDataUrl: async dataUrl => [...cacheStore.values()].find(item => item.dataUrl === dataUrl) || null,
     set: async (dataUrl, serverUrl) => {
@@ -58,6 +64,7 @@ function makeContext(fetchImpl, cacheStore, cacheWrites = [], extras = {}) {
     fetch: fetchImpl,
     ...extras,
   });
+  vm.runInContext(STORE, context);
   vm.runInContext(fs.readFileSync(sourcePath, 'utf8'), context);
   return { context, cache, cacheWrites };
 }

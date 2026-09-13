@@ -7,6 +7,8 @@ const vm = require('node:vm');
 
 const root = path.resolve(__dirname, '..');
 const web = path.join(root, 'android-app/app/src/main/assets/web');
+// sync.js 依赖 image-store.js 的引用判定/取字节函数；无 window.Android 时退化为原样 data URL。
+const STORE = fs.readFileSync(path.join(web, 'image-store.js'), 'utf8');
 
 function loadSync(overrides = {}) {
   const context = vm.createContext({
@@ -14,6 +16,11 @@ function loadSync(overrides = {}) {
     URL,
     Map,
     Set,
+    Blob,
+    atob,
+    btoa,
+    TextEncoder,
+    Uint8Array,
     structuredClone,
     localStorage: { getItem: () => '抗大抗大越抗越大' },
     imageCacheDB: {
@@ -25,6 +32,7 @@ function loadSync(overrides = {}) {
     fetch: async () => ({ ok: false, status: 404 }),
     ...overrides,
   });
+  vm.runInContext(STORE, context);
   vm.runInContext(fs.readFileSync(path.join(web, 'sync.js'), 'utf8'), context);
   return context;
 }

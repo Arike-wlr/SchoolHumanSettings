@@ -23,7 +23,7 @@
     <div class="card" onclick="navigateTo('relations')"><div class="card-icon">🔗</div><div class="card-title">关系网</div><div class="card-desc">编织人物关系<br>可视化图谱</div></div>
     <div class="card" onclick="navigateTo('documents')"><div class="card-icon">📄</div><div class="card-title">文档</div><div class="card-desc">管理参考文件<br>灵感永不丢失</div></div>
   </div>
-  <div class="footer">校拟设定簿 v1.0</div>
+  <div class="footer">校拟设定簿 v1.0 · <span onclick="openDiagModal()" style="cursor:pointer;text-decoration:underline;text-underline-offset:2px;">诊断日志<span id="diagBadge" style="display:none;color:#c0392b;font-weight:700;">●</span></span></div>
 </div>
 
 <!-- VIEW: 角色设定 -->
@@ -106,16 +106,46 @@
   <span class="nav-item" data-view="documents" onclick="navigateTo('documents')"><span class="nav-icon">📄</span><span class="nav-text">文档</span></span>
 </nav>
 
+<!-- 诊断日志：闪退原因查看 / 导出（不依赖电脑） -->
+<div class="modal-overlay" id="diagOverlay">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title">诊断日志</span>
+      <button class="modal-close" onclick="closeDiagModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div id="diagInfo" style="font-size:.72rem;color:var(--text-light);white-space:pre-wrap;line-height:1.55;margin-bottom:10px;word-break:break-word;"></div>
+      <pre id="diagContent" style="background:#f7f4ee;border:1px solid var(--border);border-radius:8px;padding:10px;font-size:.7rem;line-height:1.45;white-space:pre-wrap;word-break:break-word;max-height:46vh;overflow:auto;margin:0;"></pre>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-modal cancel" onclick="clearDiagLog()">清空</button>
+      <button class="btn-modal primary" onclick="exportDiagLog()">导出日志</button>
+    </div>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <!-- 全局错误捕获（调试用） -->
 <script>
 window._jsErrors = [];
+// 同步转发给原生：让 JS 错误和 Java 堆栈落在同一份诊断日志里，排查时能对上时间线
+function reportJsError(text) {
+  try { if (window.Android && window.Android.logJsError) window.Android.logJsError(text); } catch (e) { }
+}
 window.onerror = function(msg, url, line, col, err) {
   window._jsErrors.push({msg: String(msg), url: String(url||''), line: line, col: col});
+  reportJsError(String(msg) + '\n  位置: ' + String(url||'') + ':' + line + ':' + col +
+    (err && err.stack ? '\n  堆栈: ' + err.stack : ''));
   return false;
 };
+window.addEventListener('unhandledrejection', function(e) {
+  var r = e && e.reason;
+  reportJsError('未处理的 Promise 拒绝: ' + (r && r.message ? r.message : String(r)) +
+    (r && r.stack ? '\n  ' + r.stack : ''));
+});
 </script>
+<script src="image-store.js"></script>
 <script src="db.js"></script>
 <script src="api-shim.js"></script>
 <script src="mammoth.min.js"></script>
@@ -132,6 +162,7 @@ if (window._jsErrors.length > 0) {
 }
 </script>
 <script src="sync.js"></script>
+<script src="image-migrate.js"></script>
 <script src="sync-ui.js"></script>
 <script>
 // sync 脚本完成后再次检查错误

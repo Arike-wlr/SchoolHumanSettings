@@ -235,11 +235,15 @@ async function handleApiRequest(url, init) {
       }
     }
 
-    // ---- 图片上传（离线：转 base64 data URL 直接存角色 images 数组）----
+    // ---- 图片上传（离线：写进本地图片仓库，角色记录只保存引用）----
     if (path === '/api/images/upload' && method === 'POST') {
       const formData = body;
       const file = formData.get('file');
       if (!file) return makeResponse({ detail: '未找到文件' }, 400);
+      // 原生仓库可用时图片直接落文件，这里返回 img:// 引用 ——
+      // 角色记录从此不再裹着几百 KB 的 base64 文本。仓库不可用时退回 data URL（改造前的行为）。
+      const ref = await imageStorePutBlob(file);
+      if (ref) return makeResponse({ image_url: ref });
       const dataUrl = await new Promise((resolve, reject) => {
         const r = new FileReader();
         r.onload = () => resolve(r.result);

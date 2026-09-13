@@ -245,16 +245,53 @@ function cacheRecordForServer(index, serverUrl) {
   return index && index.byServerUrl ? index.byServerUrl.get(serverUrl) : null;
 }
 
-// 把服务器图片转成 data URL。任何必要图片失败都会抛错，调用方在核心记录写入前停止。
+// ---------- 图片本地化：统一产出"库里存得下的表示" ----------
+// 原生图片仓库可用时产出 img:// 引用（字节进文件，IndexedDB 里只留指纹）；
+// 不可用时退回规范化 data URL —— 与改造前逐字节一致，既有测试据此继续成立。
+
+async function storeImageBlob(blob) {
+  const normalized = await normalizeImageBlob(blob);
+  const ref = await imageStorePutBlob(normalized);
+  return ref || await blobToDataUrl(normalized);
+}
+
+async function storeImageDataUrl(dataUrl) {
+  const ref = await imageStorePutDataUrl(dataUrl);
+  return ref || await canonicalImageDataUrl(dataUrl);
+}
+
+/** 缓存的图片表示 → 确认仓库里真有这张图（img:// 引用要校验文件还在） */
+async function ensureStoredImage(ref) {
+  const value = String(ref || '');
+  if (!value) return null;
+  if (isImageRef(value)) return imageRefExists(value) ? value : null;
+  if (/^data:/i.test(value)) return await storeImageDataUrl(value);
+  return null;
+}
+
+/**
+ * 这张图是否"只存在于本地"（即需要上传到服务器）：img:// 引用与 data URL 都算。
+ * 故意不含 blob: —— 浏览器可能已经 revoke 掉它，上传时取字节会抛错，
+ * 进而把整轮同步判为失败；这与改造前的口径（只上传 data URL）一致。
+ */
+function isLocalOnlyImageRef(ref) {
+  const value = String(ref || '');
+  if (!value) return false;
+  return isImageRef(value) || /^data:/i.test(value);
+}
+
+// 把服务器图片转成本地可持久表示（原生环境即 img:// 引用）。
+// 任何必要图片失败都会抛错，调用方在核心记录写入前停止。
 async function convertServerImagesToDataUrl(characters, serverUrl, onProgress) {
   const base = normalizeServerBase(serverUrl);
   const entries = new Map();
-  const dataByRef = new Map();
+  const storedByRef = new Map();
   for (const c of characters) {
     for (const ref of imageList(c)) {
       if (!ref) continue;
+      if (isImageRef(ref)) continue;                 // 已经是本地引用，无需处理
       if (/^data:/i.test(ref)) {
-        try { dataByRef.set(ref, await canonicalImageDataUrl(ref)); }
+        try { storedByRef.set(ref, await storeImageDataUrl(ref)); }
         catch (e) { throw imageFailure(`图片内容无效：${ref.slice(0, 24)}`, e.code || 'IMAGE_DECODE'); }
         continue;
       }
@@ -262,7 +299,7 @@ async function convertServerImagesToDataUrl(characters, serverUrl, onProgress) {
         try {
           const response = await fetch(ref);
           if (!response.ok) throw imageFailure(`图片请求失败 (${response.status})`, 'IMAGE_HTTP', response.status);
-          dataByRef.set(ref, await blobToDataUrl(await normalizeImageBlob(await response.blob())));
+          storedByRef.set(ref, await storeImageBlob(await response.blob()));
         } catch (e) {
           throw imageFailure(`本地图片读取失败：${ref.slice(0, 40)}`, e.code || 'IMAGE_SOURCE', e.status);
         }
@@ -276,7 +313,7 @@ async function convertServerImagesToDataUrl(characters, serverUrl, onProgress) {
     }
   }
   if (entries.size === 0) {
-    for (const c of characters) setImageList(c, imageList(c).map(ref => dataByRef.has(ref) ? dataByRef.get(ref) : ref));
+    for (const c of characters) setImageList(c, imageList(c).map(ref => storedByRef.has(ref) ? storedByRef.get(ref) : ref));
     return { total: 0, skipped: 0 };
   }
   const cacheIndex = await loadImageCacheIndex();
@@ -285,14 +322,16 @@ async function convertServerImagesToDataUrl(characters, serverUrl, onProgress) {
   for (const entry of entries.values()) {
     const fullUrl = entry.fullUrl;
     const cached = cacheRecordForServer(cacheIndex, fullUrl);
+    // 缓存命中也要过一遍 ensureStoredImage：引用对应的文件可能已被清理；
+    // 而且旧缓存行里存的是 data URL，这里顺带把它转成引用。
+    let stored = null;
     if (cached && cached.dataUrl) {
-      try {
-        const dataUrl = await canonicalImageDataUrl(cached.dataUrl);
-        entry.refs.forEach(ref => dataByRef.set(ref, dataUrl));
-        skipped++;
-      } catch (e) {
-        pending.push(entry); // 坏缓存只视为 miss，允许 GET 修复。
-      }
+      try { stored = await ensureStoredImage(cached.dataUrl); }
+      catch (e) { stored = null; }                   // 坏缓存只视为 miss，允许 GET 修复。
+    }
+    if (stored) {
+      entry.refs.forEach(ref => storedByRef.set(ref, stored));
+      skipped++;
     } else {
       pending.push(entry);
     }
@@ -301,16 +340,16 @@ async function convertServerImagesToDataUrl(characters, serverUrl, onProgress) {
     onProgress && onProgress(`正在下载图片 (${skipped + index + 1}/${entries.size})...`);
     try {
       const blob = await fetchImageWithRetry(item.fullUrl);
-      const dataUrl = await blobToDataUrl(blob);
-      await imageCacheDB.set(dataUrl, item.fullUrl, cacheIndex.rows);
-      item.refs.forEach(ref => dataByRef.set(ref, dataUrl));
+      const stored = await storeImageBlob(blob);
+      await imageCacheDB.set(stored, item.fullUrl, cacheIndex.rows);
+      item.refs.forEach(ref => storedByRef.set(ref, stored));
     } catch (error) {
       throw imageFailure(`图片下载失败: ${item.refs[0]}（${error.message}）`, error.code || 'IMAGE_DOWNLOAD', error.status);
     }
   });
   if (skipped > 0) onProgress && onProgress(`图片同步：${skipped} 张已缓存，${pending.length} 张需下载`);
   for (const c of characters) {
-    const images = imageList(c).map(ref => dataByRef.has(ref) ? dataByRef.get(ref) : ref);
+    const images = imageList(c).map(ref => storedByRef.has(ref) ? storedByRef.get(ref) : ref);
     setImageList(c, images);
   }
   cacheIndex.release();
@@ -322,14 +361,15 @@ function imageExtension(mime) {
 }
 
 // 上传只做一次 POST；缓存映射复用前先确认当前服务器仍有资源。
+// 处理对象是"只在本地存在"的图片：img:// 引用（新形态）与 data URL（旧数据）。
 async function verifyUploadImageMappings(characters, serverUrl, cacheIndex) {
   const base = normalizeServerBase(serverUrl);
   const current = new URL(base).origin;
-  const staleDataUrls = new Set();
-  const dataUrls = new Set();
-  for (const c of characters) for (const ref of imageList(c)) if (/^data:/i.test(ref)) dataUrls.add(ref);
-  for (const dataUrl of dataUrls) {
-    const cached = cacheRecordForData(cacheIndex, dataUrl);
+  const staleDataUrls = new Set();   // 元素是本地图片标识：img:// 引用或 data URL
+  const localRefs = new Set();
+  for (const c of characters) for (const ref of imageList(c)) if (isLocalOnlyImageRef(ref)) localRefs.add(ref);
+  for (const localRef of localRefs) {
+    const cached = cacheRecordForData(cacheIndex, localRef);
     const candidates = cacheServerUrls(cached).filter(u => /^https?:\/\//i.test(u))
       .map(u => resolveServerImageUrl(base, u)).filter(u => new URL(u).origin === current);
     if (candidates.length === 0) continue;
@@ -344,7 +384,7 @@ async function verifyUploadImageMappings(characters, serverUrl, cacheIndex) {
         else throw error;
       }
     }
-    if (missing) staleDataUrls.add(dataUrl);
+    if (missing) staleDataUrls.add(localRef);
   }
   return staleDataUrls;
 }
@@ -352,14 +392,14 @@ async function verifyUploadImageMappings(characters, serverUrl, cacheIndex) {
 async function convertDataUrlImagesToServerUrl(characters, serverUrl, onProgress, cacheIndex) {
   const base = normalizeServerBase(serverUrl);
   cacheIndex = cacheIndex || await loadImageCacheIndex();
-  const dataUrls = new Set();
-  for (const c of characters) for (const ref of imageList(c)) if (/^data:/i.test(ref)) dataUrls.add(ref);
-  if (dataUrls.size === 0) return;
-  const serverRefByData = new Map();
+  const localRefs = new Set();
+  for (const c of characters) for (const ref of imageList(c)) if (isLocalOnlyImageRef(ref)) localRefs.add(ref);
+  if (localRefs.size === 0) return;
+  const serverRefByLocal = new Map();
   let skipped = 0;
   const failed = [];
-  for (const dataUrl of dataUrls) {
-    const cached = cacheRecordForData(cacheIndex, dataUrl);
+  for (const localRef of localRefs) {
+    const cached = cacheRecordForData(cacheIndex, localRef);
     let cachedFull = null;
     const current = new URL(base).origin;
     if (cached) {
@@ -372,16 +412,17 @@ async function convertDataUrlImagesToServerUrl(characters, serverUrl, onProgress
     if (cachedFull) {
       try {
         await fetchImageWithRetry(cachedFull);
-        serverRefByData.set(dataUrl, serverImageRef(cachedFull, base));
+        serverRefByLocal.set(localRef, serverImageRef(cachedFull, base));
         skipped++;
         continue;
       } catch (error) {
         if (error.status !== 404) { failed.push(error); continue; }
       }
     }
-    onProgress && onProgress(`正在上传图片 (${dataUrls.size - failed.length - skipped}/${dataUrls.size})...`);
+    onProgress && onProgress(`正在上传图片 (${localRefs.size - failed.length - skipped}/${localRefs.size})...`);
     try {
-      const blob = await normalizeImageBlob(dataUrlToBlob(dataUrl));
+      // 图片来源可能是 img:// 引用（读文件）或 data URL（就地解码），统一由 imageRefToBlob 处理
+      const blob = await normalizeImageBlob(await imageRefToBlob(localRef));
       const formData = new FormData();
       formData.append('file', blob, 'image.' + imageExtension(blob.type));
       const res = await fetch(base + '/api/images/upload', { method: 'POST', body: formData });
@@ -389,21 +430,21 @@ async function convertDataUrlImagesToServerUrl(characters, serverUrl, onProgress
       const result = await res.json();
       if (!result || typeof result.image_url !== 'string' || !result.image_url) throw imageFailure('图片上传响应缺少 image_url', 'IMAGE_UPLOAD');
       const fullUrl = resolveServerImageUrl(base, result.image_url);
-      await imageCacheDB.set(dataUrl, fullUrl, cacheIndex.rows);
-      const stored = cacheIndex.rows.find(row => row.dataUrl === dataUrl);
+      await imageCacheDB.set(localRef, fullUrl, cacheIndex.rows);
+      const stored = cacheIndex.rows.find(row => row.dataUrl === localRef);
       if (stored) {
-        cacheIndex.byDataUrl.set(dataUrl, stored);
+        cacheIndex.byDataUrl.set(localRef, stored);
         cacheIndex.byServerUrl.set(fullUrl, stored);
       }
-      serverRefByData.set(dataUrl, serverImageRef(fullUrl, base));
+      serverRefByLocal.set(localRef, serverImageRef(fullUrl, base));
     } catch (error) {
       console.warn('图片上传失败:', error);
       failed.push(error);
     }
   }
-  if (skipped > 0) onProgress && onProgress(`图片同步：${skipped} 张已缓存，${dataUrls.size - skipped} 张需上传`);
+  if (skipped > 0) onProgress && onProgress(`图片同步：${skipped} 张已缓存，${localRefs.size - skipped} 张需上传`);
   for (const c of characters) {
-    const images = imageList(c).map(ref => serverRefByData.has(ref) ? serverRefByData.get(ref) : ref);
+    const images = imageList(c).map(ref => serverRefByLocal.has(ref) ? serverRefByLocal.get(ref) : ref);
     setImageList(c, images);
   }
   if (failed.length > 0) throw new Error(`${failed.length} 张图片上传/校验失败，请检查网络后重试`);
@@ -466,7 +507,9 @@ async function canonicalizeRecordsForDiff(records, serverUrl, localSide = false,
   const opts = options || {};
   const staleDataUrls = opts.staleDataUrls || new Set();
   function canonicalRef(ref) {
-    if (/^data:/i.test(ref)) {
+    // 本地图片：img:// 引用（新形态）与 data URL（旧数据）都靠缓存映射折算成服务器地址，
+    // 只有这样本地记录与服务器记录才比得出"是不是同一张图"。
+    if (isImageRef(ref) || /^data:/i.test(ref)) {
       const cached = cacheRecordForData(index, ref);
       if (opts.trustDataCache !== false && !staleDataUrls.has(ref)) {
         const sameOrigin = cacheServerUrls(cached).find(u => /^https?:\/\//i.test(u)
@@ -709,7 +752,11 @@ async function uploadToServer(onProgress) {
     ...charDiff.added.map(i => i.source),
     ...charDiff.modified.map(i => i.source),
   ];
-  if (charsToUpload.some(c => (c.images && c.images.some(u => u && u.startsWith('data:'))) || (c.image_url && c.image_url.startsWith('data:')))) {
+  // 判据必须覆盖 img:// 引用，不能只看 data: 前缀 ——
+  // 否则本地新增的图片会被认为"没什么要传的"，永远同步不到服务器。
+  const needsImageUpload = charsToUpload.some(c =>
+    (Array.isArray(c.images) && c.images.some(isLocalOnlyImageRef)) || isLocalOnlyImageRef(c.image_url));
+  if (needsImageUpload) {
     await convertDataUrlImagesToServerUrl(charsToUpload, url, onProgress, cacheIndex);
   }
 

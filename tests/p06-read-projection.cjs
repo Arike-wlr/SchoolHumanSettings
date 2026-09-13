@@ -25,6 +25,8 @@ const APP = fs.readFileSync(path.join(WEB, 'app.js'), 'utf8');
 const DB = fs.readFileSync(path.join(WEB, 'db.js'), 'utf8');
 const SHIM = fs.readFileSync(path.join(WEB, 'api-shim.js'), 'utf8');
 const SYNC = fs.readFileSync(path.join(WEB, 'sync.js'), 'utf8');
+// 图片字节仓库：app.js / db.js 现在经由它的引用判定函数；无原生接口时退化为原样 data URL。
+const STORE = fs.readFileSync(path.join(WEB, 'image-store.js'), 'utf8');
 
 // ---------------------------------------------------------------- 源码切片
 // 按名字提取函数体（跳过字符串、注释与正则字面量；同 p05 的健壮实现）。
@@ -211,6 +213,7 @@ function makeCtx(options) {
     confirm: () => false, alert() {}, location: { reload() {} },
     FileReader: class { readAsDataURL() { if (this.onload) this.onload(); } },
   });
+  vm.runInContext(STORE, ctx);
   vm.runInContext(DB, ctx);
   vm.runInContext(SHIM, ctx);
   vm.runInContext('globalThis.__db = { charDB, charLiteDB, buildCharacterLite, putCharacterLiteIfAbsent,'
@@ -250,6 +253,7 @@ const refsOf = record => {
 function makeCardEnv() {
   const ctx = vm.createContext({ window: { devicePixelRatio: 1 }, Set, Math, String, Number, Array, Object, RegExp, isFinite });
   vm.runInContext([
+    STORE,
     'var CARD_BOX_W = 88, CARD_BOX_H = 64;',
     extractFunction(APP, 'esc'),
     extractFunction(APP, 'safeImageSrc'),

@@ -247,8 +247,49 @@ const charLiteDB = {
 // ============= 角色写入：源记录与派生投影在同一事务内维护 =============
 // 投影是派生数据；写入必须与源记录同事务，且只写派生 store，绝不整条覆盖源记录。
 
+/**
+ * 写入即归一化：进 characters 的记录不允许再带 base64 图片，一律换成 img:// 引用。
+ * 这是条硬不变量 —— 少了它，"打开改造前就载入的详情页、再点保存"会把 base64 又写回库，
+ * 备份随之重新膨胀，转一圈又回到当初 OOM 的老路。
+ * 无原生仓库（桌面/测试）时原样返回，行为与改造前一致。
+ * 解析不了的 images 字符串原样保留，绝不做"猜一个空数组"这种会吃数据的兜底。
+ */
+async function normalizeRecordImageRefs(record) {
+  if (!record || !imageStoreAvailable()) return record;
+  let changed = false;
+  const mapOne = async (u) => {
+    if (!isDataImageUrl(u)) return u;
+    const ref = await imageStorePutDataUrl(u);
+    if (ref && ref !== u) { changed = true; return ref; }
+    return u;
+  };
+  let nextImages = null;
+  const raw = record.images;
+  if (typeof raw === 'string') {
+    let parsed = null;
+    try { parsed = JSON.parse(raw); } catch (e) { parsed = null; }
+    if (Array.isArray(parsed)) {
+      const out = [];
+      for (const u of parsed) out.push(await mapOne(u));
+      nextImages = JSON.stringify(out);
+    }
+  } else if (Array.isArray(raw)) {
+    const out = [];
+    for (const u of raw) out.push(await mapOne(u));
+    nextImages = out;
+  }
+  let nextImageUrl = null;
+  if (typeof record.image_url === 'string') nextImageUrl = await mapOne(record.image_url);
+  if (!changed) return record;
+  const out = { ...record };
+  if (nextImages !== null) out.images = nextImages;
+  if (nextImageUrl !== null) out.image_url = nextImageUrl;
+  return out;
+}
+
 async function addCharacter(data) {
   invalidateCharactersShared();
+  data = await normalizeRecordImageRefs(data);
   const db = await openDB();
   return new Promise((resolve, reject) => {
     const t = db.transaction([STORES.characters, STORES.characterLite], 'readwrite');
@@ -268,6 +309,7 @@ async function addCharacter(data) {
 
 async function putCharacter(data) {
   invalidateCharactersShared();
+  data = await normalizeRecordImageRefs(data);
   const db = await openDB();
   return new Promise((resolve, reject) => {
     const t = db.transaction([STORES.characters, STORES.characterLite], 'readwrite');
@@ -683,20 +725,59 @@ const imageCacheDB = {
 
 let _backupTimer = null;
 
-// 收集当前全部核心数据
+// 单次过桥的字符上限。
+// 整份备份一次性交给原生时，App 进程要在 384MB 的 Java 堆里再复制一份等大的 String ——
+// 数据涨到几百 MB 时这是必崩的操作（2026-09-12 崩溃日志：JavaBridge 线程申请 434MB、
+// 堆上限 384MB，而系统内存还有 2.5GB 空闲，说明不是手机内存不够，是这一次复制放不下）。
+// 切片之后单次过桥只有 1MB 量级，内存峰值与数据总量脱钩。
+const BACKUP_CHUNK_CHARS = 1 << 20;
+
+// 备份序列化的唯一实现：只产出片段，从不拼成整串。
+// collectBackupData（浏览器 / 测试用）与流式落盘（Android）共用它，
+// 避免两条路径各写一份 JSON 而慢慢跑偏。
+async function forEachBackupChunk(emit) {
+  emit('{"version":1,"savedAt":' + Date.now() + ',"characters":[');
+  await emitStoreRecords(STORES.characters, emit, true);
+  emit('],"worldBuildings":[');
+  await emitStoreRecords(STORES.worldBuildings, emit, false);
+  emit('],"relations":[');
+  await emitStoreRecords(STORES.relations, emit, false);
+  emit(']}');
+}
+
+// 逐条读、逐条产出：任一时刻内存里只有「一条记录」，不再把全表物化。
+// 用 getAllKeys + 单条 get（各自独立事务），而不是在一条游标事务里 await ——
+// 游标回调里让出事件循环会让事务自动提交，后续 continue() 直接 TransactionInactiveError。
+async function emitStoreRecords(storeName, emit, stripThumbs) {
+  const keys = await getAllKeys(storeName);
+  let emitted = 0;
+  for (let i = 0; i < keys.length; i++) {
+    const record = await getById(storeName, keys[i]);
+    if (record === undefined) continue;          // 读取期间被并发删除：跳过，保持数组紧凑
+    const out = stripThumbs ? stripDerivedThumbs([record])[0] : record;
+    emit((emitted++ === 0 ? '' : ',') + JSON.stringify(out));
+    if ((i + 1) % 20 === 0) await yieldToMain(); // 分批让出主线程，别把 UI 卡死
+  }
+}
+
+// 大串切片过桥：每片都很小，原生侧永远不需要一次性的大分配。
+// 切点不能落在代理对中间，否则 UTF-8 编码出半个字符，备份里的 emoji 会变乱码。
+function emitChunked(emit, text) {
+  for (let i = 0; i < text.length; i += BACKUP_CHUNK_CHARS) {
+    let end = Math.min(i + BACKUP_CHUNK_CHARS, text.length);
+    if (end < text.length) {
+      const c = text.charCodeAt(end - 1);
+      if (c >= 0xD800 && c <= 0xDBFF) end--;      // 高位代理不能作为切片结尾
+    }
+    emit(text.slice(i, end));
+  }
+}
+
+// 收集当前全部核心数据（整串版本：浏览器环境与测试用；Android 走流式，不再用这个）
 async function collectBackupData() {
-  const [chars, worlds, rels] = await Promise.all([
-    getAll(STORES.characters),
-    getAll(STORES.worldBuildings),
-    getAll(STORES.relations),
-  ]);
-  return JSON.stringify({
-    version: 1,
-    savedAt: Date.now(),
-    characters: stripDerivedThumbs(chars),
-    worldBuildings: worlds,
-    relations: rels,
-  });
+  let out = '';
+  await forEachBackupChunk(chunk => { out += chunk; });
+  return out;
 }
 
 // 派生缩略图（thumbs）不进备份：与恢复语义无关，只增体积；恢复后由渲染侧 backfill 重新生成。
@@ -709,39 +790,79 @@ function stripDerivedThumbs(list) {
   });
 }
 
+// 把备份交给原生落盘。
+// 优先走分片接口（新版原生）：JS 一侧不再持有整份字符串，原生一侧也不再有等大的副本。
+function writeBackupToNative() {
+  const A = window.Android;
+  if (!A) return Promise.resolve();
+  if (A.beginBackup && A.appendBackup && A.endBackup) {
+    A.beginBackup();
+    return forEachBackupChunk(function (chunk) {
+      emitChunked(function (piece) { A.appendBackup(piece); }, chunk);
+    }).then(function () {
+      A.endBackup();
+    }).catch(function (e) {
+      if (A.abortBackup) A.abortBackup();   // 作废本次，保留上一份完整备份
+      throw e;
+    });
+  }
+  // 旧版原生接口：只能退回整串（数据量大时仍会 OOM，但没有别的选择）
+  if (!A.saveBackup) return Promise.resolve();
+  return collectBackupData().then(function (json) { A.saveBackup(json); });
+}
+
 // 防抖保存备份（连续写操作 1.5s 内合并为一次）
 function scheduleBackup() {
-  if (!window.Android || !window.Android.saveBackup) return;
+  if (!window.Android) return;
   if (_backupTimer) clearTimeout(_backupTimer);
-  _backupTimer = setTimeout(async () => {
+  _backupTimer = setTimeout(function () {
     _backupTimer = null;
-    try {
-      window.Android.saveBackup(await collectBackupData());
-    } catch (e) { /* 备份失败不打断主流程 */ }
+    writeBackupToNative().catch(function () { /* 备份失败不打断主流程 */ });
   }, 1500);
 }
 
 // 页面切后台时立即备份，确保退出前数据已落盘
 document.addEventListener('visibilitychange', function () {
-  if (document.visibilityState === 'hidden' && window.Android && window.Android.saveBackup) {
+  if (document.visibilityState === 'hidden' && window.Android) {
     if (_backupTimer) { clearTimeout(_backupTimer); _backupTimer = null; }
-    collectBackupData().then(function (json) {
-      try { window.Android.saveBackup(json); } catch (e) { }
-    });
+    writeBackupToNative().catch(function () { });
   }
 });
 
+// 分片读回备份。整份 String 一次性返回会在 Java 堆里炸 —— 和写入侧完全对称的坑，
+// 所以按字节区间取，用 TextDecoder 流式解码（多字节字符恰好被切断也不会乱码）。
+async function loadBackupText() {
+  const A = window.Android;
+  if (!(A.readBackupBytes && A.backupBytes)) return A.loadBackup ? A.loadBackup() : '';
+  const total = A.backupBytes();
+  if (!total) return '';
+  const CHUNK = 256 * 1024;                    // 每片 256KB 字节 → 约 340KB Base64
+  const decoder = new TextDecoder('utf-8');
+  let text = '';
+  for (let offset = 0; offset < total; offset += CHUNK) {
+    const b64 = A.readBackupBytes(offset, CHUNK);
+    if (!b64) break;
+    const bin = atob(b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    text += decoder.decode(bytes, { stream: true });
+    if ((offset / CHUNK) % 16 === 0) await yieldToMain();
+  }
+  return text + decoder.decode();
+}
+
 // 启动恢复检查：IndexedDB 为空但存在原生备份时，询问用户是否恢复
 async function checkAndRestoreBackup() {
-  if (!window.Android || !window.Android.hasBackup || !window.Android.loadBackup) return;
+  const A = window.Android;
+  if (!A || !A.hasBackup || (!A.loadBackup && !(A.readBackupBytes && A.backupBytes))) return;
   try {
-    if (!window.Android.hasBackup()) return;
+    if (!A.hasBackup()) return;
     // 只判断"有没有数据"，用 count 而不是 getAll：
     // 启动路径上 getAll 会把全部角色（含 base64 原图）读进内存，
     // 有数据的机器冷启动会被这一下顶到 OOM —— 这就是"退出再进入闪退"的启动侧峰值。
     const charCount = await countAll(STORES.characters);
     if (charCount > 0) return; // 有数据就不打扰
-    const json = window.Android.loadBackup();
+    const json = await loadBackupText();
     if (!json) return;
     const data = JSON.parse(json);
     const list = data.characters || [];
@@ -760,6 +881,8 @@ async function checkAndRestoreBackup() {
       await bulkInsert(STORES.relations, data.relations);
     }
     alert('已从备份恢复 ' + list.length + ' 个角色！');
+    // 备份里的图片可能还是 base64 形态，清掉"已迁移"标记让搬迁在重载后重跑一遍
+    clearImageMigrationFlag();
     location.reload(); // 重新加载页面，让各视图从 IndexedDB 拉取数据
   } catch (e) { /* 备份损坏等情况静默跳过 */ }
 }
