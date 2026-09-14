@@ -111,7 +111,7 @@ async function migrateImageCacheRows(onProgress) {
 }
 
 /**
- * 主入口。options.force 为真时忽略"已完成"标记强制重扫（诊断入口用）。
+ * 主入口。options.force 为真时忽略"已完成"标记强制重扫。
  * 仓库不可用时直接跳过：那是桌面/测试环境，本来就维持 data URL 形态。
  */
 function migrateImagesToStore(options) {

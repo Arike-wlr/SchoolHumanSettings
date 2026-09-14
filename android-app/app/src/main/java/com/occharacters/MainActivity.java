@@ -2,12 +2,9 @@ package com.occharacters;
 
 import android.annotation.SuppressLint;
 import android.app.Activity;
-import android.app.ActivityManager;
-import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.net.Uri;
-import android.os.Build;
 import android.os.Bundle;
 import android.util.Base64;
 import android.view.KeyEvent;
@@ -44,16 +41,6 @@ public class MainActivity extends AppCompatActivity {
     private JsBridge jsBridge;                     // 持有引用，onDestroy 时好收尾未完成的备份
     private static final int FILE_CHOOSER_REQUEST = 100;
 
-    // ==================== 崩溃日志 ====================
-    // 目的：闪退后不依赖电脑/adb，直接在 App 内看到原因。覆盖三类现场：
-    //   1. Java 未捕获异常      —— 有完整堆栈
-    //   2. WebView 渲染进程崩溃 —— 没有 Java 堆栈，但能记录 didCrash
-    //   3. 前台进程被系统直接杀死（OOM 等）—— 没有任何回调，下次启动时补记
-    private static final String CRASH_LOG_NAME = "crash_log.txt";
-    private static final long CRASH_LOG_MAX_BYTES = 256 * 1024L;   // 单文件上限
-    private static final long CRASH_LOG_KEEP_BYTES = 128 * 1024L;  // 超限时保留的尾部长度
-    private static boolean crashHandlerInstalled = false;
-
     // ==================== 流式备份 ====================
     // 整份备份 JSON 一次性从 JS 过桥时，App 进程要在 384MB 的 Java 堆里再复制一份等大的
     // String。数据量涨到几百 MB 时这是必崩的操作（2026-09-12 日志：JavaBridge 线程申请
@@ -82,8 +69,6 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        installCrashHandler();
-        checkAbnormalExit();
         cleanStaleBackupTemp();
 
         webView = findViewById(R.id.webview);
@@ -147,12 +132,6 @@ public class MainActivity extends AppCompatActivity {
                 // 渲染进程崩溃最典型的诱因就是内存不足（大图/base64 撑爆）。
                 // 不接管的话系统会连带杀掉整个 App —— 外部看到的就是"闪退"。
                 // 返回 true = 已处理，随后重建一个干净的 WebView 继续用。
-                boolean didCrash = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
-                        && detail != null && detail.didCrash();
-                appendCrashLog(getApplicationContext(),
-                        "\n========== WebView 渲染进程终止 ==========\n"
-                                + deviceInfo(MainActivity.this)
-                                + "didCrash=" + didCrash + "\n");
                 // 短时间反复崩就不重启了，否则会陷入"重建-崩溃"死循环
                 SharedPreferences sp = getSharedPreferences("app_cache", MODE_PRIVATE);
                 long now = System.currentTimeMillis();
@@ -162,7 +141,7 @@ public class MainActivity extends AppCompatActivity {
                 sp.edit().putLong("render_crash_at", now).putInt("render_crash_count", count).apply();
                 if (count > 2) {
                     Toast.makeText(MainActivity.this,
-                            "页面反复崩溃，请重启应用。原因已记录，见首页「诊断日志」。",
+                            "页面反复崩溃，请重启应用。",
                             Toast.LENGTH_LONG).show();
                     return true;
                 }
@@ -266,11 +245,6 @@ public class MainActivity extends AppCompatActivity {
         if (webView != null) {
             webView.pauseTimers();
         }
-        // 能走到 onStop 说明进程是「活着退出前台」的，不算异常退出。
-        // 若下次启动时该标记仍为 true，说明进程是在前台被直接干掉的（OOM / 原生崩溃），
-        // 那种情况拿不到任何 Java 堆栈，只能靠这个标记补记一条现场。
-        getSharedPreferences("app_cache", MODE_PRIVATE).edit()
-                .putBoolean("session_foreground", false).commit();
         super.onStop();
     }
 
@@ -567,59 +541,6 @@ public class MainActivity extends AppCompatActivity {
             return new java.io.File(getFilesDir(), "data_backup.json").exists();
         }
 
-        // ---------- 崩溃日志（诊断用） ----------
-
-        /** 读取崩溃日志全文；没有记录则返回空串（流式读，避免大日志多占一份内存） */
-        @JavascriptInterface
-        public String readCrashLog() {
-            java.io.File f = new java.io.File(getFilesDir(), CRASH_LOG_NAME);
-            if (!f.exists() || f.length() == 0) return "";
-            java.io.InputStreamReader reader = null;
-            try {
-                reader = new java.io.InputStreamReader(
-                        new java.io.FileInputStream(f), java.nio.charset.StandardCharsets.UTF_8);
-                StringBuilder sb = new StringBuilder((int) Math.min(f.length(), 1 << 18));
-                char[] buf = new char[32768];
-                int n;
-                while ((n = reader.read(buf)) > 0) sb.append(buf, 0, n);
-                return sb.toString();
-            } catch (Exception e) {
-                return "";
-            } finally {
-                if (reader != null) {
-                    try { reader.close(); } catch (Exception ignore) { }
-                }
-            }
-        }
-
-        /** 有没有崩溃记录（首页据此决定要不要显示红点提醒） */
-        @JavascriptInterface
-        public boolean hasCrashLog() {
-            return new java.io.File(getFilesDir(), CRASH_LOG_NAME).length() > 0;
-        }
-
-        /** 清空崩溃日志 */
-        @JavascriptInterface
-        public void clearCrashLog() {
-            try {
-                new java.io.FileOutputStream(new java.io.File(getFilesDir(), CRASH_LOG_NAME)).close();
-            } catch (Exception ignore) {
-            }
-        }
-
-        /** 网页侧未捕获的 JS 错误也记进来，和原生崩溃放在一起看 */
-        @JavascriptInterface
-        public void logJsError(String message) {
-            if (message == null || message.isEmpty()) return;
-            appendCrashLog(getApplicationContext(),
-                    "\n---------- JS 错误 ----------\n" + message + "\n");
-        }
-
-        /** 设备 / 内存信息，供页面直接展示 */
-        @JavascriptInterface
-        public String deviceInfo() {
-            return MainActivity.deviceInfo(MainActivity.this);
-        }
     }
 
     private void doSaveFile(String base64Data, String fileName) {
@@ -635,7 +556,7 @@ public class MainActivity extends AppCompatActivity {
             String lower = fileName == null ? "" : fileName.toLowerCase(java.util.Locale.US);
             Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
             intent.addCategory(Intent.CATEGORY_OPENABLE);
-            // 按扩展名给 MIME：诊断日志导出的是 txt，用 json 类型会被某些机型改成 .json
+            // 按扩展名给 MIME：txt 用 json 类型会被某些机型改成 .json
             intent.setType(lower.endsWith(".txt") ? "text/plain"
                     : lower.endsWith(".json") ? "application/json"
                     : "application/octet-stream");
@@ -696,61 +617,6 @@ public class MainActivity extends AppCompatActivity {
         return super.onKeyDown(keyCode, event);
     }
 
-    // ==================== 崩溃现场记录 ====================
-
-    /** 只装一次：Activity 重建时重复安装会让 handler 层层嵌套，同一条崩溃被记很多遍 */
-    private void installCrashHandler() {
-        if (crashHandlerInstalled) return;
-        crashHandlerInstalled = true;
-        final Context appCtx = getApplicationContext();
-        final Thread.UncaughtExceptionHandler previous = Thread.getDefaultUncaughtExceptionHandler();
-        Thread.setDefaultUncaughtExceptionHandler(new Thread.UncaughtExceptionHandler() {
-            @Override
-            public void uncaughtException(Thread thread, Throwable e) {
-                try {
-                    StringBuilder sb = new StringBuilder();
-                    sb.append("\n########## 未捕获异常 ##########\n");
-                    sb.append(deviceInfo(appCtx));
-                    sb.append("线程  : ").append(thread.getName()).append('\n');
-                    sb.append("异常  : ").append(e.getClass().getName())
-                      .append(": ").append(e.getMessage()).append('\n');
-                    java.io.StringWriter sw = new java.io.StringWriter();
-                    e.printStackTrace(new java.io.PrintWriter(sw));
-                    sb.append(sw).append('\n');
-                    // 真正有信息量的往往是 cause（Java 习惯把根因包在 RuntimeException 里）
-                    Throwable cause = e.getCause();
-                    int depth = 0;
-                    while (cause != null && depth < 3) {
-                        sb.append("---- 根因 ").append(depth + 1).append(" ----\n");
-                        java.io.StringWriter cw = new java.io.StringWriter();
-                        cause.printStackTrace(new java.io.PrintWriter(cw));
-                        sb.append(cw).append('\n');
-                        cause = cause.getCause();
-                        depth++;
-                    }
-                    sb.append("########## 记录结束 ##########\n");
-                    appendCrashLog(appCtx, sb.toString());
-                } catch (Throwable ignore) {
-                    // 记日志本身再出错就直接放弃，绝不能改变崩溃的原始行为
-                }
-                if (previous != null) previous.uncaughtException(thread, e);
-            }
-        });
-    }
-
-    /** 上次是否在前台被直接杀掉；是的话补记一条（OOM 场景压根没有堆栈可抓，只能靠这个） */
-    private void checkAbnormalExit() {
-        SharedPreferences sp = getSharedPreferences("app_cache", MODE_PRIVATE);
-        if (sp.getBoolean("session_foreground", false)) {
-            appendCrashLog(getApplicationContext(),
-                    "\n========== 非正常退出 ==========\n"
-                            + deviceInfo(this)
-                            + "上次进程没有走到 onStop，是被系统在前台直接终止的。\n"
-                            + "这种退出没有 Java 堆栈，绝大多数是内存不足（OOM）导致的。\n");
-        }
-        sp.edit().putBoolean("session_foreground", true).commit();
-    }
-
     /**
      * 清理上次备份写到一半留下的临时文件。
      * 正常流程里 endBackup 会把它改名成正式文件，留下 .tmp 就说明上次写到一半进程没了。
@@ -782,81 +648,4 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    /**
-     * 追加写崩溃日志。
-     * 全程吞异常：日志是诊断手段，任何情况下都不允许它反过来影响 App 运行。
-     */
-    static void appendCrashLog(Context ctx, String text) {
-        if (ctx == null || text == null) return;
-        java.io.FileOutputStream fos = null;
-        try {
-            java.io.File f = new java.io.File(ctx.getFilesDir(), CRASH_LOG_NAME);
-            if (f.length() > CRASH_LOG_MAX_BYTES) trimCrashLog(f);
-            fos = new java.io.FileOutputStream(f, true);
-            fos.write(text.getBytes(java.nio.charset.StandardCharsets.UTF_8));
-            fos.flush();
-        } catch (Throwable ignore) {
-        } finally {
-            if (fos != null) {
-                try { fos.close(); } catch (Throwable ignore) { }
-            }
-        }
-    }
-
-    /** 超限时只保留尾部，避免日志文件无限膨胀 */
-    private static void trimCrashLog(java.io.File f) {
-        java.io.RandomAccessFile raf = null;
-        try {
-            raf = new java.io.RandomAccessFile(f, "rw");
-            long len = raf.length();
-            long keep = Math.min(CRASH_LOG_KEEP_BYTES, len);
-            byte[] tail = new byte[(int) keep];
-            raf.seek(len - keep);
-            raf.readFully(tail);
-            raf.setLength(0);
-            raf.seek(0);
-            raf.write("=== 早期日志已截断 ===\n".getBytes(java.nio.charset.StandardCharsets.UTF_8));
-            raf.write(tail);
-        } catch (Throwable ignore) {
-        } finally {
-            if (raf != null) {
-                try { raf.close(); } catch (Throwable ignore) { }
-            }
-        }
-    }
-
-    /** 设备 / 内存 / WebView 版本 —— 判断 OOM 与渲染兼容问题的关键上下文 */
-    static String deviceInfo(Context ctx) {
-        StringBuilder sb = new StringBuilder();
-        try {
-            sb.append("时间  : ").append(stamp()).append('\n');
-            sb.append("机型  : ").append(Build.MANUFACTURER).append(' ').append(Build.MODEL).append('\n');
-            sb.append("系统  : Android ").append(Build.VERSION.RELEASE)
-              .append(" (API ").append(Build.VERSION.SDK_INT).append(")\n");
-            if (Build.SUPPORTED_ABIS.length > 0) {
-                sb.append("ABI   : ").append(Build.SUPPORTED_ABIS[0]).append('\n');
-            }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                android.content.pm.PackageInfo wv = WebView.getCurrentWebViewPackage();
-                if (wv != null) sb.append("WebView: ").append(wv.versionName).append('\n');
-            }
-            sb.append("堆上限: ").append(Runtime.getRuntime().maxMemory() / 1048576L).append("MB\n");
-            ActivityManager am = (ActivityManager) ctx.getSystemService(Context.ACTIVITY_SERVICE);
-            if (am != null) {
-                ActivityManager.MemoryInfo mi = new ActivityManager.MemoryInfo();
-                am.getMemoryInfo(mi);
-                sb.append("内存  : 可用 ").append(mi.availMem / 1048576L)
-                  .append("MB / 总计 ").append(mi.totalMem / 1048576L)
-                  .append("MB / 低内存线 ").append(mi.threshold / 1048576L)
-                  .append("MB / 系统低内存=").append(mi.lowMemory).append('\n');
-            }
-        } catch (Throwable ignore) {
-        }
-        return sb.toString();
-    }
-
-    private static String stamp() {
-        return new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", java.util.Locale.US)
-                .format(new java.util.Date());
-    }
 }

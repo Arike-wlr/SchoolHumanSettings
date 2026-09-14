@@ -77,6 +77,10 @@ function renderKeyedList(container, items) {
     } else if (node.getAttribute('data-sig') !== item.sig) {
       var fresh = nodeFromHTML(item.html());
       container.replaceChild(fresh, node);
+      // 旧节点已被移出容器：游标若正指向它，必须跟着挪到新节点上。
+      // 否则下面的 insertBefore 会拿一个"已不在容器里"的节点当参照物，
+      // 抛 NotFoundError，整次重渲染在第一张变化的卡片上就中断（后面的卡片全部保持旧样子）。
+      if (cursor === node) cursor = fresh;
       node = fresh;
     }
     node.setAttribute('data-key', item.key);
@@ -749,14 +753,23 @@ VM.index = (function() {
     if(card)card.classList.toggle('selected',checked);
     updateExportButtons();
   }
+  // 只把勾选态刷到已有 DOM 上，不整表重建：卡片含 base64 缩略图，全选时重建会明显卡顿。
+  function syncSelectionToDom(){
+    document.querySelectorAll('#charGrid .card[data-drag-id]').forEach(function(card){
+      var on=selectedIds.has(parseInt(card.dataset.dragId,10));
+      card.classList.toggle('selected',on);
+      var cb=card.querySelector('.card-check');if(cb)cb.checked=on;
+    });
+    updateExportButtons();
+  }
   function toggleSelectAll(){
     var cards=document.querySelectorAll('#charGrid .card[data-drag-id]');
     if(cards.length===0)return;
-    var vi=[];cards.forEach(function(c){vi.push(parseInt(c.dataset.dragId));});
+    var vi=[];cards.forEach(function(c){vi.push(parseInt(c.dataset.dragId,10));});
     var as=vi.every(function(id){return selectedIds.has(id);});
     if(as){vi.forEach(function(id){selectedIds.delete(id);});}
     else{vi.forEach(function(id){selectedIds.add(id);});}
-    applyFilter();
+    syncSelectionToDom();
   }
   function confirmExport(){
     if(selectedIds.size===0)return;
@@ -1169,15 +1182,24 @@ VM.worldview = (function() {
     if (card) card.classList.toggle('selected', checked);
     updateExportButtons();
   }
+  // 只把勾选态刷到已有 DOM 上，不整表重建：全选时重建整页会明显卡顿。
+  function syncSelectionToDom() {
+    document.querySelectorAll('#entryGrid .card[data-drag-id]').forEach(function(card) {
+      var on = selectedIds.has(parseInt(card.dataset.dragId, 10));
+      card.classList.toggle('selected', on);
+      var cb = card.querySelector('.card-check'); if (cb) cb.checked = on;
+    });
+    updateExportButtons();
+  }
   function toggleSelectAll() {
     var cards = document.querySelectorAll('#entryGrid .card[data-drag-id]');
     if (cards.length === 0) return;
     var vi = [];
-    cards.forEach(function(c) { vi.push(parseInt(c.dataset.dragId)); });
+    cards.forEach(function(c) { vi.push(parseInt(c.dataset.dragId, 10)); });
     var as = vi.every(function(id) { return selectedIds.has(id); });
     if (as) vi.forEach(function(id) { selectedIds.delete(id); });
     else vi.forEach(function(id) { selectedIds.add(id); });
-    applyFilter();
+    syncSelectionToDom();
   }
   function updateExportButtons() {
     var btn = document.getElementById('worldConfirmExportBtn');
@@ -1814,14 +1836,23 @@ VM.relations = (function() {
     if (card) card.classList.toggle('selected', checked);
     updateExportButtons();
   }
+  // 只把勾选态刷到已有 DOM 上，不整表重建：全选时重建整页会明显卡顿。
+  function syncSelectionToDom() {
+    document.querySelectorAll('#relList .rel-card[data-rel-id]').forEach(function(card) {
+      var on = selectedIds.has(parseInt(card.dataset.relId, 10));
+      card.classList.toggle('selected', on);
+      var cb = card.querySelector('.rel-check'); if (cb) cb.checked = on;
+    });
+    updateExportButtons();
+  }
   function toggleSelectAll() {
     var cards = document.querySelectorAll('#relList .rel-card[data-rel-id]');
     if (cards.length === 0) return;
-    var vi = []; cards.forEach(function(c) { vi.push(parseInt(c.dataset.relId)); });
+    var vi = []; cards.forEach(function(c) { vi.push(parseInt(c.dataset.relId, 10)); });
     var as = vi.every(function(id) { return selectedIds.has(id); });
     if (as) vi.forEach(function(id) { selectedIds.delete(id); });
     else vi.forEach(function(id) { selectedIds.add(id); });
-    renderRelList();
+    syncSelectionToDom();
   }
   function updateExportButtons() {
     var btn = document.getElementById('relConfirmExportBtn');
@@ -2271,93 +2302,4 @@ VM.relations = (function() {
     graphZoom: graphZoom, graphReset: graphReset
   };
 })();
-
-// ======================== 诊断日志 ========================
-// 闪退排查用：原生把崩溃堆栈写进 App 私有目录，这里只负责展示与导出，
-// 全程不依赖电脑 / adb。入口在首页 footer 的「诊断日志」。
-var diagLogText = '';
-
-function diagNativeReady() {
-  return typeof Android !== 'undefined' && Android && Android.readCrashLog;
-}
-
-// 首页入口上的红点：只在确实有崩溃记录时才亮
-function refreshDiagBadge() {
-  var dot = document.getElementById('diagBadge');
-  if (!dot) return;
-  var has = false;
-  try { has = !!(diagNativeReady() && Android.hasCrashLog && Android.hasCrashLog()); } catch (e) { }
-  dot.style.display = has ? 'inline-block' : 'none';
-}
-
-function openDiagModal() {
-  var overlay = document.getElementById('diagOverlay');
-  var info = document.getElementById('diagInfo');
-  var pre = document.getElementById('diagContent');
-  if (!overlay) return;
-  diagLogText = '';
-  if (!diagNativeReady()) {
-    // 浏览器里直接打开时没有原生桥接
-    info.textContent = '当前运行在浏览器环境，没有原生崩溃日志。';
-    pre.textContent = '（无）';
-  } else {
-    try { info.textContent = Android.deviceInfo ? Android.deviceInfo() : ''; } catch (e) { info.textContent = ''; }
-    var full = '';
-    try { full = Android.readCrashLog() || ''; } catch (e) { full = ''; }
-    diagLogText = full;
-    var MAX_SHOW = 20000;
-    if (!full) {
-      pre.textContent = '还没有崩溃记录。\n\n如果刚闪退过这里仍然为空，说明进程是在原生层被系统直接终止的（例如内存不足），那种情况没有堆栈，下次启动时才会补记一条。';
-    } else if (full.length > MAX_SHOW) {
-      // 日志可能上百 KB，全量塞进 DOM 会卡住页面；崩溃现场在尾部，显示尾段即可
-      pre.textContent = '……（日志较长，此处只显示最后 ' + MAX_SHOW + ' 字符，点「导出日志」可拿完整内容）\n\n' + full.slice(-MAX_SHOW);
-    } else {
-      pre.textContent = full;
-    }
-  }
-  overlay.classList.add('active');
-}
-
-function closeDiagModal() {
-  var overlay = document.getElementById('diagOverlay');
-  if (overlay) overlay.classList.remove('active');
-}
-
-function exportDiagLog() {
-  if (!diagLogText) { showToast('没有可导出的日志', 'error'); return; }
-  var header = '校拟设定簿 崩溃诊断日志\n导出时间: ' + new Date().toLocaleString() + '\n\n';
-  var text = header + diagLogText;
-  var fileName = 'crash_log_' + new Date().toISOString().slice(0, 10) + '.txt';
-  if (typeof Android !== 'undefined' && Android.saveFile) {
-    var blob = new Blob([text], { type: 'text/plain' });
-    var reader = new FileReader();
-    reader.onloadend = function() { Android.saveFile(reader.result, fileName); };
-    reader.readAsDataURL(blob);
-    showToast('请选择保存位置', 'success');
-  } else {
-    var a = document.createElement('a');
-    a.href = URL.createObjectURL(new Blob([text], { type: 'text/plain' }));
-    a.download = fileName;
-    a.click();
-    setTimeout(function() { URL.revokeObjectURL(a.href); }, 1000);
-  }
-}
-
-function clearDiagLog() {
-  if (!confirm('确定清空崩溃日志？')) return;
-  try { if (diagNativeReady() && Android.clearCrashLog) Android.clearCrashLog(); } catch (e) { }
-  diagLogText = '';
-  document.getElementById('diagContent').textContent = '（已清空）';
-  refreshDiagBadge();
-  showToast('已清空', 'success');
-}
-
-(function bindDiagOverlay() {
-  var overlay = document.getElementById('diagOverlay');
-  if (overlay) overlay.addEventListener('click', function(e) { if (e.target === this) closeDiagModal(); });
-})();
-
-// 进首页时刷新红点，让"上次崩过"一眼可见
-if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', refreshDiagBadge);
-else refreshDiagBadge();
 
