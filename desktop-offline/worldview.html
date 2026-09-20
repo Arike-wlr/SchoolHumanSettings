@@ -519,7 +519,8 @@
         </div>
         <div class="form-group">
           <label for="content">内容</label>
-          <textarea id="content" rows="6" placeholder="详细描述世界观内容…"></textarea>
+          <textarea id="content" rows="6" placeholder="详细描述世界观内容… 可用 [[文件名|显示文字]] 插入文档链接"></textarea>
+          <button type="button" class="btn-action" onclick="insertDocLink()" style="margin-top:8px;">📎 插入文档链接</button>
         </div>
       </form>
     </div>
@@ -544,6 +545,20 @@
     <div class="modal-footer" style="justify-content:center;">
       <button class="btn btn-ghost" onclick="closeDeleteModal()">取消</button>
       <button class="btn btn-danger" id="confirmDeleteBtn" onclick="confirmDelete()">确认删除</button>
+    </div>
+  </div>
+</div>
+
+<!-- ====== 文档链接选择器 ====== -->
+<div class="modal-overlay" id="docLinkOverlay">
+  <div class="modal" style="max-width:500px;">
+    <div class="modal-header">
+      <h2>选择文档</h2>
+      <button class="modal-close" onclick="closeDocLinkPicker()">✕</button>
+    </div>
+    <div class="modal-body" id="docLinkBody" style="padding:8px 12px;"></div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" type="button" onclick="closeDocLinkPicker()">取消</button>
     </div>
   </div>
 </div>
@@ -893,8 +908,68 @@ async function openDetailModal(id) {
 
 function detailSection(label, value) {
   const cls = (!value || value.trim() === '') ? ' muted' : '';
-  return `<div class="detail-section"><div class="detail-label">${label}</div><div class="detail-value${cls}">${esc(value || '（未填写）')}</div></div>`;
+  return `<div class="detail-section"><div class="detail-label">${label}</div><div class="detail-value${cls}">${renderContentWithDocLinks(value || '（未填写）')}</div></div>`;
 }
+
+// 渲染内容：把 [[doc:文件名|显示文字]] 或 [[文件名|显示文字]] 转成可点击链接
+function renderContentWithDocLinks(text) {
+  if (!text) return '';
+  let safe = esc(text);
+  // [[doc:文件名|显示文字]] 或 [[文件名|显示文字]]
+  safe = safe.replace(/\[\[(?:doc:)?([^|<>\]]+)\|([^\]]*)\]\]/g, (m, fname, label) => {
+    return `<a href="/documents?open=${encodeURIComponent(fname)}" style="color:var(--accent);text-decoration:underline;">${label || fname}</a>`;
+  });
+  // [[doc:文件名]] 或 [[文件名]]
+  safe = safe.replace(/\[\[(?:doc:)?([^<>\]]+)\]\]/g, (m, fname) => {
+    return `<a href="/documents?open=${encodeURIComponent(fname)}" style="color:var(--accent);text-decoration:underline;">${fname}</a>`;
+  });
+  return safe;
+}
+
+// ====== 文档链接选择器 ======
+function insertDocLink() {
+  const body = document.getElementById('docLinkBody');
+  body.innerHTML = '<p style="padding:20px;text-align:center;color:var(--text-light);">加载中…</p>';
+  document.getElementById('docLinkOverlay').classList.add('active');
+  fetch('/api/files').then(r => r.json()).then(files => {
+    if (!files || files.length === 0) {
+      body.innerHTML = '<p style="padding:20px;text-align:center;color:var(--text-light);">暂无文档，请先上传文档</p>';
+      return;
+    }
+    body.innerHTML = files.map(f => {
+      const disp = f.size_display ? `${f.name} (${f.size_display})` : f.name;
+      return `<div style="padding:12px 8px;border-bottom:1px solid var(--border);cursor:pointer;" onclick="pickDocLink('${f.name.replace(/'/g, "\\'")}')"><span style="font-size:.9rem;">📄 ${esc(disp)}</span></div>`;
+    }).join('');
+  }).catch(() => {
+    body.innerHTML = '<p style="padding:20px;text-align:center;color:var(--text-light);">加载失败</p>';
+  });
+}
+
+function closeDocLinkPicker() {
+  document.getElementById('docLinkOverlay').classList.remove('active');
+}
+
+function pickDocLink(fname) {
+  closeDocLinkPicker();
+  const ta = document.getElementById('content');
+  let linkText = `[[${fname}|${fname}]]`;
+  if (ta && typeof ta.setSelectionRange === 'function') {
+    const start = ta.selectionStart, end = ta.selectionEnd;
+    const sel = ta.value.substring(start, end);
+    if (sel) linkText = `[[${fname}|${sel}]]`;
+    ta.value = ta.value.substring(0, start) + linkText + ta.value.substring(end);
+    ta.focus();
+    const newCursor = start + linkText.length;
+    ta.setSelectionRange(newCursor, newCursor);
+  } else if (ta) {
+    ta.value += linkText;
+    ta.focus();
+  }
+}
+
+document.getElementById('docLinkOverlay').addEventListener('click', function(e) {
+  if (e.target === this) closeDocLinkPicker();
+});
 
 function closeDetailModal() {
   document.getElementById('detailOverlay').classList.remove('active');

@@ -1158,13 +1158,100 @@ VM.worldview = (function() {
       var body = '';
       if (e.main_category === '人物背景故事') {}
       else if (e.category) body += '<div class="detail-section"><div class="detail-label">分类</div><div class="detail-value">' + esc(e.category) + '</div></div>';
-      if (e.content) body += '<div class="detail-section"><div class="detail-label">内容</div><div class="detail-value">' + esc(e.content) + '</div></div>';
+      if (e.content) body += '<div class="detail-section"><div class="detail-label">内容</div><div class="detail-value">' + renderContentWithDocLinks(e.content) + '</div></div>';
       document.getElementById('worldDetailBody').innerHTML = body || '<p style="color:var(--text-light);text-align:center;padding:20px;">暂无内容</p>';
       document.getElementById('worldDetailOverlay').classList.add('active');
     }).catch(function() { showToast('获取详情失败', 'error'); });
   }
   function closeDetailModal() { document.getElementById('worldDetailOverlay').classList.remove('active'); detailEntryId = null; }
   function detailEdit() { if (detailEntryId) { var id = detailEntryId; closeDetailModal(); openEditModal(id); } }
+
+  // ====== 文档链接功能 ======
+  // 渲染详情内容时把 [[doc:文件名|显示文字]] 或 [[文件名|显示文字]] 转成可点击链接
+  function renderContentWithDocLinks(text) {
+    if (!text) return '';
+    var safe = esc(text);
+    // [[doc:文件名|显示文字]] 或 [[文件名|显示文字]]
+    safe = safe.replace(/\[\[(?:doc:)?([^|<>\]]+)\|([^\]]*)\]\]/g, function(m, fname, label) {
+      return '<a href="#" onclick="VM.worldview.openDocFromLink(\'' + fname.replace(/'/g, "\\'") + '\');return false;" style="color:var(--accent);text-decoration:underline;">' + (label || fname) + '</a>';
+    });
+    // [[doc:文件名]] 或 [[文件名]]
+    safe = safe.replace(/\[\[(?:doc:)?([^<>\]]+)\]\]/g, function(m, fname) {
+      return '<a href="#" onclick="VM.worldview.openDocFromLink(\'' + fname.replace(/'/g, "\\'") + '\');return false;" style="color:var(--accent);text-decoration:underline;">' + fname + '</a>';
+    });
+    return safe;
+  }
+
+  // 从链接跳转：切到文档页并打开对应文件
+  function openDocFromLink(fname) {
+    // 关闭所有世界观相关 modal
+    document.getElementById('worldDetailOverlay').classList.remove('active');
+    // 切到文档页
+    if (typeof navigateTo === 'function') navigateTo('documents');
+    // 给文档页一个短延时来初始化，然后打开查看器
+    setTimeout(function() {
+      if (VM.documents && VM.documents.openViewer) {
+        VM.documents.openViewer(encodeURIComponent(fname));
+      }
+    }, 350);
+  }
+
+  // 插入文档链接：弹出文档选择器
+  function insertDocLink() {
+    var body = document.getElementById('worldDocLinkBody');
+    body.innerHTML = '<p style="padding:16px;text-align:center;color:var(--text-light);">加载中…</p>';
+    document.getElementById('worldDocLinkOverlay').classList.add('active');
+    // 从 API 获取文档列表
+    fetch('/api/files').then(function(r) { return r.json(); }).then(function(files) {
+      if (!files || files.length === 0) {
+        body.innerHTML = '<p style="padding:20px;text-align:center;color:var(--text-light);">暂无文档，请先上传文档</p>';
+        return;
+      }
+      var html = files.map(function(f) {
+        var disp = f.name;
+        if (f.size_display) disp += ' (' + f.size_display + ')';
+        return '<div style="padding:12px 8px;border-bottom:1px solid var(--border);cursor:pointer;" onclick="VM.worldview.pickDocLink(\'' + f.name.replace(/'/g, "\\'") + '\')" ontouchstart=""><span style="font-size:.9rem;">📄 ' + esc(disp) + '</span></div>';
+      }).join('');
+      body.innerHTML = html;
+    }).catch(function() {
+      // 走 api-shim 也失败 → 尝试从 docDB 拿文档列表
+      if (typeof docDB !== 'undefined' && docDB.list) {
+        docDB.list().then(function(files) {
+          if (files && files.length) {
+            body.innerHTML = files.map(function(f) {
+              var disp = f.name;
+              if (f.size_display) disp += ' (' + f.size_display + ')';
+              return '<div style="padding:12px 8px;border-bottom:1px solid var(--border);cursor:pointer;" onclick="VM.worldview.pickDocLink(\'' + f.name.replace(/'/g, "\\'") + '\')" ontouchstart="">📄 ' + esc(disp) + '</div>';
+            }).join('');
+          } else {
+            body.innerHTML = '<p style="padding:20px;text-align:center;color:var(--text-light);">暂无文档</p>';
+          }
+        }).catch(function() { body.innerHTML = '<p style="padding:20px;text-align:center;color:var(--text-light);">加载失败</p>'; });
+      } else {
+        body.innerHTML = '<p style="padding:20px;text-align:center;color:var(--text-light);">加载失败</p>';
+      }
+    });
+  }
+
+  function closeDocLinkPicker() { document.getElementById('worldDocLinkOverlay').classList.remove('active'); }
+
+  function pickDocLink(fname) {
+    closeDocLinkPicker();
+    var ta = document.getElementById('worldContent');
+    var linkText = '[[' + fname + '|' + fname + ']]';
+    if (ta && typeof ta.setSelectionRange === 'function') {
+      var start = ta.selectionStart, end = ta.selectionEnd;
+      var sel = ta.value.substring(start, end);
+      if (sel) linkText = '[[' + fname + '|' + sel + ']]';
+      ta.value = ta.value.substring(0, start) + linkText + ta.value.substring(end);
+      ta.focus();
+      var newCursor = start + linkText.length;
+      ta.setSelectionRange(newCursor, newCursor);
+    } else if (ta) {
+      ta.value += linkText;
+      ta.focus();
+    }
+  }
 
   function enterExportMode() { exportMode = true; selectedIds.clear(); document.body.classList.add('export-mode'); applyFilter(); }
   function cancelExport() { exportMode = false; selectedIds.clear(); document.body.classList.remove('export-mode'); applyFilter(); }
@@ -1300,6 +1387,7 @@ VM.worldview = (function() {
     openCreateModal: openCreateModal, openEditModal: openEditModal, submitForm: submitForm,
     openDeleteModal: openDeleteModal, closeDeleteModal: closeDeleteModal, confirmDelete: confirmDelete,
     closeModal: closeModal, closeDetailModal: closeDetailModal, detailEdit: detailEdit,
+    insertDocLink: insertDocLink, closeDocLinkPicker: closeDocLinkPicker, pickDocLink: pickDocLink, openDocFromLink: openDocFromLink,
     handleCardClick: handleCardClick,
     enterExportMode: enterExportMode, cancelExport: cancelExport,
     toggleCardSelect: toggleCardSelect, toggleSelectAll: toggleSelectAll, confirmExport: confirmExport,

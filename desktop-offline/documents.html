@@ -435,6 +435,14 @@ window.addEventListener('DOMContentLoaded', () => {
   document.getElementById('viewerOverlay').addEventListener('click', function(e) {
     if (e.target === this) closeViewer();
   });
+
+  // 支持通过 ?open=文件名 参数自动打开文档（从世界观链接跳转）
+  const params = new URLSearchParams(window.location.search);
+  const openName = params.get('open');
+  if (openName) {
+    // 等文档列表加载后再打开
+    setTimeout(() => openViewer(openName), 500);
+  }
 });
 
 // 键盘 ESC 关闭
