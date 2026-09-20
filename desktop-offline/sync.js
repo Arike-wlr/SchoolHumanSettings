@@ -5,6 +5,22 @@
 
 // 版本升级时自动清空图片缓存，避免复用已失效的 serverUrl
 const SYNC_VERSION = '抗大抗大越抗越大';
+
+// 默认 scope：四个块全部启用（与历史"一锅端"行为一致）。
+// downloadFromServer / uploadToServer 接受 scope 参数以支持只同步某一个块。
+const SYNC_SCOPE_ALL = Object.freeze({ chars: true, worlds: true, rels: true, docs: true });
+// 把一个"想同步的块名"转换成 scope 对象，未识别则退化为全量。
+function scopeFromKeys(keys) {
+  if (!keys || !keys.length) return SYNC_SCOPE_ALL;
+  const s = { chars: false, worlds: false, rels: false, docs: false };
+  for (const k of keys) {
+    if (k === 'chars') s.chars = true;
+    else if (k === 'worlds') s.worlds = true;
+    else if (k === 'rels') s.rels = true;
+    else if (k === 'docs') s.docs = true;
+  }
+  return s;
+}
 (async () => {
   try {
     const stored = localStorage.getItem('imageCacheVersion');
@@ -164,6 +180,29 @@ async function pingServer(url) {
 
 // ============= 增量比较辅助 =============
 
+// 把记录复制一份，删掉 id/sort_order/created_at/updated_at 等内部字段，并把图片 data: URL 替换为短占位符。
+// 其他长字段（设定/外观等）保留全文，由 UI 侧 CSS 限高滚动展示，避免看不到"哪里变了"。
+function scrubRecord(rec) {
+  if (!rec || typeof rec !== 'object') return rec;
+  const out = {};
+  for (const k of Object.keys(rec)) {
+    if (k === 'id' || k === 'sort_order' || k === 'created_at' || k === 'updated_at') continue;
+    let v = rec[k];
+    if (k === 'images' && Array.isArray(v)) {
+      // 每张图都换成一个短占位符，避免把巨长的 data URL 塞进 diff 结果。
+      v = v.map(x => {
+        if (typeof x !== 'string') return x;
+        if (/^data:/i.test(x)) return `[图片 data: ${x.length} 字符]`;
+        return x;
+      });
+    } else if (typeof v === 'string' && /^data:/i.test(v)) {
+      v = `[图片 data: ${v.length} 字符]`;
+    }
+    out[k] = v;
+  }
+  return out;
+}
+
 /**
  * 比较两个数组，计算 source → target 方向的增量变更
  * @param sourceArr 源端数据（同步的来源）
@@ -241,7 +280,9 @@ function enrichRelationsWithNames(relations, characters) {
 }
 
 // ============= 从服务器增量下载（只更新变化的部分） =============
-async function downloadFromServer(onProgress) {
+// scope: 可选，{ chars, worlds, rels, docs }，未传则全部为 true（按整轮同步执行）。
+async function downloadFromServer(onProgress, scope) {
+  scope = scope || SYNC_SCOPE_ALL;
   const url = getServerUrl();
   if (!url) throw new Error('未配置服务器地址');
 
@@ -262,8 +303,8 @@ async function downloadFromServer(onProgress) {
   const serverRels = await relRes.json();
   const serverDocs = await docListRes.json();
 
-  // 2. 转换服务器图片 URL → data URL（离线可显示）
-  if (serverChars.some(c => (c.images && c.images.length) || c.image_url)) {
+  // 2. 转换服务器图片 URL → data URL（离线可显示）。只在下载角色时需要。
+  if (scope.chars && serverChars.some(c => (c.images && c.images.length) || c.image_url)) {
     await convertServerImagesToDataUrl(serverChars, url, onProgress);
   }
 
@@ -273,7 +314,7 @@ async function downloadFromServer(onProgress) {
   ]);
   const localRelsNamed = enrichRelationsWithNames(localRels, localChars);
 
-  // 4. 计算增量差异
+  // 4. 计算增量差异（始终全部计算，方便结果统计与未执行块的状态提示）
   const charDiff = computeRecordDiff(serverChars, localChars,
     (s, t) => s.name === t.name, charContentEqual, r => r.name);
   const worldDiff = computeRecordDiff(serverWorlds, localWorlds,
@@ -287,7 +328,7 @@ async function downloadFromServer(onProgress) {
   const relChanges = relDiff.added.length + relDiff.deleted.length + relDiff.modified.length;
 
   // 5. 增量同步角色
-  if (charChanges > 0) {
+  if (scope.chars && charChanges > 0) {
     onProgress && onProgress(`正在同步角色 (${charChanges} 项变更)...`);
     for (const item of charDiff.deleted) await charDB.delete(item.target.id);
     for (const item of charDiff.modified) {
@@ -304,7 +345,7 @@ async function downloadFromServer(onProgress) {
   const nameToLocalId = new Map(updatedLocalChars.map(c => [c.name, c.id]));
 
   // 7. 增量同步世界设定
-  if (worldChanges > 0) {
+  if (scope.worlds && worldChanges > 0) {
     onProgress && onProgress(`正在同步世界设定 (${worldChanges} 项变更)...`);
     for (const item of worldDiff.deleted) await worldDB.delete(item.target.id);
     for (const item of worldDiff.modified) {
@@ -317,7 +358,7 @@ async function downloadFromServer(onProgress) {
   }
 
   // 8. 增量同步关系（转换 char_id：server id → local id）
-  if (relChanges > 0) {
+  if (scope.rels && relChanges > 0) {
     onProgress && onProgress(`正在同步关系 (${relChanges} 项变更)...`);
     for (const item of relDiff.deleted) await relDB.delete(item.target.id);
     for (const item of relDiff.modified) {
@@ -337,24 +378,26 @@ async function downloadFromServer(onProgress) {
   }
 
   // 9. 文档增量同步（name + size 比较）
-  onProgress && onProgress('正在同步文档...');
-  const localDocMap = new Map(localDocs.map(d => [d.name, d]));
-  const serverDocNames = new Set(serverDocs.map(d => d.name));
-  let docDeleted = 0;
-  for (const ld of localDocs) {
-    if (!serverDocNames.has(ld.name)) { await docDB.delete(ld.name); docDeleted++; }
-  }
-  const toDownload = serverDocs.filter(sd => {
-    const ld = localDocMap.get(sd.name);
-    return !ld || ld.size !== sd.size;
-  });
-  for (let i = 0; i < toDownload.length; i++) {
-    const doc = toDownload[i];
-    onProgress && onProgress(`正在下载文档 (${i + 1}/${toDownload.length})...`);
-    const blobRes = await fetch(url + '/api/files/' + encodeURIComponent(doc.name));
-    if (!blobRes.ok) throw new Error('下载文档失败: ' + doc.name);
-    const blob = await blobRes.blob();
-    await docDB.create({ name: doc.name, blob, size: doc.size, modified: doc.modified });
+  let docDeleted = 0, toDownload = [];
+  if (scope.docs) {
+    onProgress && onProgress('正在同步文档...');
+    const localDocMap = new Map(localDocs.map(d => [d.name, d]));
+    const serverDocNames = new Set(serverDocs.map(d => d.name));
+    for (const ld of localDocs) {
+      if (!serverDocNames.has(ld.name)) { await docDB.delete(ld.name); docDeleted++; }
+    }
+    toDownload = serverDocs.filter(sd => {
+      const ld = localDocMap.get(sd.name);
+      return !ld || ld.size !== sd.size;
+    });
+    for (let i = 0; i < toDownload.length; i++) {
+      const doc = toDownload[i];
+      onProgress && onProgress(`正在下载文档 (${i + 1}/${toDownload.length})...`);
+      const blobRes = await fetch(url + '/api/files/' + encodeURIComponent(doc.name));
+      if (!blobRes.ok) throw new Error('下载文档失败: ' + doc.name);
+      const blob = await blobRes.blob();
+      await docDB.create({ name: doc.name, blob, size: doc.size, modified: doc.modified });
+    }
   }
 
   onProgress && onProgress('下载完成');
@@ -363,13 +406,23 @@ async function downloadFromServer(onProgress) {
     worldBuildings: (await worldDB.list()).length,
     relations: (await relDB.list()).length,
     documents: serverDocs.length,
-    documentsSynced: toDownload.length + docDeleted,
-    charChanges, worldChanges, relChanges,
+    documentsSynced: scope.docs ? (toDownload.length + docDeleted) : 0,
+    charChanges: scope.chars ? charChanges : 0,
+    worldChanges: scope.worlds ? worldChanges : 0,
+    relChanges: scope.rels ? relChanges : 0,
+    // 也回传未执行块探测到的变更数，方便上层提示用户还有未同步项。
+    pending: {
+      chars: scope.chars ? 0 : charChanges,
+      worlds: scope.worlds ? 0 : worldChanges,
+      rels: scope.rels ? 0 : relChanges,
+    },
   };
 }
 
 // ============= 增量上传到服务器（只更新变化的部分） =============
-async function uploadToServer(onProgress) {
+// scope: 可选，{ chars, worlds, rels, docs }，未传则全部为 true（按整轮同步执行）。
+async function uploadToServer(onProgress, scope) {
+  scope = scope || SYNC_SCOPE_ALL;
   const url = getServerUrl();
   if (!url) throw new Error('未配置服务器地址');
 
@@ -410,16 +463,18 @@ async function uploadToServer(onProgress) {
   const relChanges = relDiff.added.length + relDiff.deleted.length + relDiff.modified.length;
 
   // 4. 上传图片（仅对需要同步的角色）
-  const charsToUpload = [
-    ...charDiff.added.map(i => i.source),
-    ...charDiff.modified.map(i => i.source),
-  ];
-  if (charsToUpload.some(c => (c.images && c.images.some(u => u && u.startsWith('data:'))) || (c.image_url && c.image_url.startsWith('data:')))) {
-    await convertDataUrlImagesToServerUrl(charsToUpload, url, onProgress);
+  if (scope.chars) {
+    const charsToUpload = [
+      ...charDiff.added.map(i => i.source),
+      ...charDiff.modified.map(i => i.source),
+    ];
+    if (charsToUpload.some(c => (c.images && c.images.some(u => u && u.startsWith('data:'))) || (c.image_url && c.image_url.startsWith('data:')))) {
+      await convertDataUrlImagesToServerUrl(charsToUpload, url, onProgress);
+    }
   }
 
   // 5. 增量同步角色到服务器
-  if (charChanges > 0) {
+  if (scope.chars && charChanges > 0) {
     onProgress && onProgress(`正在同步角色 (${charChanges} 项变更)...`);
     for (const item of charDiff.deleted) {
       await fetch(url + '/api/characters/' + item.target.id, { method: 'DELETE' });
@@ -464,7 +519,7 @@ async function uploadToServer(onProgress) {
   const nameToServerId = new Map(updatedServerChars.map(c => [c.name, c.id]));
 
   // 7. 增量同步世界设定
-  if (worldChanges > 0) {
+  if (scope.worlds && worldChanges > 0) {
     onProgress && onProgress(`正在同步世界设定 (${worldChanges} 项变更)...`);
     for (const item of worldDiff.deleted) {
       await fetch(url + '/api/world-buildings/' + item.target.id, { method: 'DELETE' });
@@ -488,7 +543,7 @@ async function uploadToServer(onProgress) {
   }
 
   // 8. 增量同步关系（转换 char_id：local id → server id）
-  if (relChanges > 0) {
+  if (scope.rels && relChanges > 0) {
     onProgress && onProgress(`正在同步关系 (${relChanges} 项变更)...`);
     for (const item of relDiff.deleted) {
       await fetch(url + '/api/relations/' + item.target.id, { method: 'DELETE' });
@@ -518,28 +573,30 @@ async function uploadToServer(onProgress) {
   }
 
   // 9. 文档增量同步（name + size 比较）
-  onProgress && onProgress('正在同步文档...');
-  const serverDocMap = new Map(serverDocs.map(d => [d.name, d]));
-  const localDocNames = new Set(localDocs.map(d => d.name));
-  let docDeleted = 0;
-  for (const sd of serverDocs) {
-    if (!localDocNames.has(sd.name)) {
-      await fetch(url + '/api/files/' + encodeURIComponent(sd.name), { method: 'DELETE' });
-      docDeleted++;
+  let docDeleted = 0, toUpload = [];
+  if (scope.docs) {
+    onProgress && onProgress('正在同步文档...');
+    const serverDocMap = new Map(serverDocs.map(d => [d.name, d]));
+    const localDocNames = new Set(localDocs.map(d => d.name));
+    for (const sd of serverDocs) {
+      if (!localDocNames.has(sd.name)) {
+        await fetch(url + '/api/files/' + encodeURIComponent(sd.name), { method: 'DELETE' });
+        docDeleted++;
+      }
     }
-  }
-  const toUpload = localDocs.filter(ld => {
-    const sd = serverDocMap.get(ld.name);
-    return !sd || sd.size !== ld.size;
-  });
-  for (let i = 0; i < toUpload.length; i++) {
-    const docMeta = toUpload[i];
-    onProgress && onProgress(`正在上传文档 (${i + 1}/${toUpload.length})...`);
-    const doc = await docDB.get(docMeta.name);
-    const formData = new FormData();
-    formData.append('files', doc.blob, doc.name);
-    const uploadRes = await fetch(url + '/api/files/upload', { method: 'POST', body: formData });
-    if (!uploadRes.ok) throw new Error('文档上传失败: ' + docMeta.name);
+    toUpload = localDocs.filter(ld => {
+      const sd = serverDocMap.get(ld.name);
+      return !sd || sd.size !== ld.size;
+    });
+    for (let i = 0; i < toUpload.length; i++) {
+      const docMeta = toUpload[i];
+      onProgress && onProgress(`正在上传文档 (${i + 1}/${toUpload.length})...`);
+      const doc = await docDB.get(docMeta.name);
+      const formData = new FormData();
+      formData.append('files', doc.blob, doc.name);
+      const uploadRes = await fetch(url + '/api/files/upload', { method: 'POST', body: formData });
+      if (!uploadRes.ok) throw new Error('文档上传失败: ' + docMeta.name);
+    }
   }
 
   onProgress && onProgress('上传完成');
@@ -548,8 +605,15 @@ async function uploadToServer(onProgress) {
     worldBuildings: localWorlds.length,
     relations: localRels.length,
     documents: localDocs.length,
-    documentsSynced: toUpload.length + docDeleted,
-    charChanges, worldChanges, relChanges,
+    documentsSynced: scope.docs ? (toUpload.length + docDeleted) : 0,
+    charChanges: scope.chars ? charChanges : 0,
+    worldChanges: scope.worlds ? worldChanges : 0,
+    relChanges: scope.rels ? relChanges : 0,
+    pending: {
+      chars: scope.chars ? 0 : charChanges,
+      worlds: scope.worlds ? 0 : worldChanges,
+      rels: scope.rels ? 0 : relChanges,
+    },
   };
 }
 
@@ -664,17 +728,46 @@ async function getSyncDiff(direction) {
       added: charDiff.added.map(i => i.label),
       deleted: charDiff.deleted.map(i => i.label),
       modified: charDiff.modified.map(i => i.label),
+      details: {
+        added: charDiff.added.map(i => ({ label: i.label, source: scrubRecord(i.source) })),
+        deleted: charDiff.deleted.map(i => ({ label: i.label, target: scrubRecord(i.target) })),
+        modified: charDiff.modified.map(i => ({ label: i.label, source: scrubRecord(i.source), target: scrubRecord(i.target) })),
+      },
     },
     worlds: {
       added: worldDiff.added.map(i => i.label),
       deleted: worldDiff.deleted.map(i => i.label),
       modified: worldDiff.modified.map(i => i.label),
+      details: {
+        added: worldDiff.added.map(i => ({ label: i.label, source: scrubRecord(i.source) })),
+        deleted: worldDiff.deleted.map(i => ({ label: i.label, target: scrubRecord(i.target) })),
+        modified: worldDiff.modified.map(i => ({ label: i.label, source: scrubRecord(i.source), target: scrubRecord(i.target) })),
+      },
     },
     relations: {
       added: relDiff.added.map(i => i.label),
       deleted: relDiff.deleted.map(i => i.label),
       modified: relDiff.modified.map(i => i.label),
+      details: {
+        added: relDiff.added.map(i => ({ label: i.label, source: scrubRecord(i.source) })),
+        deleted: relDiff.deleted.map(i => ({ label: i.label, target: scrubRecord(i.target) })),
+        modified: relDiff.modified.map(i => ({ label: i.label, source: scrubRecord(i.source), target: scrubRecord(i.target) })),
+      },
     },
-    docs: { added: docsAdded, deleted: docsDeleted, modified: docsModified },
+    docs: {
+      added: docsAdded,
+      deleted: docsDeleted,
+      modified: docsModified,
+      details: {
+        added: docsAdded.map(name => ({ label: name, source: { name, size: (serverDocMap.get(name) || localDocMap.get(name) || {}).size || 0 } })),
+        deleted: docsDeleted.map(name => ({ label: name, target: { name, size: (localDocMap.get(name) || serverDocMap.get(name) || {}).size || 0 } })),
+        // 文档目前只按 size 比较，无法在 diff 阶段知道两侧的具体大小，统一探一次。
+        modified: docsModified.map(name => {
+          const ld = localDocMap.get(name) || {};
+          const sd = serverDocMap.get(name) || {};
+          return { label: name, source: { name, size: ld.size || 0 }, target: { name, size: sd.size || 0 } };
+        }),
+      },
+    },
   };
 }

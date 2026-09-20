@@ -11,7 +11,7 @@ android {
         minSdk 24
         targetSdk 35
         versionCode 3
-        versionName "我已经半分钟没有听到"
+        versionName "我已经半分钟没有更新了"
     }
 
     buildTypes {

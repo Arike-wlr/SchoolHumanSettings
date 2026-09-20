@@ -98,6 +98,77 @@
     .sync-doc-more { color: var(--text-light, #8a7a6a); font-size: .76rem; margin-left: 4px; }
     .sync-diff-empty { font-size: .82rem; color: var(--text-light, #8a7a6a); text-align: center; padding: 8px 0; }
 
+    /* 可点击的变更标签 chip —— 点开后看具体哪里变了 */
+    .sync-chip {
+      display: inline-block; background: var(--card-bg, #fff);
+      border: 1px solid var(--border, #e0d6c8); border-radius: 4px;
+      padding: 2px 8px; margin: 2px 4px 2px 0; font-size: .76rem;
+      cursor: pointer; color: var(--text, #3d2b1f); transition: background .15s;
+    }
+    .sync-chip:hover { background: #f0e8d8; }
+    .sync-chip.active { background: var(--accent, #8b5e3c); color: #fff; border-color: var(--accent, #8b5e3c); }
+    .sync-chip:focus { outline: 2px solid var(--accent-light, #c49a6c); outline-offset: 1px; }
+
+    /* 变更详情面板：显示某条记录在源/目标两侧的具体字段差异 */
+    .sync-detail-panel {
+      margin-top: 10px; background: var(--card-bg, #fff);
+      border: 1px solid var(--border, #e0d6c8); border-radius: 8px;
+      padding: 10px; font-size: .8rem;
+    }
+    .sync-detail-panel-empty {
+      font-size: .8rem; color: var(--text-light, #8a7a6a);
+      text-align: center; padding: 12px 0;
+    }
+    .sync-detail-title {
+      font-weight: 600; color: var(--text, #3d2b1f);
+      margin-bottom: 8px; font-size: .85rem;
+    }
+    .sync-field-row {
+      display: grid; grid-template-columns: 78px 1fr 12px 1fr;
+      align-items: start; gap: 6px; padding: 4px 0;
+      border-top: 1px dashed var(--border, #e0d6c8);
+    }
+    .sync-field-row:first-of-type { border-top: none; }
+    .sync-field-name { color: var(--text-light, #8a7a6a); font-size: .76rem; }
+    .sync-field-val {
+      word-break: break-all; white-space: pre-wrap;
+      color: var(--text, #3d2b1f); font-size: .8rem;
+      max-height: 8em; overflow-y: auto;
+    }
+    .sync-field-val.empty { color: var(--text-light, #8a7a6a); font-style: italic; max-height: none; overflow: visible; }
+    .sync-field-arrow { color: var(--text-light, #8a7a6a); text-align: center; }
+    .sync-field-row.changed .sync-field-val { background: #fdf3e7; border-radius: 3px; padding: 2px 4px; }
+    .sync-field-side { font-size: .7rem; color: var(--text-light, #8a7a6a); margin-bottom: 4px; font-weight: 600; }
+
+    /* 单块执行按钮 */
+    .sync-block-actions {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 6px;
+    }
+    .sync-btn-block {
+      padding: 10px; border: 1.5px solid var(--accent, #8b5e3c);
+      background: #fff; color: var(--accent, #8b5e3c);
+      border-radius: 8px; font-size: .82rem; font-weight: 500; cursor: pointer;
+    }
+    .sync-btn-block:disabled { opacity: .4; cursor: not-allowed; }
+    .sync-btn-block:active:not(:disabled) { transform: scale(.97); }
+    .sync-btn-block.all { background: var(--accent, #8b5e3c); color: #fff; grid-column: span 2; }
+    .sync-btn-block:disabled.all { opacity: .5; }
+    .sync-block-row {
+      background: var(--bg, #f5f0e8); border-radius: 10px;
+      padding: 10px 12px; margin-bottom: 10px;
+    }
+    .sync-block-row-head {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 8px; margin-bottom: 6px;
+    }
+    .sync-block-row-title {
+      font-size: .82rem; color: var(--text, #3d2b1f); font-weight: 600;
+    }
+    .sync-block-row-count {
+      font-size: .74rem; color: var(--text-light, #8a7a6a);
+    }
+    .sync-block-row-count.has-changes { color: var(--accent, #8b5e3c); font-weight: 600; }
+
     .sync-btn-cancel { background: #fff; color: var(--text-light, #8a7a6a); border: 1.5px solid var(--border, #e0d6c8); }
     .sync-btn-confirm { background: var(--accent, #8b5e3c); color: #fff; }
   `;
@@ -221,11 +292,156 @@
 
   // ============= 同步确认界面 =============
   let pendingSyncAction = null; // 'download' | 'upload'
+  // 缓存当前 diff，chip 的点击处理函数从这里取详情。
+  let _currentSyncDiff = null;
+
+  // 各 block 的字段定义（用于详情面板按字段比对）。
+  // 字段顺序即显示顺序。空数组表示只展示标签（如文档目前只比 size）。
+  const SYNC_BLOCK_FIELDS = {
+    chars: ['alias', 'university', 'region', 'naming_rationale', 'height',
+            'gender', 'birthday', 'appearance', 'identity_period', 'birth_time',
+            'setting', 'family', 'birthplace', 'status', 'image_url', 'images'],
+    worlds: ['category', 'content', 'main_category'],
+    relations: ['from_name', 'to_name', 'relation_type', 'description'],
+    docs: ['size'],
+  };
+  const SYNC_BLOCK_LABEL = { chars: '角色', worlds: '世界设定', relations: '关系', docs: '文档' };
 
   function escSync(s) {
     return String(s == null ? '' : s)
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
+  // 把任意值转成可显示字符串。data: URL 太长，截短一下；其他长字段保留全文，
+  // 由 CSS 限高 + 滚动展示，避免看不到"哪里变了"。
+  function displayVal(v) {
+    if (v == null) return '';
+    if (Array.isArray(v)) {
+      if (v.length === 0) return '';
+      // 图片数组：每行一张图，便于用户阅读。
+      return v.map(x => {
+        if (typeof x !== 'string') return String(x);
+        if (/^data:/i.test(x)) return '[图片 data: ' + x.length + ' 字符]';
+        return x;
+      }).join('\n');
+    }
+    if (typeof v === 'string') {
+      if (/^data:/i.test(v)) return '[图片 data: ' + v.length + ' 字符]';
+      return v;
+    }
+    return String(v);
+  }
+
+  // 渲染某条记录的字段级差异。source/target 任一可为 null。
+  function renderFieldDiff(source, target, fields) {
+    const allKeys = fields.length ? fields : Array.from(new Set([
+      ...Object.keys(source || {}),
+      ...Object.keys(target || {}),
+    ]));
+    let rows = '';
+    for (const k of allKeys) {
+      const sv = source ? source[k] : undefined;
+      const tv = target ? target[k] : undefined;
+      const sStr = displayVal(sv);
+      const tStr = displayVal(tv);
+      const changed = (source && target) && (sStr !== tStr);
+      rows += `
+        <div class="sync-field-row${changed ? ' changed' : ''}">
+          <span class="sync-field-name">${escSync(k)}</span>
+          <span class="sync-field-val${source && (sv == null || sStr === '') ? ' empty' : ''}">${escSync(sStr)}</span>
+          <span class="sync-field-arrow">→</span>
+          <span class="sync-field-val${target && (tv == null || tStr === '') ? ' empty' : ''}">${escSync(tStr)}</span>
+        </div>`;
+    }
+    if (!rows) return '<div class="sync-detail-panel-empty">无字段可显示</div>';
+    const sides = `
+      <div style="display:grid;grid-template-columns:78px 1fr 12px 1fr;gap:6px;margin-bottom:6px;">
+        <span></span>
+        <span class="sync-field-side">${source ? '源端' : '—'}</span>
+        <span></span>
+        <span class="sync-field-side">${target ? '目标' : '—'}</span>
+      </div>`;
+    return sides + rows;
+  }
+
+  // 选中某个 chip 时把详情面板内容填进去。
+  // changeType: 'added' | 'deleted' | 'modified'，idx 是该数组中的下标。
+  function showItemDetail(direction, blockKey, changeType, idx) {
+    const panel = document.getElementById('syncDetailPanel');
+    if (!panel || !_currentSyncDiff) return;
+    const block = _currentSyncDiff[blockKey] || {};
+    const detailArr = (block.details && block.details[changeType]) || [];
+    const item = detailArr[idx];
+    if (!item) {
+      panel.innerHTML = '<div class="sync-detail-panel-empty">无详情</div>';
+      return;
+    }
+    // 高亮当前 chip、取消其他高亮。
+    document.querySelectorAll('.sync-chip.active').forEach(el => el.classList.remove('active'));
+    const chipId = `chip-${blockKey}-${changeType}-${idx}`;
+    const chip = document.getElementById(chipId);
+    if (chip) chip.classList.add('active');
+
+    const typeLabel = changeType === 'added' ? '新增' : (changeType === 'deleted' ? '删除' : '修改');
+    const fields = SYNC_BLOCK_FIELDS[blockKey] || [];
+    const fieldHtml = renderFieldDiff(item.source, item.target, fields);
+    panel.innerHTML = `
+      <div class="sync-detail-title">${SYNC_BLOCK_LABEL[blockKey] || blockKey} · ${typeLabel}：${escSync(item.label)}</div>
+      ${fieldHtml}
+    `;
+  }
+  window.showItemDetail = showItemDetail;
+
+  // 渲染一个 block 的 chips（added/deleted/modified），每个 chip 可点击。
+  function formatChips(blockKey, changes) {
+    const added = changes.added || [];
+    const deleted = changes.deleted || [];
+    const modified = changes.modified || [];
+    const total = added.length + deleted.length + modified.length;
+    if (total === 0) return '<div class="sync-diff-empty">无变化</div>';
+    let html = '';
+    if (added.length) {
+      html += `<div class="sync-diff-item add"><span class="sync-diff-badge">➕ 新增 ${added.length}</span><div class="sync-doc-list">`;
+      added.forEach((label, i) => {
+        html += `<span class="sync-chip" id="chip-${blockKey}-added-${i}" onclick="showItemDetail('${_currentSyncDiff.direction}','${blockKey}','added',${i})" tabindex="0">${escSync(label)}</span>`;
+      });
+      html += `</div></div>`;
+    }
+    if (deleted.length) {
+      html += `<div class="sync-diff-item del"><span class="sync-diff-badge">❌ 删除 ${deleted.length}</span><div class="sync-doc-list">`;
+      deleted.forEach((label, i) => {
+        html += `<span class="sync-chip" id="chip-${blockKey}-deleted-${i}" onclick="showItemDetail('${_currentSyncDiff.direction}','${blockKey}','deleted',${i})" tabindex="0">${escSync(label)}</span>`;
+      });
+      html += `</div></div>`;
+    }
+    if (modified.length) {
+      html += `<div class="sync-diff-item mod"><span class="sync-diff-badge">✏ 修改 ${modified.length}</span><div class="sync-doc-list">`;
+      modified.forEach((label, i) => {
+        html += `<span class="sync-chip" id="chip-${blockKey}-modified-${i}" onclick="showItemDetail('${_currentSyncDiff.direction}','${blockKey}','modified',${i})" tabindex="0">${escSync(label)}</span>`;
+      });
+      html += `</div></div>`;
+    }
+    return html;
+  }
+
+  // 渲染单个 block 的整行（标题 + 数量 + chips + 执行此块按钮）
+  function formatBlockRow(blockKey, changes) {
+    const added = (changes.added || []).length;
+    const deleted = (changes.deleted || []).length;
+    const modified = (changes.modified || []).length;
+    const total = added + deleted + modified;
+    return `
+      <div class="sync-block-row">
+        <div class="sync-block-row-head">
+          <span class="sync-block-row-title">${SYNC_BLOCK_LABEL[blockKey]}变更</span>
+          <span class="sync-block-row-count${total > 0 ? ' has-changes' : ''}">共 ${total} 项</span>
+        </div>
+        ${formatChips(blockKey, changes)}
+        <div class="sync-block-actions">
+          <button class="sync-btn-block" onclick="executeSyncConfirm('${blockKey}')"${total === 0 ? ' disabled' : ''}>仅同步${SYNC_BLOCK_LABEL[blockKey]}</button>
+        </div>
+      </div>`;
   }
 
   async function showSyncConfirm(direction) {
@@ -243,31 +459,11 @@
     }
 
     pendingSyncAction = direction;
+    _currentSyncDiff = diff;
+    _currentSyncDiff.direction = direction;
     const isDownload = direction === 'download';
     const targetLabel = isDownload ? '本地' : '电脑';
     const title = isDownload ? '⬇ 从电脑下载' : '⬆ 上传到电脑';
-
-    // 通用格式化函数：把变更标签列表渲染为 HTML
-    const MAX = 5;
-    const formatList = (arr) => {
-      if (!arr.length) return '';
-      const shown = arr.slice(0, MAX).map(n => `<span class="sync-doc-name">${escSync(n)}</span>`).join('');
-      const more = arr.length > MAX ? `<span class="sync-doc-more">等共 ${arr.length} 个</span>` : '';
-      return shown + more;
-    };
-    // 渲染某一类数据的变更明细
-    const formatChanges = (changes) => {
-      const added = changes.added || [];
-      const deleted = changes.deleted || [];
-      const modified = changes.modified || [];
-      const total = added.length + deleted.length + modified.length;
-      if (total === 0) return '<div class="sync-diff-empty">无变化</div>';
-      let html = '';
-      if (added.length) html += `<div class="sync-diff-item add"><span class="sync-diff-badge">➕ 新增 ${added.length}</span><div class="sync-doc-list">${formatList(added)}</div></div>`;
-      if (deleted.length) html += `<div class="sync-diff-item del"><span class="sync-diff-badge">❌ 删除 ${deleted.length}</span><div class="sync-doc-list">${formatList(deleted)}</div></div>`;
-      if (modified.length) html += `<div class="sync-diff-item mod"><span class="sync-diff-badge">✏ 修改 ${modified.length}</span><div class="sync-doc-list">${formatList(modified)}</div></div>`;
-      return html;
-    };
 
     // 数量对比
     const dims = [
@@ -292,7 +488,6 @@
         </div>`;
     }
 
-    // 各类型变更明细
     const charTotal = (diff.chars.added.length + diff.chars.deleted.length + diff.chars.modified.length);
     const worldTotal = (diff.worlds.added.length + diff.worlds.deleted.length + diff.worlds.modified.length);
     const relTotal = (diff.relations.added.length + diff.relations.deleted.length + diff.relations.modified.length);
@@ -302,30 +497,21 @@
     const html = `
       <div class="sync-modal">
         <div class="sync-title">${title}</div>
-        <div class="sync-confirm-warn">ℹ 增量同步：只更新以下变化的部分，不会覆盖未变更的数据。${allTotal === 0 ? '当前无变更，无需同步。' : `共 ${allTotal} 项变更。`}</div>
+        <div class="sync-confirm-warn">ℹ 增量同步：只更新以下变化的部分，不会覆盖未变更的数据。${allTotal === 0 ? '当前无变更，无需同步。' : `共 ${allTotal} 项变更，可点击下面每个标签查看具体哪里变了。`}</div>
         <div class="sync-diff-section">
           <div class="sync-diff-section-title">${targetLabel}数据数量（当前 → 变更后）</div>
           ${diffRows}
         </div>
-        <div class="sync-diff-section">
-          <div class="sync-diff-section-title">角色变更（共 ${charTotal} 项）</div>
-          ${formatChanges(diff.chars)}
-        </div>
-        <div class="sync-diff-section">
-          <div class="sync-diff-section-title">世界设定变更（共 ${worldTotal} 项）</div>
-          ${formatChanges(diff.worlds)}
-        </div>
-        <div class="sync-diff-section">
-          <div class="sync-diff-section-title">关系变更（共 ${relTotal} 项）</div>
-          ${formatChanges(diff.relations)}
-        </div>
-        <div class="sync-diff-section">
-          <div class="sync-diff-section-title">文档变更（共 ${docTotal} 项）</div>
-          ${formatChanges(diff.docs)}
+        ${formatBlockRow('chars', diff.chars)}
+        ${formatBlockRow('worlds', diff.worlds)}
+        ${formatBlockRow('relations', diff.relations)}
+        ${formatBlockRow('docs', diff.docs)}
+        <div class="sync-detail-panel" id="syncDetailPanel">
+          <div class="sync-detail-panel-empty">点击上方任意变更标签可查看具体字段差异</div>
         </div>
         <div class="sync-actions">
           <button class="sync-btn sync-btn-cancel" onclick="cancelSyncConfirm()">取消</button>
-          <button class="sync-btn sync-btn-confirm" onclick="executeSyncConfirm()"${allTotal === 0 ? ' disabled style="opacity:.5"' : ''}>确认执行</button>
+          <button class="sync-btn sync-btn-confirm" onclick="executeSyncConfirm('all')"${allTotal === 0 ? ' disabled style="opacity:.5"' : ''}>全部执行</button>
         </div>
       </div>
     `;
@@ -351,28 +537,37 @@
     const overlay = document.getElementById('syncConfirmOverlay');
     if (overlay) overlay.classList.remove('active');
     pendingSyncAction = null;
+    _currentSyncDiff = null;
   }
   window.cancelSyncConfirm = cancelSyncConfirm;
 
-  async function executeSyncConfirm() {
+  // blockKey: 'chars' | 'worlds' | 'relations' | 'docs' | 'all' | undefined（兼容旧调用）
+  async function executeSyncConfirm(blockKey) {
     const direction = pendingSyncAction;
+    let scope = null;
+    if (blockKey && blockKey !== 'all') {
+      scope = scopeFromKeys([blockKey]);
+    }
     cancelSyncConfirm();
-    if (direction === 'download') await doDownloadExecute();
-    else if (direction === 'upload') await doUploadExecute();
+    if (direction === 'download') await doDownloadExecute(scope, blockKey);
+    else if (direction === 'upload') await doUploadExecute(scope, blockKey);
   }
   window.executeSyncConfirm = executeSyncConfirm;
 
-  // 实际执行下载（已通过确认界面）
-  async function doDownloadExecute() {
+  // 实际执行下载；scope 为 null 表示全量（向后兼容）。
+  async function doDownloadExecute(scope, blockKey) {
     const status = document.getElementById('syncStatus');
-    status.textContent = '正在下载...';
+    const label = blockKey && blockKey !== 'all' ? `仅下载${SYNC_BLOCK_LABEL[blockKey]}` : '下载';
+    status.textContent = `正在${label}...`;
     status.className = 'sync-status';
     try {
-      const result = await runSyncOnce(() => downloadFromServer(msg => { status.textContent = msg; }));
+      const result = await runSyncOnce(() => downloadFromServer(msg => { status.textContent = msg; }, scope));
       const chg = result.charChanges + result.worldChanges + result.relChanges;
       const chgMsg = chg > 0 ? `，更新 ${chg} 项变更（角色${result.charChanges}/设定${result.worldChanges}/关系${result.relChanges}）` : '，数据已最新';
       const docSync = result.documentsSynced != null ? `，文档同步 ${result.documentsSynced} 个` : '';
-      status.textContent = `下载完成：${result.characters} 角色、${result.worldBuildings} 设定、${result.relations} 关系、${result.documents} 文档${chgMsg}${docSync}`;
+      const pending = result.pending && (result.pending.chars + result.pending.worlds + result.pending.rels);
+      const pendingMsg = pending > 0 ? `（仍有 ${pending} 项未选块变更未同步）` : '';
+      status.textContent = `${label}完成：${result.characters} 角色、${result.worldBuildings} 设定、${result.relations} 关系、${result.documents} 文档${chgMsg}${docSync}${pendingMsg}`;
       status.className = 'sync-status success';
       loadLocalStats();
       // 刷新当前页面数据；旧请求由视图自己的序号保护。
@@ -380,28 +575,31 @@
       if (typeof refreshCurrentView === 'function') refreshCurrentView();
     } catch (e) {
       if (typeof markAppDataChanged === 'function') markAppDataChanged();
-      status.textContent = '下载失败: ' + e.message;
+      status.textContent = `${label}失败: ` + e.message;
       status.className = 'sync-status error';
     }
   }
 
-  // 实际执行上传（已通过确认界面）
-  async function doUploadExecute() {
+  // 实际执行上传；scope 为 null 表示全量（向后兼容）。
+  async function doUploadExecute(scope, blockKey) {
     const status = document.getElementById('syncStatus');
-    status.textContent = '正在上传...';
+    const label = blockKey && blockKey !== 'all' ? `仅上传${SYNC_BLOCK_LABEL[blockKey]}` : '上传';
+    status.textContent = `正在${label}...`;
     status.className = 'sync-status';
     try {
-      const result = await runSyncOnce(() => uploadToServer(msg => { status.textContent = msg; }));
+      const result = await runSyncOnce(() => uploadToServer(msg => { status.textContent = msg; }, scope));
       const chg = result.charChanges + result.worldChanges + result.relChanges;
       const chgMsg = chg > 0 ? `，更新 ${chg} 项变更（角色${result.charChanges}/设定${result.worldChanges}/关系${result.relChanges}）` : '，数据已最新';
       const docSync = result.documentsSynced != null ? `，文档同步 ${result.documentsSynced} 个` : '';
-      status.textContent = `上传完成：${result.characters} 角色、${result.worldBuildings} 设定、${result.relations} 关系、${result.documents} 文档${chgMsg}${docSync}`;
+      const pending = result.pending && (result.pending.chars + result.pending.worlds + result.pending.rels);
+      const pendingMsg = pending > 0 ? `（仍有 ${pending} 项未选块变更未同步）` : '';
+      status.textContent = `${label}完成：${result.characters} 角色、${result.worldBuildings} 设定、${result.relations} 关系、${result.documents} 文档${chgMsg}${docSync}${pendingMsg}`;
       status.className = 'sync-status success';
       if (typeof markAppDataChanged === 'function') markAppDataChanged();
       if (typeof refreshCurrentView === 'function') refreshCurrentView();
     } catch (e) {
       if (typeof markAppDataChanged === 'function') markAppDataChanged();
-      status.textContent = '上传失败: ' + e.message;
+      status.textContent = `${label}失败: ` + e.message;
       status.className = 'sync-status error';
     }
   }
