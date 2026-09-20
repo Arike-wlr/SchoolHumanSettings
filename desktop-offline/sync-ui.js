@@ -124,18 +124,44 @@
       margin-bottom: 8px; font-size: .85rem;
     }
     .sync-field-row {
-      display: grid; grid-template-columns: 78px 1fr 12px 1fr;
-      align-items: start; gap: 6px; padding: 4px 0;
+      display: grid; grid-template-columns: 92px 1fr;
+      align-items: start; gap: 8px; padding: 6px 0;
       border-top: 1px dashed var(--border, #e0d6c8);
     }
     .sync-field-row:first-of-type { border-top: none; }
-    .sync-field-name { color: var(--text-light, #8a7a6a); font-size: .76rem; }
+    .sync-field-name {
+      color: var(--text-light, #8a7a6a); font-size: .76rem;
+      padding-top: 2px;
+    }
     .sync-field-val {
       word-break: break-all; white-space: pre-wrap;
       color: var(--text, #3d2b1f); font-size: .8rem;
-      max-height: 8em; overflow-y: auto;
+      max-height: 14em; overflow-y: auto;
     }
     .sync-field-val.empty { color: var(--text-light, #8a7a6a); font-style: italic; max-height: none; overflow: visible; }
+
+    /* git 风格行级 diff */
+    .sync-diff-block {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: .76rem; line-height: 1.45;
+      background: var(--card-bg, #fff); border: 1px solid var(--border, #e0d6c8);
+      border-radius: 6px; max-height: 14em; overflow-y: auto;
+    }
+    .sync-diff-line { display: flex; padding: 1px 6px; white-space: pre-wrap; word-break: break-all; }
+    .sync-diff-line .gutter { flex: 0 0 18px; color: var(--text-light, #8a7a6a); user-select: none; text-align: right; padding-right: 6px; }
+    .sync-diff-line .content { flex: 1; }
+    .sync-diff-line.del { background: #fde8e8; }
+    .sync-diff-line.del .content { color: #b3261e; text-decoration: line-through; }
+    .sync-diff-line.add { background: #e3f3e8; }
+    .sync-diff-line.add .content { color: #1e6b3a; font-weight: 500; }
+    .sync-diff-line.ctx .content { color: var(--text-light, #8a7a6a); }
+    .sync-diff-line.empty-marker .content { color: var(--text-light, #8a7a6a); font-style: italic; }
+
+    /* 字符级 inline diff（单行修改时使用） */
+    .sync-inline-del { background: #fde8e8; color: #b3261e; text-decoration: line-through; border-radius: 2px; }
+    .sync-inline-add { background: #e3f3e8; color: #1e6b3a; font-weight: 500; border-radius: 2px; }
+    .sync-inline-ctx { color: inherit; }
+
     .sync-field-arrow { color: var(--text-light, #8a7a6a); text-align: center; }
     .sync-field-row.changed .sync-field-val { background: #fdf3e7; border-radius: 3px; padding: 2px 4px; }
     .sync-field-side { font-size: .7rem; color: var(--text-light, #8a7a6a); margin-bottom: 4px; font-weight: 600; }
@@ -333,7 +359,126 @@
     return String(v);
   }
 
+  // 计算两段文本的行级 diff（LCS 算法）。
+  // 返回 [{type:'ctx'|'del'|'add', text:'...'}] 序列。
+  // 空 a 或空 b 会被当作 0 行处理，使另一侧整体显示为 add/del。
+  function computeLineDiff(a, b) {
+    const aLines = a.length === 0 ? [] : a.split('\n');
+    const bLines = b.length === 0 ? [] : b.split('\n');
+    const n = aLines.length, m = bLines.length;
+    // dp LCS 表
+    const dp = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
+    for (let i = n - 1; i >= 0; i--) {
+      for (let j = m - 1; j >= 0; j--) {
+        dp[i][j] = aLines[i] === bLines[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+      }
+    }
+    // 回溯
+    const out = [];
+    let i = 0, j = 0;
+    while (i < n && j < m) {
+      if (aLines[i] === bLines[j]) { out.push({ type: 'ctx', text: aLines[i] }); i++; j++; }
+      else if (dp[i + 1][j] >= dp[i][j + 1]) { out.push({ type: 'del', text: aLines[i] }); i++; }
+      else { out.push({ type: 'add', text: bLines[j] }); j++; }
+    }
+    while (i < n) { out.push({ type: 'del', text: aLines[i++] }); }
+    while (j < m) { out.push({ type: 'add', text: bLines[j++] }); }
+    return out;
+  }
+
+  // 字符级 LCS（单行修改时使用，类似 git diff --word-diff）。
+  // 返回 [{type:'ctx'|'del'|'add', text:'...'}]，相邻同类型片段已合并。
+  // 性能保护：超过 maxLen 字符则不细分（直接退化成 del+add 两段）。
+  function computeCharDiff(a, b, maxLen) {
+    maxLen = maxLen == null ? 500 : maxLen;
+    if (a.length === 0) return b.length ? [{ type: 'add', text: b }] : [];
+    if (b.length === 0) return a.length ? [{ type: 'del', text: a }] : [];
+    if (a.length + b.length > maxLen) {
+      // 退化：整段作为 del+add
+      return [{ type: 'del', text: a }, { type: 'add', text: b }];
+    }
+    const n = a.length, m = b.length;
+    const dp = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
+    for (let i = n - 1; i >= 0; i--) {
+      for (let j = m - 1; j >= 0; j--) {
+        dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+      }
+    }
+    const out = [];
+    const push = (type, ch) => {
+      const last = out[out.length - 1];
+      if (last && last.type === type) last.text += ch;
+      else out.push({ type, text: ch });
+    };
+    let i = 0, j = 0;
+    while (i < n && j < m) {
+      if (a[i] === b[j]) { push('ctx', a[i]); i++; j++; }
+      else if (dp[i + 1][j] >= dp[i][j + 1]) { push('del', a[i]); i++; }
+      else { push('add', b[j]); j++; }
+    }
+    while (i < n) { push('del', a[i++]); }
+    while (j < m) { push('add', b[j++]); }
+    return out;
+  }
+
+  // 把字符级 diff 序列渲染成 inline <span>（红删除线 / 绿新增）。
+  function renderInlineDiffHtml(diff) {
+    if (!diff || diff.length === 0) {
+      return '<span class="sync-field-val empty">（空）</span>';
+    }
+    let html = '<span class="sync-field-val">';
+    for (const seg of diff) {
+      if (seg.type === 'ctx') html += `<span class="sync-inline-ctx">${escSync(seg.text)}</span>`;
+      else if (seg.type === 'del') html += `<span class="sync-inline-del">${escSync(seg.text)}</span>`;
+      else if (seg.type === 'add') html += `<span class="sync-inline-add">${escSync(seg.text)}</span>`;
+    }
+    html += '</span>';
+    return html;
+  }
+
+  // 把行级 diff 序列渲染成 git 风格的 <div class="sync-diff-block">。
+  // maxCtx: 当连续 ctx 行超过此值时折叠中间部分（类似 git --stat 不展开大段相同）。
+  function renderLineDiffHtml(diff, maxCtx) {
+    maxCtx = maxCtx == null ? 3 : maxCtx;
+    if (diff.length === 0) {
+      return '<div class="sync-diff-block"><div class="sync-diff-line empty-marker"><span class="content">（空）</span></div></div>';
+    }
+    // 折叠连续 ctx
+    const folded = [];
+    let i = 0;
+    while (i < diff.length) {
+      if (diff[i].type === 'ctx') {
+        let j = i;
+        while (j < diff.length && diff[j].type === 'ctx') j++;
+        const run = j - i;
+        if (run > maxCtx * 2 + 1) {
+          for (let k = 0; k < maxCtx; k++) folded.push(diff[i + k]);
+          folded.push({ type: 'ctx-fold', text: `…（省略 ${run - maxCtx * 2} 行相同）` });
+          for (let k = 0; k < maxCtx; k++) folded.push(diff[j - maxCtx + k]);
+        } else {
+          for (let k = i; k < j; k++) folded.push(diff[k]);
+        }
+        i = j;
+      } else {
+        folded.push(diff[i++]);
+      }
+    }
+    let html = '<div class="sync-diff-block">';
+    for (const line of folded) {
+      const sign = line.type === 'add' ? '+' : (line.type === 'del' ? '-' : ' ');
+      const cls = line.type === 'add' ? 'add' : (line.type === 'del' ? 'del' : (line.type === 'ctx-fold' ? 'empty-marker' : 'ctx'));
+      html += `<div class="sync-diff-line ${cls}"><span class="gutter">${sign}</span><span class="content">${escSync(line.text)}</span></div>`;
+    }
+    html += '</div>';
+    return html;
+  }
+
   // 渲染某条记录的字段级差异。source/target 任一可为 null。
+  // 同步语义：source 是"数据来源"（要写入的新内容），target 是"同步目标"（要被覆盖/删除的旧内容）。
+  // 用户视角：希望看到 target 一侧将发生的变化（"电脑/手机会被改成什么样"）。
+  // - modified（两侧都有）：用 git 风格行级 diff，`-` = target 旧版本要删的行，`+` = source 新版本要加的行。
+  // - added（只 source）：target 将新增 source 这部分内容 → 整块绿 `+`。
+  // - deleted（只 target）：target 将被删除这部分内容 → 整块红 `-`。
   function renderFieldDiff(source, target, fields) {
     const allKeys = fields.length ? fields : Array.from(new Set([
       ...Object.keys(source || {}),
@@ -345,24 +490,50 @@
       const tv = target ? target[k] : undefined;
       const sStr = displayVal(sv);
       const tStr = displayVal(tv);
-      const changed = (source && target) && (sStr !== tStr);
+      let cellHtml;
+      let rowCls = '';
+      if (source && target) {
+        // modified：target=旧版本, source=新版本
+        if (sStr === tStr) {
+          // 无变化，淡色显示一栏
+          rowCls = '';
+          cellHtml = `<span class="sync-field-val${sStr === '' ? ' empty' : ''}">${escSync(sStr) || '（空）'}</span>`;
+        } else {
+          rowCls = ' changed';
+          const hasNewline = sStr.indexOf('\n') !== -1 || tStr.indexOf('\n') !== -1;
+          if (!hasNewline) {
+            // 单行修改：用字符级 inline diff，避免整行红+整行绿看不出"加了哪几个字"
+            // a=旧版本(target), b=新版本(source) → 旧版本字符是 del，新版本字符是 add
+            const diff = computeCharDiff(tStr, sStr);
+            cellHtml = renderInlineDiffHtml(diff);
+          } else {
+            // 多行修改：用行级 diff，git 风格红/绿整行
+            // a=旧版本(target), b=新版本(source) → a 独有行是 del，b 独有行是 add
+            const diff = computeLineDiff(tStr, sStr);
+            cellHtml = renderLineDiffHtml(diff, 3);
+          }
+        }
+      } else if (source) {
+        // added：target 将新增 source 的内容，整块绿
+        rowCls = ' changed';
+        const lines = sStr.length === 0 ? [] : sStr.split('\n').map(t => ({ type: 'add', text: t }));
+        cellHtml = renderLineDiffHtml(lines, 9999);
+      } else if (target) {
+        // deleted：target 将删除这部分内容，整块红
+        rowCls = ' changed';
+        const lines = tStr.length === 0 ? [] : tStr.split('\n').map(t => ({ type: 'del', text: t }));
+        cellHtml = renderLineDiffHtml(lines, 9999);
+      } else {
+        cellHtml = '<span class="sync-field-val empty">（空）</span>';
+      }
       rows += `
-        <div class="sync-field-row${changed ? ' changed' : ''}">
+        <div class="sync-field-row${rowCls}">
           <span class="sync-field-name">${escSync(k)}</span>
-          <span class="sync-field-val${source && (sv == null || sStr === '') ? ' empty' : ''}">${escSync(sStr)}</span>
-          <span class="sync-field-arrow">→</span>
-          <span class="sync-field-val${target && (tv == null || tStr === '') ? ' empty' : ''}">${escSync(tStr)}</span>
+          <span class="sync-field-cell">${cellHtml}</span>
         </div>`;
     }
     if (!rows) return '<div class="sync-detail-panel-empty">无字段可显示</div>';
-    const sides = `
-      <div style="display:grid;grid-template-columns:78px 1fr 12px 1fr;gap:6px;margin-bottom:6px;">
-        <span></span>
-        <span class="sync-field-side">${source ? '源端' : '—'}</span>
-        <span></span>
-        <span class="sync-field-side">${target ? '目标' : '—'}</span>
-      </div>`;
-    return sides + rows;
+    return rows;
   }
 
   // 选中某个 chip 时把详情面板内容填进去。
