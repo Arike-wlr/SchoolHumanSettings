@@ -97,7 +97,7 @@ body.home-active { background: linear-gradient(180deg, #3d2b1f 0%, #5a3e2b 40%, 
 #view-home .brand .app-icon img { width: 100%; height: 100%; object-fit: cover; }
 #view-home .brand h1 { font-family: var(--font-serif); font-size: 1.4rem; color: #f5ede4; font-weight: 500; letter-spacing: .06em; }
 #view-home .brand .subtitle { font-size: .72rem; color: rgba(245,237,228,.55); margin-top: 4px; }
-#view-home .cards { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; padding: 24px 18px; width: 100%; max-width: 420px; flex: 1; }
+#view-home .cards { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; padding: 24px 18px; width: 100%; max-width: 420px; margin: 0 auto; flex: 1; }
 #view-home .card { background: #fffef9; border-radius: 14px; padding: 24px 14px 18px; text-align: center; text-decoration: none; color: var(--text); box-shadow: 0 2px 16px rgba(60,40,20,.07); transition: transform .18s, box-shadow .18s; display: flex; flex-direction: column; align-items: center; position: relative; overflow: hidden; cursor: pointer; }
 #view-home .card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; opacity: .7; }
 #view-home .card:nth-child(1)::before { background: #c49a6c; }

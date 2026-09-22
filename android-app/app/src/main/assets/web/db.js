@@ -16,6 +16,7 @@ const STORES = {
 const SERVER_KEY = 'sync_server_url';  // 服务器地址存储 key
 
 let _db = null;
+let _dbOpen = null;   // 进行中的打开请求（并发调用共享，避免同时 open 互锁）
 
 // ===== 数据持久化加固 =====
 // 1) 请求"持久化存储"权限：在 Android WebView 中标记为持久后，
@@ -42,13 +43,50 @@ document.addEventListener('visibilitychange', function () {
   }
 });
 
+// 连接生命周期自愈。
+// Android WebView 在页面切后台被系统回收、存储被清理、渲染进程重启时，会把 IndexedDB
+// 连接强制关闭；但 JS 里缓存的 _db 仍指向那个"正在关闭"的对象，之后任何
+// db.transaction() 都会抛：
+//   InvalidStateError: The database connection is closing.
+// 同步预览（getSyncDiff）一路走到这里，表现就是"获取差异失败"。
+// 接手 onclose / onversionchange 及时作废缓存，下一次访问就会重新打开连接。
+function watchDBConnection(db) {
+  db.onclose = function () { if (_db === db) _db = null; };
+  db.onversionchange = function () {
+    // 别的上下文（第二个 WebView / 标签页）要以更高版本打开：让路并作废缓存。
+    try { db.close(); } catch (e) { /* ignore */ }
+    if (_db === db) _db = null;
+  };
+}
+
+// 缓存的连接还活着吗？用一个空只读事务探一下。
+// 事务不挂任何请求，提交时零 IO，开销可忽略；但能在真正干活前就揪出"僵尸连接"。
+function isDBUsable(db) {
+  if (!db) return false;
+  try {
+    db.transaction(STORES.characters, 'readonly');
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
 // 打开数据库
 function openDB() {
-  return new Promise((resolve, reject) => {
-    if (_db) { resolve(_db); return; }
+  if (_db && isDBUsable(_db)) return Promise.resolve(_db);
+  _db = null;                                 // 僵尸连接：丢弃，重开
+  if (_dbOpen) return _dbOpen;                // 复用在途的打开请求
+  _dbOpen = new Promise((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
-    req.onerror = () => reject(req.error);
-    req.onsuccess = () => { _db = req.result; resolve(_db); };
+    req.onerror = () => { _dbOpen = null; reject(req.error); };
+    req.onblocked = () => { /* 旧连接会因 onversionchange 让路，这里继续等即可 */ };
+    req.onsuccess = () => {
+      const db = req.result;
+      watchDBConnection(db);
+      _db = db;
+      _dbOpen = null;
+      resolve(db);
+    };
     req.onupgradeneeded = (e) => {
       const db = e.target.result;
       if (!db.objectStoreNames.contains(STORES.characters)) {
