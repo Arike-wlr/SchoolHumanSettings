@@ -186,11 +186,13 @@ function navigateTo(name) {
     });
   }
 
+  // home 是静态视图，没有对应的 VM 模块，这里必须容错：
+  // 否则每次返回首页都会抛 "Cannot read properties of undefined (reading 'refresh')"。
   if (!viewInited[name]) {
     viewInited[name] = true;
-    VM[name].init();
-  } else {
-    if (VM[name].refresh) VM[name].refresh();
+    if (VM[name] && VM[name].init) VM[name].init();
+  } else if (VM[name] && VM[name].refresh) {
+    VM[name].refresh();
   }
 }
 
