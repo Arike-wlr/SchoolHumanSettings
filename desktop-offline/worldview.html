@@ -4,6 +4,17 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>世界观设定 · 高校拟人OC</title>
+<script>
+// 防闪烁：尽早应用主题
+(function(){
+  try {
+    var t = localStorage.getItem('oc-theme');
+    if (t === 'dark' || (!t && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+      document.documentElement.setAttribute('data-theme', 'dark');
+    }
+  } catch(e) {}
+})();
+</script>
 <style>
   /* ====== 全局 ====== */
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -26,6 +37,39 @@
     --font-serif: 'Georgia', 'Noto Serif SC', 'SimSun', serif;
     --font-sans: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
     --transition: 0.25s cubic-bezier(.4,0,.2,1);
+    --input-bg: #fefdf9;
+    --input-bg-2: #eef5f2;
+    --hairline: #e6efe9;
+    --title-color: var(--title-color);
+    --body-glow-1: rgba(107,168,138,.06);
+    --body-glow-2: rgba(61,107,88,.05);
+  }
+
+  /* ====== 深色主题 ====== */
+  html[data-theme="dark"] {
+    --bg: #121a16;
+    --card-bg: #1b2620;
+    --text: #dcece2;
+    --text-light: #8ba596;
+    --accent: #6ba88a;
+    --accent-light: #8cc4a5;
+    --accent-pale: #223029;
+    --danger: #e07060;
+    --danger-bg: #33231f;
+    --border: #2d3d35;
+    --shadow: 0 2px 16px rgba(0,0,0,.4);
+    --shadow-lg: 0 8px 40px rgba(0,0,0,.5);
+    --input-bg: #141d18;
+    --input-bg-2: #1f2b24;
+    --hairline: #2a3931;
+    --title-color: #dcece2;
+    --body-glow-1: rgba(107,168,138,.05);
+    --body-glow-2: rgba(61,107,88,.04);
+    color-scheme: dark;
+  }
+
+  html[data-theme="dark"] .header {
+    background: linear-gradient(135deg, #0d1512 0%, #14201a 50%, #1c2c23 100%);
   }
 
   body {
@@ -34,9 +78,27 @@
     color: var(--text);
     min-height: 100vh;
     background-image:
-      radial-gradient(ellipse at 20% 10%, rgba(107,168,138,.06) 0%, transparent 60%),
-      radial-gradient(ellipse at 80% 90%, rgba(61,107,88,.05) 0%, transparent 60%);
+      radial-gradient(ellipse at 20% 10%, var(--body-glow-1) 0%, transparent 60%),
+      radial-gradient(ellipse at 80% 90%, var(--body-glow-2) 0%, transparent 60%);
   }
+
+  /* 主题切换按钮 */
+  .theme-toggle {
+    background: rgba(255,255,255,.08);
+    color: #e8f5ee;
+    border: 1px solid rgba(255,255,255,.15);
+    border-radius: 20px;
+    padding: 6px 14px;
+    font-size: .78rem;
+    cursor: pointer;
+    font-family: var(--font-sans);
+    transition: var(--transition);
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .theme-toggle:hover { background: rgba(255,255,255,.16); }
+  .theme-toggle .theme-toggle-icon { font-size: .95rem; line-height: 1; }
 
   /* ====== Header ====== */
   .header {
@@ -264,7 +326,7 @@
   .card-header .title {
     font-family: var(--font-serif);
     font-size: 1.25rem; font-weight: 700;
-    color: #1f352b; letter-spacing: .04em;
+    color: var(--title-color); letter-spacing: .04em;
   }
   .cat-tag {
     font-size: .73rem; color: var(--accent); background: var(--accent-pale);
@@ -298,7 +360,7 @@
   .card:hover .card-more { opacity: 1; }
 
   .card-footer {
-    display: flex; gap: 8px; padding: 10px 22px 16px; border-top: 1px solid #e6efe9;
+    display: flex; gap: 8px; padding: 10px 22px 16px; border-top: 1px solid var(--hairline);
   }
 
   /* ====== 空状态 ====== */
@@ -330,10 +392,10 @@
     position: sticky; top: 0; background: var(--card-bg); z-index: 2;
   }
   .modal-header h2 {
-    font-family: var(--font-serif); font-size: 1.3rem; font-weight: 600; color: #1f352b;
+    font-family: var(--font-serif); font-size: 1.3rem; font-weight: 600; color: var(--title-color);
   }
   .modal-close {
-    width: 34px; height: 34px; border: none; background: #eef5f2;
+    width: 34px; height: 34px; border: none; background: var(--input-bg-2);
     border-radius: 50%; cursor: pointer; font-size: 1.1rem; color: var(--text-light);
     display: flex; align-items: center; justify-content: center; transition: var(--transition);
   }
@@ -349,7 +411,7 @@
   .form-group input, .form-group textarea, .form-group select {
     width: 100%; padding: 10px 14px; border: 1.5px solid var(--border);
     border-radius: var(--radius-sm); font-size: .92rem; font-family: var(--font-sans);
-    background: #fefdf9; color: var(--text); transition: var(--transition); resize: vertical;
+    background: var(--input-bg); color: var(--text); transition: var(--transition); resize: vertical;
   }
   .form-group input:focus, .form-group textarea:focus, .form-group select:focus {
     outline: none; border-color: var(--accent-light); box-shadow: 0 0 0 3px rgba(107,168,138,.12);
@@ -383,10 +445,10 @@
     position: sticky; top: 0; background: var(--card-bg); z-index: 2;
   }
   .detail-header h2 {
-    font-family: var(--font-serif); font-size: 1.3rem; font-weight: 600; color: #1f352b;
+    font-family: var(--font-serif); font-size: 1.3rem; font-weight: 600; color: var(--title-color);
   }
   .detail-close {
-    width: 34px; height: 34px; border: none; background: #eef5f2;
+    width: 34px; height: 34px; border: none; background: var(--input-bg-2);
     border-radius: 50%; cursor: pointer; font-size: 1.1rem; color: var(--text-light);
     display: flex; align-items: center; justify-content: center; transition: var(--transition);
     flex-shrink: 0;
@@ -408,7 +470,7 @@
 
   .detail-footer {
     padding: 14px 28px 18px; display: flex; justify-content: flex-end;
-    gap: 10px; border-top: 1px solid #e6efe9;
+    gap: 10px; border-top: 1px solid var(--hairline);
     position: sticky; bottom: 0; background: var(--card-bg); z-index: 3;
   }
 
@@ -451,7 +513,9 @@
     </a>
   </nav>
   <div class="sidebar-footer">
-    <span style="font-size:.75rem;opacity:.5;">高校拟人OC</span>
+    <button class="theme-toggle" onclick="toggleTheme()" title="切换深色/浅色模式">
+      <span class="theme-toggle-icon" id="themeIcon">🌙</span><span id="themeLabel">深色</span>
+    </button>
   </div>
 </aside>
 
@@ -564,7 +628,7 @@
 </div>
 
 <!-- ====== 详情查看 Modal ====== -->
-<div class="detail-overlay" id="detailOverlay">
+<div class="detail-overlay" id="detailOverlay" data-copy>
   <div class="detail-modal">
     <div class="detail-header">
       <div style="display:flex;align-items:center;flex-wrap:wrap;gap:10px;">
@@ -584,6 +648,23 @@
 <div class="toast" id="toast"></div>
 
 <script>
+// ====== 主题切换 ======
+function applyTheme(theme) {
+  const html = document.documentElement;
+  if (theme === 'dark') html.setAttribute('data-theme', 'dark');
+  else html.removeAttribute('data-theme');
+  const icon = document.getElementById('themeIcon');
+  const label = document.getElementById('themeLabel');
+  if (icon) icon.textContent = theme === 'dark' ? '☀️' : '🌙';
+  if (label) label.textContent = theme === 'dark' ? '浅色' : '深色';
+}
+function toggleTheme() {
+  const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+  const next = isDark ? 'light' : 'dark';
+  try { localStorage.setItem('oc-theme', next); } catch(e) {}
+  applyTheme(next);
+}
+
 const API = '/api/world-buildings';
 const MAIN_CATS = ['意识体世界设定', '人物背景故事'];
 let allEntries = [];
@@ -1129,7 +1210,18 @@ document.addEventListener('keydown', function(e) {
 </div><!-- /main-content -->
 </div><!-- /app-layout -->
 
-<script>function toggleSidebar(){document.getElementById('sidebar').classList.toggle('collapsed');}</script>
+<script>function toggleSidebar(){document.getElementById('sidebar').classList.toggle('collapsed');}
+// 初始化主题按钮状态
+applyTheme(document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light');
+// 全局搜索跳转定位：/worldview?wb=ID → 打开设定详情
+(function () {
+  const gsWb = new URLSearchParams(location.search).get('wb');
+  if (gsWb) setTimeout(() => openDetailModal(parseInt(gsWb, 10)), 350);
+})();
+</script>
+<script src="search.js"></script>
+<script src="export-all.js"></script>
+<script src="copy-detail.js"></script>
 
 </body>
 </html>

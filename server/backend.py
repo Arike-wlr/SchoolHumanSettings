@@ -1126,6 +1126,156 @@ def delete_file(fname: str):
 
 
 # ============================================================
+# 全局搜索 API
+# ============================================================
+
+SEARCH_SNIPPET_BEFORE = 18   # 匹配点前保留的字符数
+SEARCH_SNIPPET_AFTER = 30    # 匹配点后保留的字符数
+SEARCH_MAX_PER_GROUP = 20    # 每组最多返回条数
+
+
+def _make_snippet(text: str, q_lower: str, q_len: int) -> str:
+    """生成匹配片段：匹配点前后各留若干字符，首尾加省略号"""
+    if not text:
+        return ""
+    flat = " ".join(str(text).split())  # 压平换行/连续空白
+    pos = flat.lower().find(q_lower)
+    if pos < 0:
+        flat = flat[:SEARCH_SNIPPET_BEFORE + SEARCH_SNIPPET_AFTER]
+        return flat + ("…" if len(flat) >= SEARCH_SNIPPET_BEFORE + SEARCH_SNIPPET_AFTER else "")
+    start = max(0, pos - SEARCH_SNIPPET_BEFORE)
+    end = min(len(flat), pos + q_len + SEARCH_SNIPPET_AFTER)
+    return ("…" if start > 0 else "") + flat[start:end] + ("…" if end < len(flat) else "")
+
+
+@app.get("/api/search")
+def global_search(q: str = ""):
+    """全局搜索：角色 / 世界设定 / 关系 / 文档（含 txt、md 正文）"""
+    q = (q or "").strip()
+    empty = {"characters": [], "worldview": [], "relations": [], "documents": []}
+    if not q:
+        return empty
+    like = f"%{q}%"
+    q_lower = q.lower()
+    conn = get_db()
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+
+    # ---- 角色 ----
+    characters = []
+    try:
+        cursor.execute(
+            """SELECT * FROM characters
+               WHERE name LIKE ? OR university LIKE ? OR region LIKE ? OR naming_rationale LIKE ?
+                  OR appearance LIKE ? OR setting LIKE ? OR birthplace LIKE ? OR family LIKE ?
+                  OR birthday LIKE ? OR gender LIKE ? OR status LIKE ?
+               ORDER BY sort_order ASC, id ASC""",
+            (like, like, like, like, like, like, like, like, like, like, like),
+        )
+        for row in cursor.fetchall()[:SEARCH_MAX_PER_GROUP]:
+            c = char_to_dict(row)
+            # 找出命中的字段，生成片段
+            snippet = ""
+            matched_field = ""
+            for field in ["name", "university", "region", "naming_rationale", "appearance",
+                          "setting", "birthplace", "family", "birthday", "gender", "status"]:
+                val = str(c.get(field) or "")
+                if q_lower in val.lower():
+                    matched_field = field
+                    if not snippet:
+                        snippet = _make_snippet(val, q_lower, len(q))
+                        if field != "name":
+                            break
+            characters.append({
+                "id": c["id"], "name": c["name"], "university": c["university"],
+                "region": c["region"], "gender": c.get("gender", ""),
+                "image_url": c.get("image_url", ""),
+                "matched_field": matched_field, "snippet": snippet,
+            })
+    except Exception as e:
+        print(f"[search] characters error: {e}")
+
+    # ---- 世界设定 ----
+    worldview = []
+    try:
+        cursor.execute(
+            """SELECT * FROM world_buildings
+               WHERE title LIKE ? OR category LIKE ? OR main_category LIKE ? OR content LIKE ?
+               ORDER BY sort_order ASC, id ASC""",
+            (like, like, like, like),
+        )
+        for row in cursor.fetchall()[:SEARCH_MAX_PER_GROUP]:
+            w = dict(row)
+            snippet = _make_snippet(w.get("content") or "", q_lower, len(q))
+            if not snippet:
+                snippet = _make_snippet(w.get("category") or "", q_lower, len(q))
+            worldview.append({
+                "id": w["id"], "title": w["title"], "category": w.get("category", ""),
+                "main_category": w.get("main_category", ""), "snippet": snippet,
+            })
+    except Exception as e:
+        print(f"[search] worldview error: {e}")
+
+    # ---- 关系 ----
+    relations = []
+    try:
+        cursor.execute(
+            """SELECT r.*, c1.name AS from_name, c2.name AS to_name
+               FROM relations r
+               LEFT JOIN characters c1 ON r.from_char_id = c1.id
+               LEFT JOIN characters c2 ON r.to_char_id = c2.id
+               WHERE r.relation_type LIKE ? OR r.description LIKE ?
+                  OR c1.name LIKE ? OR c2.name LIKE ?
+               ORDER BY r.sort_order ASC, r.id ASC""",
+            (like, like, like, like),
+        )
+        for row in cursor.fetchall()[:SEARCH_MAX_PER_GROUP]:
+            r = dict(row)
+            snippet = _make_snippet(r.get("description") or "", q_lower, len(q))
+            relations.append({
+                "id": r["id"], "from_name": r.get("from_name") or "", "to_name": r.get("to_name") or "",
+                "relation_type": r.get("relation_type") or "", "snippet": snippet,
+            })
+    except Exception as e:
+        print(f"[search] relations error: {e}")
+
+    # ---- 文档（文件名 + txt/md 正文）----
+    documents = []
+    try:
+        if os.path.exists(UPLOAD_DIR):
+            for fname in os.listdir(UPLOAD_DIR):
+                fpath = os.path.join(UPLOAD_DIR, fname)
+                if not os.path.isfile(fpath):
+                    continue
+                ext = os.path.splitext(fname)[1].lower()
+                snippet = ""
+                # txt/md 搜正文（限制 2MB 以内，避免大文件拖慢）
+                if ext in (".txt", ".md") and os.path.getsize(fpath) < 2 * 1024 * 1024:
+                    try:
+                        with open(fpath, "r", encoding="utf-8", errors="replace") as f:
+                            content = f.read()
+                        if q_lower in content.lower():
+                            snippet = _make_snippet(content, q_lower, len(q))
+                    except Exception:
+                        pass
+                if q_lower in fname.lower() or snippet:
+                    stat = os.stat(fpath)
+                    documents.append({
+                        "name": fname,
+                        "size_display": format_size(stat.st_size),
+                        "modified": datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M"),
+                        "snippet": snippet,
+                    })
+                if len(documents) >= SEARCH_MAX_PER_GROUP:
+                    break
+    except Exception as e:
+        print(f"[search] documents error: {e}")
+
+    conn.close()
+    return {"characters": characters, "worldview": worldview, "relations": relations, "documents": documents}
+
+
+# ============================================================
 # 数据同步 API（供手机端上传/下载全量数据）
 # ============================================================
 from pydantic import BaseModel as PydanticModel
@@ -1203,6 +1353,21 @@ def serve_relations():
 @app.get("/")
 def serve_index():
     return FileResponse(os.path.join(DESKTOP_DIR, "index.html"))
+
+
+@app.get("/search.js")
+def serve_search_js():
+    return FileResponse(os.path.join(DESKTOP_DIR, "search.js"), media_type="application/javascript")
+
+
+@app.get("/export-all.js")
+def serve_export_all_js():
+    return FileResponse(os.path.join(DESKTOP_DIR, "export-all.js"), media_type="application/javascript")
+
+
+@app.get("/copy-detail.js")
+def serve_copy_detail_js():
+    return FileResponse(os.path.join(DESKTOP_DIR, "copy-detail.js"), media_type="application/javascript")
 
 
 # ============================================================

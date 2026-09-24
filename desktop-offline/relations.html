@@ -4,6 +4,17 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>关系网 · 高校拟人OC</title>
+<script>
+// 防闪烁：尽早应用主题
+(function(){
+  try {
+    var t = localStorage.getItem('oc-theme');
+    if (t === 'dark' || (!t && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+      document.documentElement.setAttribute('data-theme', 'dark');
+    }
+  } catch(e) {}
+})();
+</script>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -25,7 +36,45 @@
     --font-serif: 'Georgia', 'Noto Serif SC', 'SimSun', serif;
     --font-sans: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
     --transition: 0.25s cubic-bezier(.4,0,.2,1);
+    --input-bg: #fefdf9;
+    --canvas-from: #faf8f6;
+    --canvas-to: #ece5dd;
+    --canvas-label-bg: #ffffff;
+    --canvas-grid: #e8e0d5;
+    --body-glow-1: rgba(155,126,196,.05);
+    --body-glow-2: rgba(107,76,138,.04);
   }
+
+  /* ====== 深色主题 ====== */
+  html[data-theme="dark"] {
+    --bg: #1a1720;
+    --card-bg: #241f2c;
+    --text: #e8e0f0;
+    --text-light: #a396b5;
+    --accent: #9b7ec4;
+    --accent-light: #b79dda;
+    --accent-pale: #322a3d;
+    --danger: #e07060;
+    --danger-bg: #39242e;
+    --border: #3a3346;
+    --shadow: 0 2px 16px rgba(0,0,0,.4);
+    --shadow-lg: 0 8px 40px rgba(0,0,0,.5);
+    --input-bg: #1d1924;
+    --canvas-from: #1a1720;
+    --canvas-to: #12101a;
+    --canvas-label-bg: #2a2436;
+    --canvas-grid: #322b3e;
+    --body-glow-1: rgba(155,126,196,.05);
+    --body-glow-2: rgba(107,76,138,.04);
+    color-scheme: dark;
+  }
+
+  html[data-theme="dark"] .header {
+    background: linear-gradient(135deg, #12101a 0%, #1d1826 40%, #2a2038 100%);
+  }
+
+  html[data-theme="dark"] .modal-close { background: #332c3d; }
+  html[data-theme="dark"] .modal-close:hover { background: #443a52; }
 
   body {
     font-family: var(--font-sans);
@@ -33,9 +82,27 @@
     color: var(--text);
     min-height: 100vh;
     background-image:
-      radial-gradient(ellipse at 20% 10%, rgba(155,126,196,.05) 0%, transparent 60%),
-      radial-gradient(ellipse at 80% 90%, rgba(107,76,138,.04) 0%, transparent 60%);
+      radial-gradient(ellipse at 20% 10%, var(--body-glow-1) 0%, transparent 60%),
+      radial-gradient(ellipse at 80% 90%, var(--body-glow-2) 0%, transparent 60%);
   }
+
+  /* 主题切换按钮 */
+  .theme-toggle {
+    background: rgba(255,255,255,.08);
+    color: #f0e8f8;
+    border: 1px solid rgba(255,255,255,.15);
+    border-radius: 20px;
+    padding: 6px 14px;
+    font-size: .78rem;
+    cursor: pointer;
+    font-family: var(--font-sans);
+    transition: var(--transition);
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .theme-toggle:hover { background: rgba(255,255,255,.16); }
+  .theme-toggle .theme-toggle-icon { font-size: .95rem; line-height: 1; }
 
   /* ====== Header ====== */
   .header {
@@ -136,7 +203,7 @@
     position: relative;
     width: 100%;
     height: 480px;
-    background: radial-gradient(ellipse at center, #faf8f6 0%, #ece5dd 100%);
+    background: radial-gradient(ellipse at center, var(--canvas-from) 0%, var(--canvas-to) 100%);
   }
   .graph-canvas-wrap canvas {
     display: block;
@@ -256,7 +323,7 @@
     position: sticky; top: 0; background: var(--card-bg); z-index: 2;
   }
   .modal-header h2 {
-    font-family: var(--font-serif); font-size: 1.2rem; font-weight: 600; color: #3d2b1f;
+    font-family: var(--font-serif); font-size: 1.2rem; font-weight: 600; color: var(--text);
   }
   .modal-close {
     width: 32px; height: 32px; border: none; background: #f5f0eb;
@@ -273,7 +340,7 @@
   .form-group select, .form-group input, .form-group textarea {
     width: 100%; padding: 9px 12px; border: 1.5px solid var(--border);
     border-radius: var(--radius-sm); font-size: .9rem; font-family: var(--font-sans);
-    background: #fefdf9; color: var(--text); transition: var(--transition); resize: vertical;
+    background: var(--input-bg); color: var(--text); transition: var(--transition); resize: vertical;
   }
   .form-group select:focus, .form-group input:focus, .form-group textarea:focus {
     outline: none; border-color: var(--accent-light); box-shadow: 0 0 0 3px rgba(155,126,196,.12);
@@ -282,7 +349,7 @@
   .char-search {
     width: 100%; padding: 9px 12px; border: 1.5px solid var(--border);
     border-radius: var(--radius-sm); font-size: .9rem; font-family: var(--font-sans);
-    background: #fefdf9; color: var(--text); transition: var(--transition);
+    background: var(--input-bg); color: var(--text); transition: var(--transition);
     margin-bottom: 4px;
   }
   .char-search:focus { outline: none; border-color: var(--accent-light); box-shadow: 0 0 0 3px rgba(155,126,196,.12); }
@@ -362,7 +429,9 @@
     </a>
   </nav>
   <div class="sidebar-footer">
-    <span style="font-size:.75rem;opacity:.5;">高校拟人OC</span>
+    <button class="theme-toggle" onclick="toggleTheme()" title="切换深色/浅色模式">
+      <span class="theme-toggle-icon" id="themeIcon">🌙</span><span id="themeLabel">深色</span>
+    </button>
   </div>
 </aside>
 
@@ -434,7 +503,7 @@
 </div><!-- /app-layout -->
 
 <!-- ====== 添加/编辑关系 Modal ====== -->
-<div class="modal-overlay" id="modalOverlay">
+<div class="modal-overlay" id="modalOverlay" data-copy>
   <div class="modal">
     <div class="modal-header">
       <h2 id="modalTitle">添加关系</h2>
@@ -499,7 +568,7 @@
 </div>
 
 <!-- ====== 角色信息 Modal ====== -->
-<div class="modal-overlay" id="infoOverlay">
+<div class="modal-overlay" id="infoOverlay" data-copy>
   <div class="modal" style="max-width:520px;">
     <div class="modal-header">
       <h2 id="infoName"></h2>
@@ -531,6 +600,29 @@
 </div>
 
 <script>
+// ====== 主题切换 ======
+function applyTheme(theme) {
+  const html = document.documentElement;
+  if (theme === 'dark') html.setAttribute('data-theme', 'dark');
+  else html.removeAttribute('data-theme');
+  const icon = document.getElementById('themeIcon');
+  const label = document.getElementById('themeLabel');
+  if (icon) icon.textContent = theme === 'dark' ? '☀️' : '🌙';
+  if (label) label.textContent = theme === 'dark' ? '浅色' : '深色';
+}
+function toggleTheme() {
+  const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+  const next = isDark ? 'light' : 'dark';
+  try { localStorage.setItem('oc-theme', next); } catch(e) {}
+  applyTheme(next);
+  if (typeof drawGraph === 'function' && allCharacters.length) { try { drawGraph(); } catch(e) {} }
+}
+// 读取当前主题的 CSS 变量值（用于 canvas 绘制）
+function themeVar(name, fallback) {
+  const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  return v || fallback;
+}
+
 const API_REL = '/api/relations';
 const API_CHAR = '/api/characters';
 let allRelations = [];
@@ -566,7 +658,19 @@ const pinnedPos = new Map();  // id → {x, y} 手动拖动过的节点位置
 let canvas, ctx, cw, ch;
 
 document.addEventListener('DOMContentLoaded', () => {
-  loadData();
+  applyTheme(document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light');
+  loadData().then(() => {
+    // 全局搜索跳转定位：/relations?rel=ID → 滚动到该关系并高亮
+    const gsRel = new URLSearchParams(location.search).get('rel');
+    if (gsRel) {
+      const el = document.getElementById('rel-' + gsRel);
+      if (el) {
+        el.scrollIntoView({ block: 'center' });
+        el.classList.add('highlight');
+        setTimeout(() => el.classList.remove('highlight'), 4000);
+      }
+    }
+  });
 });
 
 async function loadData() {
@@ -1127,7 +1231,7 @@ function drawGraph() {
   ctx.clearRect(0, 0, cw, ch);
 
   // 背景网格
-  ctx.strokeStyle = '#e8e0d5';
+  ctx.strokeStyle = themeVar('--canvas-grid', '#e8e0d5');
   ctx.lineWidth = 0.5;
   const gs = 40;
   for (let x = gs; x < cw; x += gs) {
@@ -1170,7 +1274,7 @@ function drawGraph() {
     else labelColor = '#6b4c8a';
     ctx.font = '12px "PingFang SC","Microsoft YaHei",sans-serif';
     const tw = ctx.measureText(label).width + 8;
-    ctx.fillStyle = '#fff';
+    ctx.fillStyle = themeVar('--canvas-label-bg', '#fff');
     ctx.fillRect(lx - tw/2, ly - 9, tw, 18);
     ctx.strokeStyle = labelColor + '55';
     ctx.lineWidth = 1;
@@ -1563,7 +1667,7 @@ function drawGraphWithHighlight() {
   ctx.clearRect(0, 0, cw, ch);
 
   // 背景网格
-  ctx.strokeStyle = '#e8e0d5'; ctx.lineWidth = 0.5;
+  ctx.strokeStyle = themeVar('--canvas-grid', '#e8e0d5'); ctx.lineWidth = 0.5;
   for (let x = 40; x < cw; x += 40) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, ch); ctx.stroke(); }
   for (let y = 40; y < ch; y += 40) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(cw, y); ctx.stroke(); }
 
@@ -1596,7 +1700,7 @@ function drawGraphWithHighlight() {
     else if (edge.type === '亲属') labelColor = '#2ecc71';
     else labelColor = '#6b4c8a';
     const tw = ctx.measureText(label).width + 8;
-    ctx.fillStyle = hl ? '#f0e8f8' : '#fff';
+    ctx.fillStyle = hl ? themeVar('--accent-pale','#f0e8f8') : themeVar('--canvas-label-bg','#fff');
     ctx.fillRect(lx - tw/2, ly - 9, tw, 18);
     ctx.strokeStyle = hl ? labelColor + '99' : labelColor + '55';
     ctx.lineWidth = 1;
@@ -2022,6 +2126,9 @@ document.getElementById('familyOverlay').addEventListener('click', function(e) {
 
 function toggleSidebar(){document.getElementById('sidebar').classList.toggle('collapsed');}
 </script>
+<script src="search.js"></script>
+<script src="export-all.js"></script>
+<script src="copy-detail.js"></script>
 
 </body>
 </html>

@@ -4,6 +4,17 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>文档管理 · 高校拟人OC</title>
+<script>
+// 防闪烁：尽早应用主题
+(function(){
+  try {
+    var t = localStorage.getItem('oc-theme');
+    if (t === 'dark' || (!t && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+      document.documentElement.setAttribute('data-theme', 'dark');
+    }
+  } catch(e) {}
+})();
+</script>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -25,7 +36,35 @@
     --font-serif: 'Georgia', 'Noto Serif SC', 'SimSun', serif;
     --font-sans: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
     --transition: 0.25s cubic-bezier(.4,0,.2,1);
+    --body-glow-1: rgba(168,148,126,.06);
+    --body-glow-2: rgba(107,90,78,.04);
   }
+
+  /* ====== 深色主题 ====== */
+  html[data-theme="dark"] {
+    --bg: #1a1714;
+    --card-bg: #242019;
+    --text: #ece3d8;
+    --text-light: #a8988a;
+    --accent: #b8a48e;
+    --accent-light: #cbb99f;
+    --accent-pale: #322a22;
+    --danger: #e07060;
+    --danger-bg: #392420;
+    --border: #3d352c;
+    --shadow: 0 2px 16px rgba(0,0,0,.4);
+    --shadow-lg: 0 8px 40px rgba(0,0,0,.5);
+    --body-glow-1: rgba(168,148,126,.04);
+    --body-glow-2: rgba(107,90,78,.03);
+    color-scheme: dark;
+  }
+
+  html[data-theme="dark"] .header {
+    background: linear-gradient(135deg, #100e0c 0%, #1c1814 40%, #28221b 100%);
+  }
+
+  html[data-theme="dark"] .viewer-close { background: #332c25; }
+  html[data-theme="dark"] .viewer-close:hover { background: #443a31; }
 
   body {
     font-family: var(--font-sans);
@@ -33,9 +72,27 @@
     color: var(--text);
     min-height: 100vh;
     background-image:
-      radial-gradient(ellipse at 20% 10%, rgba(168,148,126,.06) 0%, transparent 60%),
-      radial-gradient(ellipse at 80% 90%, rgba(107,90,78,.04) 0%, transparent 60%);
+      radial-gradient(ellipse at 20% 10%, var(--body-glow-1) 0%, transparent 60%),
+      radial-gradient(ellipse at 80% 90%, var(--body-glow-2) 0%, transparent 60%);
   }
+
+  /* 主题切换按钮 */
+  .theme-toggle {
+    background: rgba(255,255,255,.08);
+    color: #f5ede4;
+    border: 1px solid rgba(255,255,255,.15);
+    border-radius: 20px;
+    padding: 6px 14px;
+    font-size: .78rem;
+    cursor: pointer;
+    font-family: var(--font-sans);
+    transition: var(--transition);
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .theme-toggle:hover { background: rgba(255,255,255,.16); }
+  .theme-toggle .theme-toggle-icon { font-size: .95rem; line-height: 1; }
 
   /* ====== Header ====== */
   .header {
@@ -237,7 +294,7 @@
     padding: 20px 24px 0;
   }
   .modal-header h2 {
-    font-family: var(--font-serif); font-size: 1.25rem; font-weight: 600; color: #3d2b1f;
+    font-family: var(--font-serif); font-size: 1.25rem; font-weight: 600; color: var(--text);
   }
   .modal-body { padding: 20px 24px; font-size: .95rem; }
   .modal-body strong { color: var(--danger); }
@@ -283,7 +340,7 @@
   }
   .viewer-header h2 {
     font-family: var(--font-serif); font-size: 1.15rem; font-weight: 600;
-    color: #3d2b1f; margin: 0;
+    color: var(--text); margin: 0;
   }
   .viewer-header .header-info {
     display: flex; align-items: center; gap: 10px;
@@ -307,7 +364,7 @@
     color: var(--text);
   }
   .viewer-body .doc-heading {
-    font-size: 1.25rem; font-weight: 700; color: #3d2b1f;
+    font-size: 1.25rem; font-weight: 700; color: var(--text);
     margin: 1.5em 0 .5em; line-height: 1.5;
   }
   .viewer-body .doc-heading:first-child { margin-top: 0; }
@@ -367,7 +424,9 @@
     </a>
   </nav>
   <div class="sidebar-footer">
-    <span style="font-size:.75rem;opacity:.5;">高校拟人OC</span>
+    <button class="theme-toggle" onclick="toggleTheme()" title="切换深色/浅色模式">
+      <span class="theme-toggle-icon" id="themeIcon">🌙</span><span id="themeLabel">深色</span>
+    </button>
   </div>
 </aside>
 
@@ -400,7 +459,7 @@
 
 
 <div class="toast" id="toast"></div>
-<div class="viewer-overlay" id="viewerOverlay">
+<div class="viewer-overlay" id="viewerOverlay" data-copy>
   <div class="viewer-modal" id="viewerModalBox">
     <div class="viewer-header">
       <div class="header-info">
@@ -420,11 +479,29 @@
 </div>
 
 <script>
+// ====== 主题切换 ======
+function applyTheme(theme) {
+  const html = document.documentElement;
+  if (theme === 'dark') html.setAttribute('data-theme', 'dark');
+  else html.removeAttribute('data-theme');
+  const icon = document.getElementById('themeIcon');
+  const label = document.getElementById('themeLabel');
+  if (icon) icon.textContent = theme === 'dark' ? '☀️' : '🌙';
+  if (label) label.textContent = theme === 'dark' ? '浅色' : '深色';
+}
+function toggleTheme() {
+  const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+  const next = isDark ? 'light' : 'dark';
+  try { localStorage.setItem('oc-theme', next); } catch(e) {}
+  applyTheme(next);
+}
+
 const API = '/api/files';
 let deleteTarget = null;
 
 // ====== 初始化 ======
 window.addEventListener('DOMContentLoaded', () => {
+  applyTheme(document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light');
   loadFiles();
 
   // 查看弹窗按钮
@@ -686,6 +763,9 @@ function escAttr(s) {
 </div><!-- /app-layout -->
 
 <script>function toggleSidebar(){document.getElementById('sidebar').classList.toggle('collapsed');}</script>
+<script src="search.js"></script>
+<script src="export-all.js"></script>
+<script src="copy-detail.js"></script>
 
 </body>
 </html>

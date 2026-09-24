@@ -208,6 +208,80 @@ async function handleApiRequest(url, init) {
       }
     }
 
+    // ---- 全局搜索 ----
+    if (path === '/api/search' && method === 'GET') {
+      const q = (queryParams.get('q') || '').trim().toLowerCase();
+      const empty = { characters: [], worldview: [], relations: [], documents: [] };
+      if (!q) return makeResponse(empty);
+      const MAX = 20;
+      const snip = (text) => {
+        if (!text) return '';
+        const flat = String(text).replace(/\s+/g, ' ').trim();
+        const pos = flat.toLowerCase().indexOf(q);
+        if (pos < 0) return flat.slice(0, 48);
+        const start = Math.max(0, pos - 18), end = Math.min(flat.length, pos + q.length + 30);
+        return (start > 0 ? '…' : '') + flat.slice(start, end) + (end < flat.length ? '…' : '');
+      };
+      const hit = (v) => String(v || '').toLowerCase().includes(q);
+
+      // 角色
+      const chars = await charDB.list();
+      const characters = [];
+      for (const c of chars) {
+        const fields = ['name','university','region','naming_rationale','appearance','setting','birthplace','family','birthday','gender','status'];
+        let matched_field = '', snippet = '';
+        for (const f of fields) {
+          if (hit(c[f])) { if (!matched_field) matched_field = f; if (!snippet) snippet = snip(c[f]); }
+        }
+        if (matched_field) {
+          characters.push({ id: c.id, name: c.name, university: c.university || '', region: c.region || '',
+            gender: c.gender || '', image_url: (Array.isArray(c.images) && c.images[0]) || c.image_url || '',
+            matched_field, snippet });
+        }
+        if (characters.length >= MAX) break;
+      }
+
+      // 世界观
+      const worlds = await worldDB.list('');
+      const worldview = worlds.filter(w => hit(w.title) || hit(w.category) || hit(w.main_category) || hit(w.content))
+        .slice(0, MAX)
+        .map(w => ({ id: w.id, title: w.title, category: w.category || '', main_category: w.main_category || '',
+          snippet: snip(w.content) }));
+
+      // 关系
+      const rels = await relDB.list();
+      const cmap = {}; chars.forEach(c => { cmap[c.id] = c.name; });
+      const relations = [];
+      for (const r of rels) {
+        const fn = cmap[r.from_char_id] || '', tn = cmap[r.to_char_id] || '';
+        if (hit(r.relation_type) || hit(r.description) || hit(fn) || hit(tn)) {
+          relations.push({ id: r.id, from_name: fn, to_name: tn, relation_type: r.relation_type || '', snippet: snip(r.description) });
+        }
+        if (relations.length >= MAX) break;
+      }
+
+      // 文档（文件名 + txt/md 正文）
+      const docs = await docDB.list();
+      const documents = [];
+      for (const d of docs) {
+        let snippet = '';
+        const ext = (d.name.split('.').pop() || '').toLowerCase();
+        if (ext === 'txt' || ext === 'md') {
+          try {
+            const full = await docDB.get(d.name);
+            if (full && full.blob && full.blob.size < 2 * 1024 * 1024) {
+              const text = await full.blob.text();
+              if (text.toLowerCase().includes(q)) snippet = snip(text);
+            }
+          } catch (e) { /* 忽略读取失败 */ }
+        }
+        if (hit(d.name) || snippet) documents.push({ name: d.name, size_display: d.size_display || '', modified: d.modified || '', snippet });
+        if (documents.length >= MAX) break;
+      }
+
+      return makeResponse({ characters, worldview, relations, documents });
+    }
+
     // ---- 图片上传（离线：转 base64 data URL 直接存角色 images 数组）----
     if (path === '/api/images/upload' && method === 'POST') {
       const formData = body;

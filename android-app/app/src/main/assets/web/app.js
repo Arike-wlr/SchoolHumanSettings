@@ -2,6 +2,37 @@
    全局工具函数
    ============================================================ */
  function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+
+/* ============================================================
+   主题切换
+   ============================================================ */
+function applyTheme(theme) {
+  var html = document.documentElement;
+  if (theme === 'dark') html.setAttribute('data-theme', 'dark');
+  else html.removeAttribute('data-theme');
+  var icon = document.getElementById('themeIcon');
+  var label = document.getElementById('themeLabel');
+  if (icon) icon.textContent = theme === 'dark' ? '☀️' : '🌙';
+  if (label) label.textContent = theme === 'dark' ? '浅色模式' : '深色模式';
+}
+function toggleTheme() {
+  var isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+  var next = isDark ? 'light' : 'dark';
+  try { localStorage.setItem('oc-theme', next); } catch(e) {}
+  applyTheme(next);
+  // 关系图谱是 canvas 绘制，切换后需重绘以更新网格与标签底色
+  try { if (window.VM && VM.relations && VM.relations.graphRedraw) VM.relations.graphRedraw(); } catch(e) {}
+}
+// 读取当前主题下的 CSS 变量值（供 canvas 绘制使用）
+function themeVar(name, fallback) {
+  try {
+    var v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    return v || fallback;
+  } catch(e) { return fallback; }
+}
+document.addEventListener('DOMContentLoaded', function () {
+  applyTheme(document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light');
+});
  function safeImageSrc(src) {
    // img:// 引用是本地图片仓库的内容指纹，这里换算成 WebView 能直接加载的 https 地址
    // （由原生 WebViewAssetLoader 从磁盘流式提供，字节不经过 JS 堆）；
@@ -33,6 +64,35 @@ function saveExportFile(jsonStr, fileName, msg) {
     URL.revokeObjectURL(a.href);
     showToast(msg, 'success');
   }
+}
+
+// 导出字段映射（与各页单独导出保持一致；全局导出复用同一套，保证内容完全相同）
+function mapCharExport(c) {
+  return { 姓名: c.name, 别名: c.alias || '', 代表高校: c.university || '', 地区: c.region || '', 诞生地: c.birthplace || '', 存在状态: c.status || '存在', 性别: c.gender || '', 身高: c.height || '', 生日: c.birthday || '', 外貌: c.appearance || '', 身份存在时间: c.identity_period || '', 诞生时间: c.birth_time || '', 取名依据: c.naming_rationale || '', 设定: c.setting || '' };
+}
+function mapWorldExport(e) {
+  return { 标题: e.title, 大类: e.main_category || '', 分类: e.category || '', 内容: e.content || '' };
+}
+function mapRelExport(r) {
+  return { 角色A: r.from_name || '', 角色B: r.to_name || '', 关系类型: r.relation_type || '', 关系描述: r.description || '' };
+}
+
+// 全局导出：角色 + 世界观 + 关系 汇总到一个 JSON 文件（各分区内容与单独导出完全一致）
+function exportAllData() {
+  Promise.all([
+    fetch('/api/characters').then(function(r) { return r.json(); }),
+    fetch('/api/world-buildings').then(function(r) { return r.json(); }),
+    fetch('/api/relations').then(function(r) { return r.json(); })
+  ]).then(function(arr) {
+    var chars = arr[0] || [], worlds = arr[1] || [], rels = arr[2] || [];
+    var out = {
+      角色: chars.map(mapCharExport),
+      世界观: worlds.map(mapWorldExport),
+      关系: rels.map(mapRelExport)
+    };
+    var fn = '高校拟人OC_全量导出_' + new Date().toISOString().slice(0, 10) + '.json';
+    saveExportFile(JSON.stringify(out, null, 2), fn, '已导出全部数据（' + chars.length + ' 角色 / ' + worlds.length + ' 世界观 / ' + rels.length + ' 关系）');
+  }).catch(function() { showToast('导出失败', 'error'); });
 }
 /* ============================================================
    视图间共享的内存数据（不再向 sessionStorage 序列化记录）
@@ -776,7 +836,7 @@ VM.index = (function() {
   function confirmExport(){
     if(selectedIds.size===0)return;
     var sel=allCharacters.filter(function(c){return selectedIds.has(c.id);});
-    var ed=sel.map(function(c){return{姓名:c.name,别名:c.alias||'',代表高校:c.university||'',地区:c.region||'',诞生地:c.birthplace||'',存在状态:c.status||'存在',性别:c.gender||'',身高:c.height||'',生日:c.birthday||'',外貌:c.appearance||'',身份存在时间:c.identity_period||'',诞生时间:c.birth_time||'',取名依据:c.naming_rationale||'',设定:c.setting||''};});
+    var ed=sel.map(mapCharExport);
     var js=JSON.stringify(ed,null,2);
     var fn='高校拟人OC_'+sel.length+'位角色_'+new Date().toISOString().slice(0,10)+'.json';
     saveExportFile(js,fn,'已导出 '+sel.length+' 位角色');
@@ -1299,7 +1359,7 @@ VM.worldview = (function() {
   function confirmExport() {
     if (selectedIds.size === 0) return;
     var sel = allEntries.filter(function(e) { return selectedIds.has(e.id); });
-    var ed = sel.map(function(e) { return { 标题: e.title, 大类: e.main_category || '', 分类: e.category || '', 内容: e.content || '' }; });
+    var ed = sel.map(mapWorldExport);
     var js = JSON.stringify(ed, null, 2);
     var fn = '世界观设定_' + sel.length + '条_' + new Date().toISOString().slice(0, 10) + '.json';
     saveExportFile(js, fn, '已导出 ' + sel.length + ' 条设定');
@@ -1574,6 +1634,8 @@ VM.relations = (function() {
   var selectedIds = new Set();
   var _autoSaveInProgress = false;
   var REL_TYPES = ['CP', '单箭头', '继承记忆', '参与组建', '师生', '朋友', '冤家', '亲属'];
+  // 全局搜索跳转：待定位的关系 id。数据异步加载完毕后由 renderRelList 消费。
+  var _pendingFocusRelId = null;
   var familyEditMap = {};
 
   var _tdEnabled = false, _tdEl = null, _tdGhost = null, _tdIdx = -1;
@@ -1696,6 +1758,25 @@ VM.relations = (function() {
     });
     renderKeyedList(list, items);
     if (exportMode) updateExportButtons();
+    if (_pendingFocusRelId != null) {
+      var target = list.querySelector('.rel-card[data-rel-id="' + _pendingFocusRelId + '"]');
+      if (target) applyRelFocus(target);
+    }
+  }
+
+  // 滚动到目标关系卡并短暂高亮（全局搜索跳转用）
+  function applyRelFocus(el) {
+    _pendingFocusRelId = null;
+    try { el.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (e) { el.scrollIntoView(); }
+    el.classList.add('rel-focus');
+    setTimeout(function() { el.classList.remove('rel-focus'); }, 2600);
+  }
+
+  // 供全局搜索调用：记录待定位关系 id；若列表已渲染则立即定位
+  function focusRelation(id) {
+    _pendingFocusRelId = id;
+    var el = document.querySelector('#relList .rel-card[data-rel-id="' + id + '"]');
+    if (el) applyRelFocus(el);
   }
 
   var searchTimer = null;
@@ -1810,7 +1891,7 @@ VM.relations = (function() {
 
   function infoRow(l, v) {
     if (!v) return '';
-    return '<div style="display:flex;padding:7px 0;border-bottom:1px solid var(--border);gap:8px;"><span style="flex:0 0 84px;color:var(--text-light);font-size:.82rem;">' + esc(l) + '</span><span style="flex:1;font-size:.88rem;white-space:pre-wrap;line-height:1.5;word-break:break-word;">' + v + '</span></div>';
+    return '<div class="oc-kv" style="display:flex;padding:7px 0;border-bottom:1px solid var(--border);gap:8px;"><span style="flex:0 0 84px;color:var(--text-light);font-size:.82rem;">' + esc(l) + '</span><span style="flex:1;font-size:.88rem;white-space:pre-wrap;line-height:1.5;word-break:break-word;">' + v + '</span></div>';
   }
   function showCharInfo(charId) {
     infoCharId = charId;
@@ -1953,7 +2034,7 @@ VM.relations = (function() {
   function confirmExport() {
     if (selectedIds.size === 0) return;
     var sel = allRelations.filter(function(r) { return selectedIds.has(r.id); });
-    var ed = sel.map(function(r) { return { 角色A: r.from_name || '', 角色B: r.to_name || '', 关系类型: r.relation_type || '', 关系描述: r.description || '' }; });
+    var ed = sel.map(mapRelExport);
     var js = JSON.stringify(ed, null, 2);
     var fn = '关系网_' + sel.length + '条关系_' + new Date().toISOString().slice(0, 10) + '.json';
     saveExportFile(js, fn, '已导出 ' + sel.length + ' 条关系');
@@ -2221,7 +2302,7 @@ VM.relations = (function() {
         var off = (lo[i] || 0) * 12, lx = mx + px_ * off, ly = my + py_ * off;
         gCtx.globalAlpha = 0.9; gCtx.font = '10px "PingFang SC","Microsoft YaHei",sans-serif';
         var tw = gCtx.measureText(e.type).width;
-        gCtx.fillStyle = '#fffef9'; gCtx.fillRect(lx - tw / 2 - 3, ly - 7, tw + 6, 14);
+        gCtx.fillStyle = themeVar('--canvas-label-bg','#fffef9'); gCtx.fillRect(lx - tw / 2 - 3, ly - 7, tw + 6, 14);
         gCtx.fillStyle = color; gCtx.textAlign = 'center'; gCtx.textBaseline = 'middle'; gCtx.fillText(e.type, lx, ly);
       }
       gCtx.globalAlpha = 1;
@@ -2230,8 +2311,8 @@ VM.relations = (function() {
       var fc = nodeFamilyColor(n);
       gCtx.beginPath(); gCtx.arc(n.x, n.y, 16, 0, Math.PI * 2);
       gCtx.fillStyle = n === gDragNode ? '#c49a6c' : fc; gCtx.fill();
-      gCtx.strokeStyle = '#fffef9'; gCtx.lineWidth = 2; gCtx.stroke();
-      gCtx.fillStyle = '#3d2b1f'; gCtx.font = '11px "PingFang SC","Microsoft YaHei",sans-serif'; gCtx.textAlign = 'center'; gCtx.textBaseline = 'top';
+      gCtx.strokeStyle = themeVar('--stroke-ring','#fffef9'); gCtx.lineWidth = 2; gCtx.stroke();
+      gCtx.fillStyle = themeVar('--text','#3d2b1f'); gCtx.font = '11px "PingFang SC","Microsoft YaHei",sans-serif'; gCtx.textAlign = 'center'; gCtx.textBaseline = 'top';
       var label = n.name || ('#' + n.id); if (label.length > 5) label = label.slice(0, 4) + '…';
       gCtx.fillText(label, n.x, n.y + 20);
     });
@@ -2389,7 +2470,9 @@ VM.relations = (function() {
     enterExportMode: enterExportMode, cancelExport: cancelExport,
     toggleCardClick: toggleCardClick, toggleCardSelect: toggleCardSelect, toggleSelectAll: toggleSelectAll, confirmExport: confirmExport,
     moveRelUp: moveRelUp, moveRelDown: moveRelDown,
-    graphZoom: graphZoom, graphReset: graphReset
+    focusRelation: focusRelation,
+    graphZoom: graphZoom, graphReset: graphReset,
+    graphRedraw: graphDraw
   };
 })();
 

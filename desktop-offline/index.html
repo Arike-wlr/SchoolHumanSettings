@@ -4,6 +4,17 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>高校拟人 OC · 角色设定簿</title>
+<script>
+// 防闪烁：尽早应用主题
+(function(){
+  try {
+    var t = localStorage.getItem('oc-theme');
+    if (t === 'dark' || (!t && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+      document.documentElement.setAttribute('data-theme', 'dark');
+    }
+  } catch(e) {}
+})();
+</script>
 <style>
   /* ====== 全局 ====== */
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -26,7 +37,42 @@
     --font-serif: 'Georgia', 'Noto Serif SC', 'SimSun', serif;
     --font-sans: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
     --transition: 0.25s cubic-bezier(.4,0,.2,1);
+    /* 输入控件底色（深色模式下需覆盖） */
+    --input-bg: #fefdf9;
+    --body-glow-1: rgba(196,154,108,.08);
+    --body-glow-2: rgba(139,94,60,.06);
   }
+
+  /* ====== 深色主题 ====== */
+  html[data-theme="dark"] {
+    --bg: #1c1917;
+    --card-bg: #262220;
+    --text: #ece3d8;
+    --text-light: #a89a8c;
+    --accent: #c49a6c;
+    --accent-light: #d9b58a;
+    --accent-pale: #3a2f26;
+    --danger: #e07060;
+    --danger-bg: #3a2523;
+    --border: #3d3733;
+    --shadow: 0 2px 16px rgba(0,0,0,.4);
+    --shadow-lg: 0 8px 40px rgba(0,0,0,.5);
+    --input-bg: #1f1c1a;
+    --body-glow-1: rgba(196,154,108,.05);
+    --body-glow-2: rgba(139,94,60,.04);
+    color-scheme: dark;
+  }
+
+  html[data-theme="dark"] .header {
+    background: linear-gradient(135deg, #12100e 0%, #1e1815 40%, #2a211b 100%);
+  }
+
+  /* 深色下需覆盖的零散硬编码元素 */
+  html[data-theme="dark"] .btn-ghost:hover { background: var(--accent-pale); }
+  html[data-theme="dark"] .modal-close { background: #332c27; }
+  html[data-theme="dark"] .modal-close:hover { background: #443a33; }
+  html[data-theme="dark"] .detail-close { background: #332c27; color: var(--text); }
+  html[data-theme="dark"] .detail-close:hover { background: #443a33; }
 
   body {
     font-family: var(--font-sans);
@@ -34,9 +80,27 @@
     color: var(--text);
     min-height: 100vh;
     background-image:
-      radial-gradient(ellipse at 20% 10%, rgba(196,154,108,.08) 0%, transparent 60%),
-      radial-gradient(ellipse at 80% 90%, rgba(139,94,60,.06) 0%, transparent 60%);
+      radial-gradient(ellipse at 20% 10%, var(--body-glow-1) 0%, transparent 60%),
+      radial-gradient(ellipse at 80% 90%, var(--body-glow-2) 0%, transparent 60%);
   }
+
+  /* 主题切换按钮 */
+  .theme-toggle {
+    background: rgba(255,255,255,.08);
+    color: #f5ede4;
+    border: 1px solid rgba(255,255,255,.15);
+    border-radius: 20px;
+    padding: 6px 14px;
+    font-size: .78rem;
+    cursor: pointer;
+    font-family: var(--font-sans);
+    transition: var(--transition);
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .theme-toggle:hover { background: rgba(255,255,255,.16); }
+  .theme-toggle .theme-toggle-icon { font-size: .95rem; line-height: 1; }
 
   /* ====== Header ====== */
   .header {
@@ -357,7 +421,7 @@
     font-family: var(--font-serif);
     font-size: 1.35rem;
     font-weight: 700;
-    color: #3d2b1f;
+    color: var(--text);
     letter-spacing: .04em;
   }
   .card-header .uni-tag {
@@ -554,7 +618,7 @@
     font-family: var(--font-serif);
     font-size: 1.3rem;
     font-weight: 600;
-    color: #3d2b1f;
+    color: var(--text);
   }
   .modal-close {
     width: 34px; height: 34px;
@@ -592,7 +656,7 @@
     border-radius: var(--radius-sm);
     font-size: .92rem;
     font-family: var(--font-sans);
-    background: #fefdf9;
+    background: var(--input-bg);
     color: var(--text);
     transition: var(--transition);
     resize: vertical;
@@ -623,7 +687,7 @@
     border: 2px dashed var(--border);
     border-radius: var(--radius-sm);
     padding: 20px;
-    background: #fefdf9;
+    background: var(--input-bg);
     text-align: center;
   }
   .image-upload-container:hover {
@@ -685,7 +749,7 @@
     font-family: var(--font-serif);
     font-size: 1.3rem;
     font-weight: 600;
-    color: #3d2b1f;
+    color: var(--text);
     letter-spacing: .04em;
   }
   .detail-header .detail-badges {
@@ -802,7 +866,9 @@
     </a>
   </nav>
   <div class="sidebar-footer">
-    <span style="font-size:.75rem;opacity:.5;">高校拟人OC</span>
+    <button class="theme-toggle" onclick="toggleTheme()" title="切换深色/浅色模式">
+      <span class="theme-toggle-icon" id="themeIcon">🌙</span><span id="themeLabel">深色</span>
+    </button>
   </div>
 </aside>
 
@@ -975,7 +1041,7 @@
 </div>
 
 <!-- ====== 详情查看 Modal ====== -->
-<div class="detail-overlay" id="detailOverlay">
+<div class="detail-overlay" id="detailOverlay" data-copy>
   <div class="detail-modal">
     <div class="detail-header">
       <div style="display:flex;align-items:center;flex-wrap:wrap;gap:10px;">
@@ -1000,6 +1066,23 @@
 <div class="toast" id="toast"></div>
 
 <script>
+// ====== 主题切换 ======
+function applyTheme(theme) {
+  const html = document.documentElement;
+  if (theme === 'dark') html.setAttribute('data-theme', 'dark');
+  else html.removeAttribute('data-theme');
+  const icon = document.getElementById('themeIcon');
+  const label = document.getElementById('themeLabel');
+  if (icon) icon.textContent = theme === 'dark' ? '☀️' : '🌙';
+  if (label) label.textContent = theme === 'dark' ? '浅色' : '深色';
+}
+function toggleTheme() {
+  const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+  const next = isDark ? 'light' : 'dark';
+  try { localStorage.setItem('oc-theme', next); } catch(e) {}
+  applyTheme(next);
+}
+
 // ====== 配置 ======
 const API = '/api/characters';
 let deleteTargetId = null;
@@ -1016,7 +1099,13 @@ function getRegionsByCount(groups) {
 }
 
 // ====== 页面加载 ======
-document.addEventListener('DOMContentLoaded', () => { loadCharacters(); });
+document.addEventListener('DOMContentLoaded', () => {
+  applyTheme(document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light');
+  loadCharacters();
+  // 全局搜索跳转定位：/?char=ID → 打开角色详情
+  const gsChar = new URLSearchParams(location.search).get('char');
+  if (gsChar) openDetailModal(parseInt(gsChar, 10));
+});
 
 // ====== 加载角色列表 ======
 async function loadCharacters() {
@@ -1735,6 +1824,8 @@ function toggleSidebar() {
   document.getElementById('sidebar').classList.toggle('collapsed');
 }
 </script>
-
+<script src="search.js"></script>
+<script src="export-all.js"></script>
+<script src="copy-detail.js"></script>
 </body>
 </html>
