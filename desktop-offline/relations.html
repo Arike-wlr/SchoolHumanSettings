@@ -758,10 +758,24 @@ function buildEdges() {
   }));
 }
 
-// --- Canvas Graph ---
+// 画布高度自适应角色数：角色多时把画布撑高，让物理布局有足够空间舒展，
+// 而不是把几十个节点硬塞进 480px 里挤成一团（这正是"网页版一团"的根源）。
+// 页面本身可滚动，所以撑高画布不会挡住下面的关系列表。
+// 目标：给每个节点约 110×110 的领地（桌面节点圆 56px + 间隙），
+// 并让画布尽量接近正方形，物理布局的圆盘才能自然落进去。
+function pickCanvasHeight(n) {
+  const base = 480;
+  const perNode = 132;                       // 每个节点占的边长（含间隙）
+  const needSide = Math.sqrt(Math.max(1, n)) * perNode + 140;
+  const maxH = Math.max(600, Math.min(2600, Math.round(window.innerHeight * 2.2)));
+  return Math.round(Math.max(base, Math.min(maxH, needSide)));
+}
+
 function initCanvas() {
   canvas = document.getElementById('graphCanvas');
   const wrap = document.getElementById('canvasWrap');
+  // 角色数已知，先定高度，再量尺寸
+  wrap.style.height = pickCanvasHeight(allCharacters.length) + 'px';
   cw = wrap.clientWidth;
   ch = wrap.clientHeight;
   canvas.width = cw * window.devicePixelRatio;
@@ -794,6 +808,7 @@ function initCanvas() {
 
   window.addEventListener('resize', () => {
     const wrap = document.getElementById('canvasWrap');
+    wrap.style.height = pickCanvasHeight(allCharacters.length) + 'px';
     cw = wrap.clientWidth; ch = wrap.clientHeight;
     canvas.style.width = cw + 'px';
     canvas.style.height = ch + 'px';
@@ -804,6 +819,376 @@ function initCanvas() {
   });
 }
 
+// =====================================================================
+// 布局：全局力导向物理模拟（已与手机版 app.js 统一）
+// ---------------------------------------------------------------------
+// 旧版是"家族圈几何排布"：每个家族先跑一轮家族级力模拟定中心，成员再钉
+// 到成员圈圆周上。家族一多、成员一杂，圆周就互相穿插，看着是一团乱麻。
+// 现在直接移植手机版的全身物理模拟：斥力 + 边弹簧 + 家族弹簧 + 中心引力，
+// 分帧迭代（每帧留时间预算，不阻塞界面），配 cooling 逐渐冷却。
+// 参数按画布尺寸自适应：画布越大，斥力/弹簧平衡距离等比放大。
+// =====================================================================
+
+let layoutEpoch = 0;        // 每次重排自增，用于作废旧的分帧循环
+let gLayoutHandle = null;   // requestAnimationFrame / setTimeout 句柄
+const gCooling = { v: 1 };  // 当前冷却系数
+
+// 画布尺寸自适应参数。
+// 关键点：网页版画布尺寸多变（宽而矮/高而窄），节点半径也与手机版不同
+// （桌面 nodeR=28，手机 16）。因此不能照抄手机的常数，而要：
+//   1) 用 Fruchterman-Reingold 的理想边长 k = C·√(面积/节点数)，
+//      让间距自动适配任意画布尺寸与节点数量；
+//   2) 画布高度已按节点数自适应（见 pickCanvasHeight），
+//      所以这里不必把图硬压进一个小方框，布局自然舒展即可。
+function layoutParams() {
+  const nodeR = 28;
+  const n = Math.max(1, nodes.length);
+  // ---- Fruchterman-Reingold 参数 ----
+  // 1) 理想间距 k 由【实际可用面积】与节点数决定：k = C·√(A/n)。
+  //    注意此前用的是"短边的一半"当半径，画布 1158×1321 时只按 1158 算，
+  //    → 高度方向的余量被浪费，图只铺到 1077 高就被斥力顶住，反而更挤。
+  //    改成用真实面积（宽×高）后，k 会随画布一起变大，节点铺得更开。
+  //    下限 nodeR*3.5 ≈ 98：保证两圆心至少放得下两个圆 + 标签余量。
+  // 2) 斥力加"作用半径上限"（dMax）：纯 FR 的 k²/d 对【所有】节点对生效，
+  //    而引力只沿稀疏的关系边存在 → 图会无限膨胀（实测 80 点可涨到 2600px）。
+  //    限制作用半径后，整体尺度就由 k 与中心引力共同锁定。
+  const pad = 70;                                   // 画布四周留白
+  const availW = Math.max(160, cw - pad * 2);
+  const availH = Math.max(160, ch - pad * 2);
+  // 填充系数 0.92：理想圆盘均匀铺满时 k=√(A/n)（A=πR²），
+  // 家族聚簇会让局部更密，略留余量以免重叠。
+  const kFit = Math.sqrt((availW * availH) / (Math.PI * n)) * 0.92;
+  const k = Math.max(nodeR * 3.5, Math.min(360, kFit));
+  const repulsion = k * k;             // 斥力分子：f = k²/d（d 超过 dMax 后按 0 计）
+  return {
+    k,
+    repulsion,
+    // 斥力作用半径：k 的 2.6~4 倍。节点越多作用半径越大，
+    // 否则远处节点互不感知、密集图会缩成一团。
+    dMax: k * Math.min(4.2, 2.6 + n / 90),
+    spring: 0.45,     // 关系边引力系数：f = d²/k * spring
+    cg: 0.03,         // 中心引力：配合 dMax 一起定住整体尺度
+    // 家族引力理想长度取 1.35k：明显大于普通关系间距，让同族"聚团但不挤压"。
+    // 之前取 1.15k + famSpring 0.55 → 12 人的大家族被硬拉进一个很小的圈，
+    // 内部挤在一起，斥力解不开（实测重叠 37 处）。
+    famK: k * 1.35,
+    famSpring: 0.34,  // 家族引力系数（调低，减少同族内部挤压）
+    targetR: 0,       // 不再需要硬边界
+  };
+}
+
+// 一次物理步进。cooling ∈ (0,1]，越小越"冷静"（位移越少）
+// 力模型采用 Fruchterman-Reingold：
+//   斥力 f_r = k² / d           （所有节点对）
+//   引力 f_a = d² / k * spring  （沿关系边 / 家族边，spring 为强度系数）
+// 平衡时 f_r = f_a → d³ = k³ * spring，即相邻节点距离 ≈ k（spring≈1 时）。
+// 由于每步位移被限幅在 temperature 以内，力的绝对量级不影响结果，只影响收敛速度。
+function gSimulateStep(cooling) {
+  const P = layoutParams();
+  const k = P.k, repulsion = P.repulsion, spring = P.spring;
+  const cg = P.cg, famK = P.famK, famSpring = P.famSpring, dMax = P.dMax || Infinity;
+  const cx = cw / 2 + offsetX;
+  const cy = ch / 2 + offsetY;
+
+  // 初始化加速度
+  for (const n of nodes) { n.ax = 0; n.ay = 0; }
+
+  // 1. 两两斥力（O(n²)，角色规模不大可以接受）：f = k²/d，超出 dMax 不计
+  //    额外加一个"碰撞排斥"：当两节点中心距 < 2*nodeR + 间隙时，
+  //    施加很强的额外推力，从根上保证节点圆不重叠（类似 d3 的 forceCollide）。
+  const dMax2 = dMax * dMax;
+  const nodeR = 28;
+  // 最小中心距：两个圆直径 56 + 额外 14px 呼吸缝 = 70。
+  // 取 70（而非 56）是为了让"视觉上刚好挨着"的节点也留出一点缝隙，
+  // 顺带把名字标签（画在圆下方）的横向拥挤也缓和掉。
+  const minSep = nodeR * 2 + 14;
+  for (let i = 0; i < nodes.length; i++) {
+    for (let j = i + 1; j < nodes.length; j++) {
+      const a = nodes[i], b = nodes[j];
+      let dx = b.x - a.x, dy = b.y - a.y;
+      let d2 = dx * dx + dy * dy;
+      if (d2 < 1) { dx = Math.random() - 0.5; dy = Math.random() - 0.5; d2 = 1; }
+      const d = Math.sqrt(d2);
+      const ux = dx / d, uy = dy / d;
+      let f = 0;
+      if (d2 <= dMax2) f = repulsion / d;
+      if (d < minSep) {
+        // 碰撞力：距离越近越强，量级与 k²/d 同级但增长更快。
+        // 系数 3.6 + 下限 6：近距离时力足够大，压过家族弹簧的挤压，
+        // 保证"贴住"的节点对最终也能被推开（此前 2.4 时残留 7 处微重叠）。
+        const overlap = (minSep - d) / minSep;
+        f += repulsion / Math.max(6, d) * overlap * 3.6;
+      }
+      if (f === 0) continue;
+      a.ax -= ux * f; a.ay -= uy * f;
+      b.ax += ux * f; b.ay += uy * f;
+    }
+  }
+
+  // 2. 边弹簧：关系边两端互相拉近：f = d²/k * spring
+  const byId = window._nodeById;
+  if (byId) {
+    for (const e of edges) {
+      const a = byId[e.from], b = byId[e.to];
+      if (!a || !b) continue;
+      const dx = b.x - a.x, dy = b.y - a.y;
+      const d = Math.sqrt(dx * dx + dy * dy) || 0.1;
+      const f = (d * d / k) * spring;
+      const ux = dx / d, uy = dy / d;
+      a.ax += ux * f; a.ay += uy * f;
+      b.ax -= ux * f; b.ay -= uy * f;
+    }
+    // 3. 家族弹簧：同家族成员互相拉近（让同族成团），自然形成聚簇
+    //    理想边长随家族规模放大：m 个成员若都要保持最小间距，簇半径需 ~ s·√m。
+    //    若只用固定 famK，12 人的大家族会被硬压进和 2 人一样的圈里 →
+    //    内部严重重叠（实测"中央家族"12 人贡献了 19 处重叠中的 11 处）。
+    //    故取 famK_eff = famK · (1 + (m-2)/6)，m=2 时不变，m=12 时约 2.7 倍。
+    const famMembers = window._famMemberIndex;
+    if (famMembers) {
+      for (const fam in famMembers) {
+        const arr = famMembers[fam];
+        if (!arr || arr.length < 2) continue;
+        const famKeff = famK * (1 + (arr.length - 2) / 6);
+        for (let i = 0; i < arr.length; i++) {
+          for (let j = i + 1; j < arr.length; j++) {
+            const a = byId[arr[i]], b = byId[arr[j]];
+            if (!a || !b) continue;
+            const dx = b.x - a.x, dy = b.y - a.y;
+            const d = Math.sqrt(dx * dx + dy * dy) || 0.1;
+            const f = (d * d / famKeff) * famSpring;
+            const ux = dx / d, uy = dy / d;
+            a.ax += ux * f; a.ay += uy * f;
+            b.ax -= ux * f; b.ay -= uy * f;
+          }
+        }
+      }
+    }
+  }
+
+  // 4. 中心引力 + 温度限幅 + 积分
+  //    中心引力把整图往画布中心收，配合斥力的作用半径上限一起锁定整体尺度。
+  const temperature = Math.max(0.5, cooling * cooling * 30);  // 每步最大位移
+  for (const n of nodes) {
+    if (n.fixed) { n.vx = 0; n.vy = 0; continue; }
+    n.ax += (cx - n.x) * cg;
+    n.ay += (cy - n.y) * cg;
+    // 位移长度限幅到 temperature
+    let dx2 = n.ax, dy2 = n.ay;
+    const dl = Math.sqrt(dx2 * dx2 + dy2 * dy2);
+    if (dl > temperature) { dx2 = dx2 / dl * temperature; dy2 = dy2 / dl * temperature; }
+    n.x += dx2;
+    n.y += dy2;
+  }
+}
+
+// 收敛后把整张图等比缩放+平移，使其恰好放进可视区（留边距）。
+// 只缩放视图、不改变拓扑，也不丢用户手动拖过的相对位置——
+// 所有节点按同一变换处理，钉住的相对关系自然保留。
+// 注意：这里【不做硬夹】，个别出界交给"加高画布"或"局部回拉"处理，
+// 因为整体硬夹会把已收敛的间距压小、重新制造重叠（实测 5 处 → 12 处）。
+function fitToView() {
+  if (!nodes.length) return;
+  const pad = 46;   // 四周留白（原 60 偏大，会让本来就贴边的图收得更小）
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  nodes.forEach(n => {
+    minX = Math.min(minX, n.x - n.r - 18);
+    maxX = Math.max(maxX, n.x + n.r + 18);
+    minY = Math.min(minY, n.y - n.r - 18);
+    maxY = Math.max(maxY, n.y + n.r + 34);  // 下方留名字+家族标签的空间
+  });
+  const w = Math.max(1, maxX - minX), h = Math.max(1, maxY - minY);
+  const availW = Math.max(120, cw - pad * 2);
+  const availH = Math.max(120, ch - pad * 2);
+  let k = Math.min(availW / w, availH / h);
+  // 温和收放：默认下限 0.90（收缩超过 10% 会把已收敛的间距压小、
+  // 重新制造重叠，实测 0.66 → 重叠 11 处）。
+  // 例外：若【宽度】明显超框（横向出界无法靠"加高画布"解决），
+  // 则允许再收一点（下限放到 0.78），宁可轻微收紧也不要让节点
+  // 被 clampInsideView 压成一条竖线（实测会出现间距 10px 的重叠）。
+  const widthOver = w / availW;        // >1 表示横向超框
+  let floor = 0.90;
+  if (widthOver > 1.02) floor = 0.78;
+  k = Math.max(floor, Math.min(1.05, k));
+  // 目标：图心对齐画布中心
+  const gcx = (minX + maxX) / 2, gcy = (minY + maxY) / 2;
+  const tx = cw / 2 + offsetX, ty = ch / 2 + offsetY;
+  nodes.forEach(n => {
+    n.x = tx + (n.x - gcx) * k;
+    n.y = ty + (n.y - gcy) * k;
+  });
+  // 钉住位置同步按同一变换更新，否则下次重排会跳回旧尺度
+  pinnedPos.forEach((v, id) => {
+    pinnedPos.set(id, { x: tx + (v.x - gcx) * k, y: ty + (v.y - gcy) * k });
+  });
+  const allPinned = {};
+  pinnedPos.forEach((v, id) => { allPinned[id] = v; });
+  localStorage.setItem('graphPinnedPos', JSON.stringify(allPinned));
+}
+
+// 收尾修正：把仍出界的节点沿最短方向拉回画布内侧。
+// 关键：不能简单地把所有越界节点钉在同一条边上（会把它们压成一列，
+// 出现间距仅 10px 的重叠）。这里做的是"迭代式分离"：
+//   1) 先按溢出量把出界节点拉回边界内；
+//   2) 再检查是否有节点对因此挤得过近，把其中出界过的那个沿边方向
+//      推开（只在边界内侧滑动，不会再出界）。
+function clampInsideView() {
+  const marginX = 30, marginTop = 30, marginBot = 40;
+  const minSep = 70;                     // 与物理步进中的最小中心距一致
+  // 记录哪些节点原本出界（只需修正这些）
+  const fixedList = [];
+  for (const n of nodes) {
+    let touched = false;
+    if (n.x < marginX) { n.x = marginX; touched = true; }
+    else if (n.x > cw - marginX) { n.x = cw - marginX; touched = true; }
+    if (n.y < marginTop) { n.y = marginTop; touched = true; }
+    else if (n.y > ch - marginBot) { n.y = ch - marginBot; touched = true; }
+    if (touched) fixedList.push(n);
+  }
+  // 分离：对每个被修正过的节点，若与其它节点距离 < minSep，沿连线推开
+  for (let iter = 0; iter < 30; iter++) {
+    let moved = false;
+    for (const a of fixedList) {
+      for (const b of nodes) {
+        if (a === b) continue;
+        let dx = a.x - b.x, dy = a.y - b.y;
+        let d = Math.sqrt(dx * dx + dy * dy);
+        if (d >= minSep) continue;
+        if (d < 0.01) { dx = Math.random() - 0.5; dy = Math.random() - 0.5; d = 1; }
+        const push = (minSep - d) + 0.5;
+        const ux = dx / d, uy = dy / d;
+        // 只推动 a（原本出界的节点），并确保它仍在边界内
+        a.x = Math.max(marginX, Math.min(cw - marginX, a.x + ux * push));
+        a.y = Math.max(marginTop, Math.min(ch - marginBot, a.y + uy * push));
+        moved = true;
+      }
+    }
+    if (!moved) break;
+  }
+  // 同步钉住位置，避免下次重排跳回出界处
+  pinnedPos.forEach((v, id) => {
+    pinnedPos.set(id, {
+      x: Math.max(marginX, Math.min(cw - marginX, v.x)),
+      y: Math.max(marginTop, Math.min(ch - marginBot, v.y)),
+    });
+  });
+  const allPinned = {};
+  pinnedPos.forEach((v, id) => { allPinned[id] = v; });
+  localStorage.setItem('graphPinnedPos', JSON.stringify(allPinned));
+}
+
+// 分帧迭代：每帧最多约 8ms 计算时间，避免卡界面。
+// 用 rAF + setTimeout 双保险：标签页/窗口不可见时浏览器会暂停 rAF，
+// 只挂 rAF 会让布局"卡死"在半途（此前就是这个坑）。两者谁先触发谁接力，
+// 另一个立即撤销，保证任何可见性状态下都能收敛。
+let gRafHandle = null, gToHandle = null;
+
+function gCancelFrame() {
+  if (gRafHandle !== null) { cancelAnimationFrame(gRafHandle); gRafHandle = null; }
+  if (gToHandle !== null) { clearTimeout(gToHandle); gToHandle = null; }
+}
+
+function gNextFrame(epoch, stepsLeft) {
+  gCancelFrame();
+  gLayoutHandle = 1;   // 非 null，表示"循环进行中"
+  let started = false;
+  const fire = () => {
+    if (started) return;
+    started = true;
+    gCancelFrame();
+    gLayoutLoop(epoch, stepsLeft);
+  };
+  gRafHandle = requestAnimationFrame(fire);
+  gToHandle = setTimeout(fire, 32);
+}
+
+function gLayoutLoop(epoch, stepsLeft) {
+  if (epoch !== layoutEpoch) return;
+  const t0 = performance.now();
+  while (stepsLeft > 0 && performance.now() - t0 < 9) {
+    // 降温曲线：前半程保持较高"温度"（大步调整、快速消除重叠），
+    // 后半程再逐渐收紧（精细微调、稳定下来）。
+    // 之前线性降到 0.04 导致后半程几乎不动，残留重叠解不开；
+    // 这里改用 sqrt 型缓降 + 0.12 下限，让全程都有调整能力。
+    const progress = 1 - stepsLeft / gTotalSteps;
+    gCooling.v = Math.max(0.12, 1 - Math.sqrt(progress) * 0.93);
+    gSimulateStep(gCooling.v);
+    stepsLeft--;
+    if (stepsLeft <= 0) break;
+  }
+  drawGraph();
+  if (stepsLeft > 0) {
+    gNextFrame(epoch, stepsLeft);
+  } else {
+    gLayoutHandle = null;
+    gCancelFrame();
+    fitToView();     // 收敛后等比缩放，让整张图恰好放进可视区
+    // 若纵向仍有节点出界（说明画布高度不够），加高画布并重排一次。
+    // 只重排一次（gGrowOnce 防抖），避免来回振荡。
+    // 注意：横向出界无法靠"加高"解决（画布宽度受页面限制），
+    //      横向的个别越界交给 clampInsideView 局部回拉。
+    if (!gGrowOnce && growCanvasIfNeeded()) {
+      gGrowOnce = true;
+      const e2 = ++layoutEpoch;
+      gLayoutHandle = null;
+      for (const n of nodes) { n.vx = 0; n.vy = 0; }
+      gNextFrame(e2, Math.round(gTotalSteps * 0.5));
+      return;
+    }
+    gGrowOnce = false;
+    clampInsideView();   // 兜底：把极个别越界节点拉回画布内
+    drawGraph();
+    loadAvatars();
+  }
+}
+
+let gGrowOnce = false;
+
+// 检测节点是否【纵向】出界；若有，加高画布（只加高，不改宽），
+// 并把画布实际尺寸同步给 canvas 元素。返回 true 表示"已加高、需要重排"。
+// 横向出界不在这里处理（加高无济于事），交给 clampInsideView。
+function growCanvasIfNeeded() {
+  const wrap = document.getElementById('canvasWrap');
+  if (!wrap || !canvas) return false;
+  let maxY = -Infinity, minY = Infinity;
+  for (const n of nodes) {
+    maxY = Math.max(maxY, n.y + n.r + 40);
+    minY = Math.min(minY, n.y - n.r - 18);
+  }
+  const overH = maxY > ch - 6 || minY < 6;
+  if (!overH) return false;
+  // 需要的总高度：容下全部节点 + 上下边距
+  const needH = Math.ceil((maxY - minY) + 90);
+  const newH = Math.min(Math.round(window.innerHeight * 3.4), needH);
+  if (newH <= ch + 8) return false;
+  wrap.style.height = newH + 'px';
+  cw = wrap.clientWidth;
+  ch = wrap.clientHeight;
+  canvas.style.width = cw + 'px';
+  canvas.style.height = ch + 'px';
+  canvas.width = cw * window.devicePixelRatio;
+  canvas.height = ch * window.devicePixelRatio;
+  ctx.setTransform(window.devicePixelRatio, 0, 0, window.devicePixelRatio, 0, 0);
+  return true;
+}
+
+let gTotalSteps = 1;
+
+function startGlayout() {
+  if (!nodes.length) return;
+  // 取消上一次未跑完的循环
+  layoutEpoch++;
+  gCancelFrame();
+  gLayoutHandle = null;
+  // 步数随节点数增长（O(n²) 的斥力需要足够轮次才能把重叠完全解开；
+  // 实测 80 个节点需要 ~2500 步才能从 59 处重叠收敛到个位数）。
+  gTotalSteps = Math.min(3000, Math.max(700, nodes.length * 32));
+  gCooling.v = 1;
+  const epoch = layoutEpoch;
+  // 清掉旧速度，避免残留
+  for (const n of nodes) { n.vx = 0; n.vy = 0; n.ax = 0; n.ay = 0; }
+  gNextFrame(epoch, gTotalSteps);
+}
+
 function computeLayout() {
   nodes = [];
   const chars = allCharacters;
@@ -812,212 +1197,52 @@ function computeLayout() {
   const cx = cw / 2 + offsetX;
   const cy = ch / 2 + offsetY;
   const nodeR = 28;
-  const minGap = 14;
-  const clusterPad = 24;
 
-  // ====== 1. 每个角色属于所有家族（非仅第一个） ======
+  // ====== 1. 家族归属（一个角色可属多个家族） ======
+  const famMemberSet = {};      // 家族名 → Set(charId)
+  const famMemberIndex = {};    // 家族名 → [charId]  供物理模拟用
   const charFams = {};          // charId → [家族名]
-  const famMemberSet = {};      // 家族名 → Set(charId) 用于重叠计算
-  const famMembers = {};        // 家族名 → [char] 用于有序放置
-  const noFamily = [];
 
   chars.forEach(c => {
     const fams = splitFamilies(c.family || '');
     charFams[c.id] = fams;
-    if (fams.length === 0) {
-      noFamily.push(c);
-    } else {
-      fams.forEach(f => {
-        if (!famMemberSet[f]) { famMemberSet[f] = new Set(); famMembers[f] = []; }
-        famMemberSet[f].add(c.id);
-        famMembers[f].push(c);
-      });
-    }
-  });
-
-  const allFams = Object.keys(famMembers);
-
-  // ====== 2. 构建家族重叠图 + 连通分量 ======
-  const overlaps = {};
-  allFams.forEach(f => { overlaps[f] = []; });
-  for (let i = 0; i < allFams.length; i++) {
-    for (let j = i + 1; j < allFams.length; j++) {
-      const setI = famMemberSet[allFams[i]];
-      const setJ = famMemberSet[allFams[j]];
-      const [smallS, bigS] = setI.size < setJ.size ? [setI, setJ] : [setJ, setI];
-      for (const id of smallS) { if (bigS.has(id)) { overlaps[allFams[i]].push(allFams[j]); overlaps[allFams[j]].push(allFams[i]); break; } }
-    }
-  }
-
-  // 重叠关系存于 overlaps，力模拟用到
-
-  // ====== 3. 辅助 ======
-  function calcMemberR(n) {
-    if (n <= 1) return 0;
-    if (n === 2) return nodeR + minGap / 2;
-    return (nodeR * 2 + minGap) / (2 * Math.sin(Math.PI / n));
-  }
-
-  // ====== 4. 计算每个家族的成员圈 + 集群半径 ======
-  const famMR = {};  // member circle radius
-  const famCR = {};  // cluster bounding radius (mR + nodeR + pad)
-  allFams.forEach(f => {
-    const n = famMemberSet[f].size;
-    famMR[f] = calcMemberR(n);
-    famCR[f] = famMR[f] + nodeR + clusterPad;
-  });
-
-  // ====== 5. 力导向布局：放置各家族中心 ======
-  const famCenter = {};  // fam → {x, y, r}
-  allFams.forEach(f => {
-    // 初始随机散布
-    const a = Math.random() * 2 * Math.PI;
-    const d = Math.random() * 80;
-    famCenter[f] = { x: cx + d * Math.cos(a), y: cy + d * Math.sin(a), r: famMR[f] };
-  });
-
-  // 力模拟迭代
-  const forces = {};
-  const iters = 200;
-  for (let iter = 0; iter < iters; iter++) {
-    const cool = (iters - iter) / iters;  // 逐渐冷却
-    allFams.forEach(f => { forces[f] = { fx: 0, fy: 0 }; });
-
-    // 对所有家族对施加力
-    for (let i = 0; i < allFams.length; i++) {
-      for (let j = i + 1; j < allFams.length; j++) {
-        const f1 = allFams[i], f2 = allFams[j];
-        const c1 = famCenter[f1], c2 = famCenter[f2];
-        const dx = c2.x - c1.x, dy = c2.y - c1.y;
-        const dist = Math.sqrt(dx * dx + dy * dy) || 0.1;
-        const ndx = dx / dist, ndy = dy / dist;
-        const minDist = famCR[f1] + famCR[f2] + 40;
-
-        if (overlaps[f1].includes(f2)) {
-          // 共享角色 → 强吸引力聚拢
-          const shared = [...famMemberSet[f1]].filter(id => famMemberSet[f2].has(id)).length;
-          const pull = Math.min(shared * 0.6, 2) * (dist > minDist * 2 ? 0.15 : dist > minDist ? 0.05 : -0.1);
-          forces[f1].fx += ndx * pull;
-          forces[f1].fy += ndy * pull;
-          forces[f2].fx -= ndx * pull;
-          forces[f2].fy -= ndy * pull;
-        } else if (dist < minDist * 3) {
-          // 无共享 → 排斥力推开
-          const push = Math.max(0, (minDist - dist)) * 0.04;
-          forces[f1].fx -= ndx * push;
-          forces[f1].fy -= ndy * push;
-          forces[f2].fx += ndx * push;
-          forces[f2].fy += ndy * push;
-        }
-      }
-    }
-
-    // 中心引力
-    allFams.forEach(f => {
-      forces[f].fx += (cx - famCenter[f].x) * 0.015;
-      forces[f].fy += (cy - famCenter[f].y) * 0.015;
+    fams.forEach(f => {
+      if (!famMemberSet[f]) { famMemberSet[f] = new Set(); famMemberIndex[f] = []; }
+      if (!famMemberSet[f].has(c.id)) { famMemberSet[f].add(c.id); famMemberIndex[f].push(c.id); }
     });
+  });
 
-    // 阻尼
-    allFams.forEach(f => {
-      forces[f].fx *= 0.9;
-      forces[f].fy *= 0.9;
-      famCenter[f].x += forces[f].fx * cool;
-      famCenter[f].y += forces[f].fy * cool;
-    });
-  }
+  // ====== 2. 初始播种：家族中心摆一圈，成员聚在家族中心附近 ======
+  // 关键：播种半径必须【能放进画布】。之前 baseR = min(cw,ch)*0.28*√(fams/2)，
+  // 19 个家族时会得到 0.28*√9.5 ≈ 0.86 倍画布短边 → 种子本身就已溢出，
+  // 物理再膨胀一点，fitToView 再怎么收也拉不回来（实测 11 个节点在画布外）。
+  // 改为按"家族数"在受限维度内吃水：家族越多环越大，但最大不超过短边的 45%。
+  const allFams = Object.keys(famMemberIndex);
+  const halfShort = Math.min(cw, ch) * 0.5;
+  const baseR = allFams.length > 1
+    ? Math.min(halfShort * 0.45, halfShort * 0.30 * Math.sqrt(allFams.length))
+    : 0;
+  const famCenter = {};
+  allFams.forEach((f, i) => {
+    const a = allFams.length > 1
+      ? (2 * Math.PI * i) / allFams.length - Math.PI / 2
+      : 0;
+    famCenter[f] = {
+      x: cx + (allFams.length > 1 ? baseR * Math.cos(a) : 0),
+      y: cy + (allFams.length > 1 ? baseR * Math.sin(a) : 0),
+    };
+  });
 
-  // ====== 7. 计算每个角色的位置 ======
-  const posMap = {};  // charId → {x, y}
+  const spread = Math.min(cw, ch) * 0.18;
 
   chars.forEach(c => {
     const fams = charFams[c.id] || [];
-
-    if (fams.length === 0) {
-      posMap[c.id] = { x: 0, y: 0, noFam: true };
-      return;
-    }
-
-    if (fams.length === 1) {
-      // 单家族：放在该家族成员圈上
-      const fc = famCenter[fams[0]];
-      if (!fc) { posMap[c.id] = { x: cx, y: cy, noFam: true }; return; }
-      const members = famMembers[fams[0]];  // 有序数组
-      const idx = members.findIndex(m => m.id === c.id);
-      const mR = famMR[fams[0]];
-      const angle = members.length > 1
-        ? (2 * Math.PI * idx) / members.length - Math.PI / 2
-        : 0;
-      posMap[c.id] = {
-        x: fc.x + mR * Math.cos(angle),
-        y: fc.y + mR * Math.sin(angle),
-      };
-    } else {
-      // 多家族：放在所属家族中心的加权平均位置
+    let bx = cx, by = cy;
+    if (fams.length > 0) {
       let sx = 0, sy = 0, cnt = 0;
-      fams.forEach(f => {
-        const fc = famCenter[f];
-        if (fc) { sx += fc.x; sy += fc.y; cnt++; }
-      });
-      posMap[c.id] = cnt > 0 ? { x: sx / cnt, y: sy / cnt } : { x: cx, y: cy, noFam: true };
+      fams.forEach(f => { const fc = famCenter[f]; if (fc) { sx += fc.x; sy += fc.y; cnt++; } });
+      if (cnt > 0) { bx = sx / cnt; by = sy / cnt; }
     }
-  });
-
-  // ====== 8. 力导向微调：多家族角色相互排斥，同时被家族中心吸引 ======
-  const multiChars = chars.filter(c => (charFams[c.id] || []).length > 1);
-  for (let iter = 0; iter < 40; iter++) {
-    multiChars.forEach(c => {
-      const pos = posMap[c.id];
-      if (!pos || pos.noFam) return;
-      let fx = 0, fy = 0;
-
-      // 排斥其他多家族角色
-      multiChars.forEach(o => {
-        if (o.id === c.id) return;
-        const op = posMap[o.id];
-        if (!op || op.noFam) return;
-        const dx = pos.x - op.x, dy = pos.y - op.y;
-        const dist = Math.sqrt(dx * dx + dy * dy) || 0.1;
-        const minDist = nodeR * 2 + minGap;
-        if (dist < minDist) {
-          const force = (minDist - dist) / dist * 0.4;
-          fx += dx * force; fy += dy * force;
-        }
-      });
-
-      // 被所属家族中心吸引
-      (charFams[c.id] || []).forEach(f => {
-        const fc = famCenter[f];
-        if (fc) {
-          fx += (fc.x - pos.x) * 0.15;
-          fy += (fc.y - pos.y) * 0.15;
-        }
-      });
-
-      pos.x += fx; pos.y += fy;
-    });
-  }
-
-  // ====== 9. 放置无家族角色：右侧竖列 ======
-  if (noFamily.length > 0) {
-    // 找到所有家族中心的最右边界
-    let rightEdge = cx;
-    allFams.forEach(f => {
-      const fc = famCenter[f];
-      if (fc) rightEdge = Math.max(rightEdge, fc.x + famCR[f] + 20);
-    });
-    const colX = rightEdge + 60;
-    const gap = nodeR * 2 + minGap + 8;
-    const totalH = (noFamily.length - 1) * gap;
-    const startY = cy - totalH / 2;
-    noFamily.forEach((c, i) => {
-      posMap[c.id] = { x: colX, y: startY + i * gap };
-    });
-  }
-
-  // ====== 10. 输出 nodes（恢复已手动拖动过的节点位置） ======
-  chars.forEach(c => {
-    const p = posMap[c.id];
     const pinned = pinnedPos.get(c.id);
     nodes.push({
       id: c.id, name: c.name, family: c.family || '',
@@ -1031,15 +1256,23 @@ function computeLayout() {
         const i = (fc && fc.img >= 0 && fc.img < imgs.length) ? fc.img : 0;
         return imgs[i] || '';
       })(),
-      x: pinned ? pinned.x : (p ? p.x : cx),
-      y: pinned ? pinned.y : (p ? p.y : cy),
+      // 已手动拖动过的节点：钉在原位（fixed=true），物理模拟不再移动它
+      x: pinned ? pinned.x : bx + (Math.random() - 0.5) * spread,
+      y: pinned ? pinned.y : by + (Math.random() - 0.5) * spread,
+      vx: 0, vy: 0, ax: 0, ay: 0,
+      fixed: !!pinned,
       r: nodeR,
     });
   });
 
-  // 保存数据供 drawFamilyClusters 使用
+  // 查询索引，供物理模拟用
+  window._nodeById = {};
+  nodes.forEach(n => { window._nodeById[n.id] = n; });
   window._famMemberSet = famMemberSet;
+  window._famMemberIndex = famMemberIndex;
   window._famCenter = famCenter;
+
+  startGlayout();
   loadAvatars();
 }
 
@@ -1404,22 +1637,40 @@ function drawGraph() {
       ctx.stroke();
     }
 
-    // 名字
-    ctx.font = 'bold 13px "PingFang SC","Microsoft YaHei",sans-serif';
-    ctx.fillStyle = '#fff';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    const shortName = node.name.length > 4 ? node.name.substring(0, 4) + '…' : node.name;
-    ctx.fillText(shortName, node.x, node.y - 2);
+    // 名字位置：有头像 → 画在圆外下方（否则会和头像糊在一起）；
+    //          无头像 → 恢复"原来那样"：白字画在圆内（bold 13px / y-2 / 白）。
+    if (av) {
+      const shortName = node.name.length > 5 ? node.name.substring(0, 4) + '…' : node.name;
+      ctx.font = 'bold 12px "PingFang SC","Microsoft YaHei",sans-serif';
+      ctx.fillStyle = themeVar('--text', '#3d2b1f');
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+      ctx.fillText(shortName, node.x, node.y + node.r + 5);
+    } else {
+      const shortName = node.name.length > 4 ? node.name.substring(0, 4) + '…' : node.name;
+      ctx.font = 'bold 13px "PingFang SC","Microsoft YaHei",sans-serif';
+      ctx.fillStyle = '#fff';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(shortName, node.x, node.y - 2);
+    }
 
-    // 家族标签（显示所有）
+    // 家族标签（显示所有）：有头像时叠在名字下方（圆外）；无头像时留在圆内名字下方。
     const nodeFams = getNodeFamilies(node);
     if (nodeFams.length > 0) {
       ctx.font = '10px "PingFang SC","Microsoft YaHei",sans-serif';
       const displayFams = nodeFams.map(f => f.length > 4 ? f.substring(0, 4) + '…' : f).join('·');
       const famLabel = displayFams.length > 12 ? displayFams.substring(0, 12) + '…' : displayFams;
-      ctx.fillStyle = famColor || 'rgba(255,255,255,0.7)';
-      ctx.fillText(famLabel, node.x, node.y + 14);
+      ctx.textAlign = 'center';
+      if (av) {
+        ctx.fillStyle = famColor || themeVar('--text-light', 'rgba(120,100,80,0.75)');
+        ctx.textBaseline = 'top';
+        ctx.fillText(famLabel, node.x, node.y + node.r + 21);
+      } else {
+        ctx.fillStyle = famColor || 'rgba(255,255,255,0.7)';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(famLabel, node.x, node.y + 14);
+      }
     }
   });
 }
@@ -1449,6 +1700,9 @@ function onMouseDown(e) {
     dragNode = node;
     dragOffX = mx - node.x;
     dragOffY = my - node.y;
+    // 拖动即"钉住"：物理模拟不再移动它，松手后也保持（写入 pinnedPos）
+    node.fixed = true;
+    node.vx = 0; node.vy = 0;
     canvas.style.cursor = 'grabbing';
   } else {
     dragNode = null;
@@ -1517,11 +1771,22 @@ function onWheel(e) {
   drawGraph();
 }
 
-// 双击节点查看角色
+// 双击节点查看角色；若该节点曾被手动拖动钉住，双击改为"解除钉住"并重新布局
 function onDblClick(e) {
   const rect = canvas.getBoundingClientRect();
   const node = findNodeAt(e.clientX - rect.left, e.clientY - rect.top);
-  if (node) showCharInfo(node.id);
+  if (!node) return;
+  if (node.fixed) {
+    node.fixed = false;
+    pinnedPos.delete(node.id);
+    const allPinned = {};
+    pinnedPos.forEach((v, k) => { allPinned[k] = v; });
+    localStorage.setItem('graphPinnedPos', JSON.stringify(allPinned));
+    startGlayout();
+    showToast('已解除钉住：' + node.name, 'success');
+    return;
+  }
+  showCharInfo(node.id);
 }
 
 // --- 角色信息 ---
@@ -1811,18 +2076,38 @@ function drawGraphWithHighlight() {
       ctx.stroke();
     }
 
-    ctx.font = 'bold 13px "PingFang SC","Microsoft YaHei",sans-serif';
-    ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    const shortName = node.name.length > 4 ? node.name.substring(0, 4) + '…' : node.name;
-    ctx.fillText(shortName, node.x, node.y - 2);
+    // 名字位置：有头像 → 圆外下方；无头像 → 圆内（原样式：白字 bold 13px / y-2）。
+    if (av) {
+      const shortName = node.name.length > 5 ? node.name.substring(0, 4) + '…' : node.name;
+      ctx.font = 'bold 12px "PingFang SC","Microsoft YaHei",sans-serif';
+      ctx.fillStyle = themeVar('--text', '#3d2b1f');
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+      ctx.fillText(shortName, node.x, node.y + node.r + 5);
+    } else {
+      const shortName = node.name.length > 4 ? node.name.substring(0, 4) + '…' : node.name;
+      ctx.font = 'bold 13px "PingFang SC","Microsoft YaHei",sans-serif';
+      ctx.fillStyle = '#fff';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(shortName, node.x, node.y - 2);
+    }
 
     const nodeFams2 = getNodeFamilies(node);
     if (nodeFams2.length > 0) {
       ctx.font = '10px "PingFang SC","Microsoft YaHei",sans-serif';
       const displayFams = nodeFams2.map(f => f.length > 4 ? f.substring(0, 4) + '…' : f).join('·');
       const famLabel = displayFams.length > 12 ? displayFams.substring(0, 12) + '…' : displayFams;
-      ctx.fillStyle = famColor || 'rgba(255,255,255,0.7)';
-      ctx.fillText(famLabel, node.x, node.y + 14);
+      ctx.textAlign = 'center';
+      if (av) {
+        ctx.fillStyle = famColor || themeVar('--text-light', 'rgba(120,100,80,0.75)');
+        ctx.textBaseline = 'top';
+        ctx.fillText(famLabel, node.x, node.y + node.r + 21);
+      } else {
+        ctx.fillStyle = famColor || 'rgba(255,255,255,0.7)';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(famLabel, node.x, node.y + 14);
+      }
     }
   });
 }
