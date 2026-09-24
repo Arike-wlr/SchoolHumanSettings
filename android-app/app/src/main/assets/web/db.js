@@ -186,6 +186,11 @@ async function countAll(storeName) {
 const LITE_TEXT_FIELDS = ['name', 'alias', 'university', 'region', 'birthplace', 'gender', 'status', 'height',
   'birthday', 'appearance', 'identity_period', 'birth_time', 'naming_rationale', 'setting', 'family', 'face_crop'];
 
+// 投影结构版本。投影是纯派生数据，字段集合变了就整体重建（不做逐条迁移）。
+// 注意：这个常量与 tests/p06-read-projection.cjs 的 Gate ⑧ 契约相关 —— 改动 LITE_TEXT_FIELDS
+// 或投影字段集合时必须同步 bump 它，否则老装机里的旧投影不会被重建。
+const LITE_SHAPE = 2;   // 1: 初始（无 faceRef）；2: 增加 faceRef（关系网节点圆形头像按 face_crop.img 取图）
+
 // 与 app.js 的 normalizeImages 同规则：images 数组长度；为空时看 image_url。
 function liteImageRefs(record) {
   let imgs = record ? record.images : null;
@@ -220,6 +225,7 @@ function buildCharacterLite(record) {
     faceRef: (!/^data:/i.test(faceRefRaw) && faceRefRaw) ? faceRefRaw : '',
     needsOriginal: !!(isDataUrl && thumbs.length === 0),
     thumbs,
+    liteShape: LITE_SHAPE,   // 投影结构版本：老投影缺字段时据此重建
   };
   for (const f of LITE_TEXT_FIELDS) {
     if (f in record) lite[f] = record[f];
@@ -227,31 +233,8 @@ function buildCharacterLite(record) {
   return lite;
 }
 
-// 投影批量补写：同一事务内先查再写，只补"仍缺投影"的记录，
-// 避免用读取期间已过期的投影覆盖并发写入产生的新投影。
-async function putCharacterLiteIfAbsent(list) {
-  if (!Array.isArray(list) || list.length === 0) return 0;
-  const db = await openDB();
-  return new Promise((resolve, reject) => {
-    let written = 0;
-    const t = db.transaction(STORES.characterLite, 'readwrite');
-    const store = t.objectStore(STORES.characterLite);
-    t.oncomplete = () => resolve(written);
-    t.onerror = () => reject(t.error);
-    t.onabort = () => reject(t.error || new Error('投影写入事务中止'));
-    for (const lite of list) {
-      const req = store.get(lite.id);
-      req.onsuccess = () => {
-        if (req.result) return;   // 已有投影（可能来自更新的写入）：不动
-        store.put(lite);
-        written++;
-      };
-    }
-  });
-}
-
 // 投影读取 + 自愈：不物化 characters 全量值（只用 getAllKeys + 必要的单条 get）；
-// 缺投影的记录即时投影并落库，旧数据无需重写、无需重新同步。
+// 缺投影 / 投影结构过旧的记录即时重建并落库，旧数据无需重写、无需重新同步。
 function yieldToMain() { return new Promise(resolve => setTimeout(resolve, 0)); }
 
 async function readCharacterLiteAll(options) {
@@ -260,15 +243,20 @@ async function readCharacterLiteAll(options) {
   const byId = new Map();
   liteAll.forEach(r => { if (r && r.id !== undefined && r.id !== null) byId.set(r.id, r); });
   const keys = await getAllKeys(STORES.characters);
-  const missing = keys.filter(k => !byId.has(k));
+  // 需要重建的两类：① 完全没有投影；② 投影是旧结构（缺 liteShape 或版本落后）。
+  // 老装机升级后属于 ② —— 他们的投影没有 faceRef，不重建的话关系网头像会退回首图。
+  const stale = keys.filter(k => {
+    const lite = byId.get(k);
+    return !lite || lite.liteShape !== LITE_SHAPE;
+  });
   const repaired = [];
-  for (let i = 0; i < missing.length; i++) {
-    const record = await getById(STORES.characters, missing[i]);
+  for (let i = 0; i < stale.length; i++) {
+    const record = await getById(STORES.characters, stale[i]);
     const lite = record ? buildCharacterLite(record) : null;
     if (lite) { byId.set(lite.id, lite); repaired.push(lite); }
     if ((i + 1) % 8 === 0) await yieldToMain();   // 分批让出主线程，不长时间占用
   }
-  if (repaired.length) await putCharacterLiteIfAbsent(repaired);
+  if (repaired.length) await forcePutCharacterLite(repaired);
   if (needFirstRef) {
     // 缺缩略图的 data URL 首图：按记录补一次原图引用，保证卡片回退原图（UI 与基线一致）。
     for (const lite of byId.values()) {
@@ -278,6 +266,20 @@ async function readCharacterLiteAll(options) {
     }
   }
   return [...byId.values()].sort((a, b) => (a.sort_order ?? Infinity) - (b.sort_order ?? Infinity));
+}
+
+// 投影强制批量写入（用于结构升级重建）：无条件覆盖，确保新结构立即生效。
+async function forcePutCharacterLite(list) {
+  if (!Array.isArray(list) || list.length === 0) return 0;
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const t = db.transaction(STORES.characterLite, 'readwrite');
+    const store = t.objectStore(STORES.characterLite);
+    t.oncomplete = () => resolve(list.length);
+    t.onerror = () => reject(t.error);
+    t.onabort = () => reject(t.error || new Error('投影重建事务中止'));
+    for (const lite of list) store.put(lite);
+  });
 }
 
 // 投影只读入口（派生数据；整体清空后由读路径自愈重建 —— 回滚/恢复路径）

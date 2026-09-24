@@ -573,7 +573,7 @@ async function canonicalizeRecordsForDiff(records, serverUrl, localSide = false,
 function charContentEqual(a, b) {
   const fields = ['alias', 'university', 'region', 'naming_rationale', 'height',
                    'gender', 'birthday', 'appearance', 'identity_period', 'birth_time',
-                   'setting', 'family', 'birthplace', 'status'];
+                   'setting', 'family', 'birthplace', 'status', 'face_crop'];
   for (const f of fields) {
     if ((a[f] || '') !== (b[f] || '')) return false;
   }
@@ -842,6 +842,7 @@ async function uploadToServer(onProgress, scope) {
         appearance: c.appearance || '', identity_period: c.identity_period || '',
         birth_time: c.birth_time || '', setting: c.setting || '', family: c.family || '',
         birthplace: c.birthplace || '', status: c.status || '存在',
+        face_crop: c.face_crop || '',
         images: Array.isArray(c.images) ? c.images : (c.image_url ? [c.image_url] : []),
       };
       const res = await fetch(url + '/api/characters/' + item.target.id, {
@@ -858,6 +859,7 @@ async function uploadToServer(onProgress, scope) {
         appearance: c.appearance || '', identity_period: c.identity_period || '',
         birth_time: c.birth_time || '', setting: c.setting || '', family: c.family || '',
         birthplace: c.birthplace || '', status: c.status || '存在',
+        face_crop: c.face_crop || '',
         image_url: c.image_url || '',
         images: Array.isArray(c.images) ? c.images : (c.image_url ? [c.image_url] : []),
       };
