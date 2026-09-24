@@ -78,6 +78,9 @@ def init_db():
     # 新增多图字段 images（JSON 数组），并把旧 image_url 迁移为 images 首项
     if "images" not in cols:
         cursor.execute("ALTER TABLE characters ADD COLUMN images TEXT DEFAULT '[]'")
+    # 新增人脸框选参数 face_crop（JSON：{img, cx, cy, r}，均为 0~1 比例）
+    if "face_crop" not in cols:
+        cursor.execute("ALTER TABLE characters ADD COLUMN face_crop TEXT DEFAULT ''")
     cursor.execute("SELECT id, image_url, images FROM characters")
     for row in cursor.fetchall():
         row_id, old_url, images_json = row[0], row[1], row[2]
@@ -172,6 +175,7 @@ class CharacterCreate(BaseModel):
     status: str = Field(default="存在", description="存在状态")
     image_url: str = Field(default="", description="角色图片URL（封面，兼容旧字段）")
     images: List[str] = Field(default=[], description="角色图片URL数组（多图）")
+    face_crop: str = Field(default="", description="人脸框选参数 JSON：{img,cx,cy,r}（0~1 比例）")
 
 
 class CharacterUpdate(BaseModel):
@@ -192,6 +196,7 @@ class CharacterUpdate(BaseModel):
     status: Optional[str] = None
     image_url: Optional[str] = None
     images: Optional[List[str]] = None
+    face_crop: Optional[str] = None
 
 
 class CharacterResponse(BaseModel):
@@ -212,6 +217,7 @@ class CharacterResponse(BaseModel):
     birthplace: str = ""
     status: str = "存在"
     sort_order: int = 0
+    face_crop: str = ""
     created_at: str
     updated_at: str
 
@@ -363,12 +369,13 @@ def create_character(data: CharacterCreate):
     cursor.execute(
         """INSERT INTO characters
            (name, alias, university, region, naming_rationale, height, gender, birthday, appearance,
-            identity_period, birth_time, setting, family, birthplace, status, image_url, images, sort_order, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            identity_period, birth_time, setting, family, birthplace, status, image_url, images, face_crop, sort_order, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (data.name, data.alias, data.university, data.region, data.naming_rationale,
          data.height, data.gender, data.birthday,
          data.appearance, data.identity_period, data.birth_time,
-         data.setting, data.family, data.birthplace, data.status, data.image_url, json.dumps(data.images), next_order, now, now)
+         data.setting, data.family, data.birthplace, data.status, data.image_url, json.dumps(data.images),
+         data.face_crop, next_order, now, now)
     )
     conn.commit()
     char_id = cursor.lastrowid
@@ -402,7 +409,7 @@ def update_character(char_id: int, data: CharacterUpdate):
 
     updates = {}
     for field in ["name", "alias", "university", "region", "naming_rationale", "height", "gender", "birthday", "appearance",
-                  "identity_period", "birth_time", "setting", "family", "birthplace", "status", "image_url"]:
+                  "identity_period", "birth_time", "setting", "family", "birthplace", "status", "image_url", "face_crop"]:
         val = getattr(data, field)
         if val is not None:
             updates[field] = val
@@ -1368,6 +1375,11 @@ def serve_export_all_js():
 @app.get("/copy-detail.js")
 def serve_copy_detail_js():
     return FileResponse(os.path.join(DESKTOP_DIR, "copy-detail.js"), media_type="application/javascript")
+
+
+@app.get("/face-crop.js")
+def serve_face_crop_js():
+    return FileResponse(os.path.join(DESKTOP_DIR, "face-crop.js"), media_type="application/javascript")
 
 
 # ============================================================

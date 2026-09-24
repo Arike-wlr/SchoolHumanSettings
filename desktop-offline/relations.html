@@ -1022,6 +1022,15 @@ function computeLayout() {
     nodes.push({
       id: c.id, name: c.name, family: c.family || '',
       gender: c.gender,
+      face_crop: c.face_crop || '',
+      // 头像取自 face_crop.img 指定的那张图（不是写死的首图）：
+      // 取脸时任意一张照片都能被圈选，所以节点要显示"被选中的那张"。
+      avatarRef: (function () {
+        const imgs = normalizeImages(c);
+        const fc = FaceCrop.parse(c.face_crop);
+        const i = (fc && fc.img >= 0 && fc.img < imgs.length) ? fc.img : 0;
+        return imgs[i] || '';
+      })(),
       x: pinned ? pinned.x : (p ? p.x : cx),
       y: pinned ? pinned.y : (p ? p.y : cy),
       r: nodeR,
@@ -1031,6 +1040,49 @@ function computeLayout() {
   // 保存数据供 drawFamilyClusters 使用
   window._famMemberSet = famMemberSet;
   window._famCenter = famCenter;
+  loadAvatars();
+}
+
+// ---- 节点头像：把 face_crop.img 指定的那张图按 face_crop 裁成圆形画布并缓存 ----
+const avatarCache = new Map();   // id → HTMLImageElement（已裁好的圆形图）或 null
+const avatarSig = new Map();     // id → ref|crop 签名（变了才重裁）
+function avatarKey(n) {
+  if (!n || !n.face_crop || !n.avatarRef) return '';
+  return n.avatarRef + '|' + n.face_crop;
+}
+function loadAvatars() {
+  if (!window.FaceCrop) return;
+  nodes.forEach(n => {
+    const key = avatarKey(n);
+    if (!key) { avatarCache.delete(n.id); avatarSig.delete(n.id); return; }
+    if (avatarSig.get(n.id) === key) return;
+    avatarSig.set(n.id, key);
+    const crop = FaceCrop.parse(n.face_crop);
+    // 桌面端图片引用可能是相对路径（/api/images/…）、data URL 或 http(s) 绝对地址。
+    // 相对路径在同一源下可直接被 <img> 加载，必须放行。
+    const ref = String(n.avatarRef || '').trim();
+    const src = /^(?:data:image\/|https?:\/\/|\/|\.\/|[^:/?#]+\/)/i.test(ref) ? ref : '';
+    if (!crop || !src) { avatarCache.set(n.id, null); return; }
+    const im = new Image();
+    im.onload = () => {
+      FaceCrop.cropToCanvas(im, crop, 128).then(cv => {
+        // 直接存圆形画布（不走 toDataURL，避免任何 canvas 污染风险）
+        avatarCache.set(n.id, cv || null);
+        drawGraph();
+      });
+    };
+    im.onerror = () => { avatarCache.set(n.id, null); };
+    im.src = src;
+  });
+}
+
+// 归一化 images 字段（与 index.html 同规则）
+function normalizeImages(c) {
+  let imgs = c.images;
+  if (typeof imgs === 'string') { try { imgs = JSON.parse(imgs); } catch (e) { imgs = []; } }
+  if (!Array.isArray(imgs)) imgs = [];
+  if (imgs.length === 0 && c.image_url) imgs = [c.image_url];
+  return imgs;
 }
 
 
@@ -1326,6 +1378,18 @@ function drawGraph() {
     ctx.arc(node.x, node.y, node.r, 0, Math.PI * 2);
     ctx.fillStyle = bodyGrad;
     ctx.fill();
+    // 有头像时把裁好的圆形头像贴进节点圆内（保留描边与家族色环）
+    const av = avatarCache.get(node.id);
+    if (av) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(node.x, node.y, node.r, 0, Math.PI * 2);
+      ctx.clip();
+      ctx.drawImage(av, node.x - node.r, node.y - node.r, node.r * 2, node.r * 2);
+      ctx.restore();
+    }
+    ctx.beginPath();
+    ctx.arc(node.x, node.y, node.r, 0, Math.PI * 2);
     ctx.strokeStyle = 'rgba(255,255,255,0.5)';
     ctx.lineWidth = 2;
     ctx.stroke();
@@ -1726,6 +1790,15 @@ function drawGraphWithHighlight() {
 
     ctx.beginPath(); ctx.arc(node.x, node.y, node.r, 0, Math.PI * 2);
     ctx.fillStyle = bodyGrad; ctx.fill();
+    // 有头像时把裁好的圆形头像贴进节点圆内（保留描边与家族色环）
+    const av = avatarCache.get(node.id);
+    if (av) {
+      ctx.save();
+      ctx.beginPath(); ctx.arc(node.x, node.y, node.r, 0, Math.PI * 2); ctx.clip();
+      ctx.drawImage(av, node.x - node.r, node.y - node.r, node.r * 2, node.r * 2);
+      ctx.restore();
+    }
+    ctx.beginPath(); ctx.arc(node.x, node.y, node.r, 0, Math.PI * 2);
     ctx.strokeStyle = 'rgba(255,255,255,0.5)'; ctx.lineWidth = 2; ctx.stroke();
 
     // 家族色环
@@ -2129,6 +2202,7 @@ function toggleSidebar(){document.getElementById('sidebar').classList.toggle('co
 <script src="search.js"></script>
 <script src="export-all.js"></script>
 <script src="copy-detail.js"></script>
+<script src="face-crop.js"></script>
 
 </body>
 </html>

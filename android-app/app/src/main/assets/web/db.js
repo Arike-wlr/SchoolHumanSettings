@@ -184,7 +184,7 @@ async function countAll(storeName) {
 // 见 CONTRACT rev10 的 F9），否则导出等产物会静默丢字段（首轮漏 birthplace 的教训）；
 // 由 tests/p06-read-projection.cjs 的 Gate ⑧ 机器守卫。
 const LITE_TEXT_FIELDS = ['name', 'alias', 'university', 'region', 'birthplace', 'gender', 'status', 'height',
-  'birthday', 'appearance', 'identity_period', 'birth_time', 'naming_rationale', 'setting', 'family'];
+  'birthday', 'appearance', 'identity_period', 'birth_time', 'naming_rationale', 'setting', 'family', 'face_crop'];
 
 // 与 app.js 的 normalizeImages 同规则：images 数组长度；为空时看 image_url。
 function liteImageRefs(record) {
@@ -206,6 +206,9 @@ function buildCharacterLite(record) {
   if (!record || record.id === undefined || record.id === null) return null;
   const refs = liteImageRefs(record);
   const first = refs[0] || '';
+  // 取脸图引用（face_crop.img 指向的那张）：供关系网节点圆头像使用。
+  // data URL 与首图同策略——不在这里物化，由需要它的读路径按需补。
+  const faceRefRaw = faceRefOf(record);
   const thumbs = (Array.isArray(record.thumbs) && record.thumbs[0]) ? [record.thumbs[0]] : [];
   const isDataUrl = /^data:/i.test(first);
   const lite = {
@@ -214,6 +217,7 @@ function buildCharacterLite(record) {
     images_count: refs.length,
     firstRefSig: liteFirstRefSig(first),
     firstRef: (!isDataUrl && first) ? first : '',   // 短引用可直接给卡片；data URL 由读路径按需补
+    faceRef: (!/^data:/i.test(faceRefRaw) && faceRefRaw) ? faceRefRaw : '',
     needsOriginal: !!(isDataUrl && thumbs.length === 0),
     thumbs,
   };
@@ -493,6 +497,27 @@ function firstImageRefOf(record) {
   return imgs[0] || '';
 }
 
+// 取脸图引用：face_crop.img 指向的那张图（关系网节点圆头像用它，不是首图）。
+// 取脸时任意一张照片都能被圈选，所以节点显示"被选中的那张"。
+// face_crop 缺失/下标越界时回退首图，保持旧数据仍能显示头像。
+// 只解析这一个字段，不物化 images 之外的东西（投影路径仍不碰原图字节）。
+function faceRefOf(record) {
+  if (!record) return '';
+  let imgs = record.images;
+  if (typeof imgs === 'string') { try { imgs = JSON.parse(imgs); } catch (e) { imgs = []; } }
+  if (!Array.isArray(imgs)) imgs = [];
+  if (imgs.length === 0 && record.image_url) imgs = [record.image_url];
+  let idx = 0;
+  const fc = record.face_crop;
+  if (typeof fc === 'string' && fc) {
+    try {
+      const o = JSON.parse(fc);
+      if (o && typeof o.img === 'number' && o.img >= 0 && o.img < imgs.length) idx = o.img;
+    } catch (e) { /* 解析不了就用首图 */ }
+  }
+  return imgs[idx] || '';
+}
+
 // 仅当记录当前首图仍等于生成缩略图时所用的引用时才写入 thumbs（否则视为过期）。
 // 返回 'ok' | 'stale' | 'missing'。
 // 同一事务内同步更新轻量投影的 thumbs/needsOriginal（只改字段；投影不存在则不创建，等读路径自愈）。
@@ -562,11 +587,20 @@ let _sharedCharLite = { list: null, names: null };
 function listCharactersLiteShared(shape) {
   const key = shape === 'names' ? 'names' : 'list';
   if (!_sharedCharLite[key]) {
-    _sharedCharLite[key] = readCharacterLiteAll({ needFirstRef: key === 'list' })
+    _sharedCharLite[key] = readCharacterLiteAll()
       .then(function (list) {
         if (key === 'names') {
+          // 关系网节点需要 id/name/学校/家族 + 取脸图引用与取脸参数（画圆形头像）。
+          // faceRef 是 face_crop.img 指向的那张图（不是首图）：取脸可圈选任意一张照片，
+          // 节点就要显示被选中的那张。data URL 引用不在这里补原图，交给节点渲染时的
+          // 安全路径（safeImageSrc 会识别后者为不可用并回退纯色圆）。
           return list.map(function (c) {
-            return { id: c.id, name: c.name, university: c.university, family: c.family };
+            return {
+              id: c.id, name: c.name, university: c.university, family: c.family,
+              face_crop: c.face_crop || '',
+              faceRef: c.faceRef || '',
+              firstRef: c.firstRef || ''
+            };
           });
         }
         return list;

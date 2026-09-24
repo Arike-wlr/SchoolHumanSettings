@@ -275,6 +275,7 @@ VM.index = (function() {
   var activeRegion = '全部';
   var currentImageUrls = [];
   var currentImageFiles = [];
+  var currentFaceCrop = '';   // 当前表单的取脸参数（字符串 JSON；'' = 未取脸）
   var exportMode = false;
   var selectedIds = new Set();
   var detailCharId = null;
@@ -315,14 +316,20 @@ VM.index = (function() {
   function handleImageUpload(event) {
     var files = Array.from(event.target.files || []);
     if (files.length === 0) return;
+    var added = false;
     for (var i = 0; i < files.length; i++) {
       var file = files[i];
       if (!file.type.startsWith('image/')) { showToast('文件 '+file.name+' 不是图片，已跳过', 'error'); continue; }
       if (file.size > 20*1024*1024) { showToast('图片 '+file.name+' 超过20MB，已跳过', 'error'); continue; }
       currentImageFiles.push({ file: file, previewUrl: URL.createObjectURL(file) });
+      added = true;
     }
     renderImagePreview();
     event.target.value = '';
+    // 还从未取过脸时，直接为第一张图打开圈选浮层，减少一次点击。
+    if (added && !(window.FaceCrop && FaceCrop.parse(currentFaceCrop))) {
+      setTimeout(function () { cropImageFace(0); }, 80);
+    }
   }
 
   function renderImagePreview() {
@@ -331,26 +338,57 @@ VM.index = (function() {
     for (var i = 0; i < currentImageUrls.length; i++) items.push({ url: currentImageUrls[i], index: i });
     for (var j = 0; j < currentImageFiles.length; j++) items.push({ url: currentImageFiles[j].previewUrl, index: currentImageUrls.length+j });
     if (items.length === 0) { grid.style.display = 'none'; grid.innerHTML = ''; return; }
+    var fc = window.FaceCrop ? FaceCrop.parse(currentFaceCrop) : null;
     grid.style.display = 'grid';
     grid.style.gridTemplateColumns = 'repeat(auto-fill, minmax(72px, 1fr))';
     grid.style.gap = '8px';
     grid.innerHTML = items.map(function(it) {
-      return '<div style="position:relative;aspect-ratio:1;border-radius:6px;overflow:hidden;border:1px solid var(--border);">' +
+      var isFace = fc && fc.img === it.index;
+      var badge = isFace ? '<span style="position:absolute;left:2px;bottom:2px;background:var(--accent,#8b5e3c);color:#fff;font-size:.62rem;padding:1px 6px;border-radius:8px;pointer-events:none;">人脸</span>' : '';
+      return '<div style="position:relative;aspect-ratio:1;border-radius:6px;overflow:hidden;border:2px solid '+(isFace?'var(--accent,#8b5e3c)':'var(--border)')+';cursor:pointer;" onclick="VM.index.cropImageFace('+it.index+')">' +
         (safeImageSrc(it.url) ? '<img src="'+safeImageSrc(it.url)+'" alt="预览" style="width:100%;height:100%;object-fit:cover;">' : imageRepairHint()) +
-        '<button type="button" onclick="VM.index.removeImageItem('+it.index+')" style="position:absolute;top:2px;right:2px;width:20px;height:20px;border-radius:50%;border:none;background:rgba(0,0,0,0.6);color:#fff;cursor:pointer;font-size:12px;line-height:1;display:flex;align-items:center;justify-content:center;">✕</button></div>';
+        badge +
+        '<button type="button" onclick="event.stopPropagation();VM.index.removeImageItem('+it.index+')" style="position:absolute;top:2px;right:2px;width:20px;height:20px;border-radius:50%;border:none;background:rgba(0,0,0,0.6);color:#fff;cursor:pointer;font-size:12px;line-height:1;display:flex;align-items:center;justify-content:center;">✕</button></div>';
     }).join('');
+  }
+
+  // 圈选人脸：对指定图片打开取脸浮层，确认后把参数记进 currentFaceCrop。
+  function cropImageFace(index) {
+    if (!window.FaceCrop) { showToast('取脸组件未加载', 'error'); return; }
+    var uc = currentImageUrls.length;
+    var src, ref;
+    if (index < uc) { ref = currentImageUrls[index]; src = safeImageSrc(ref); }
+    else { ref = currentImageFiles[index - uc].previewUrl; src = ref; }
+    if (!src) { showToast('该图片不可用，无法取脸', 'error'); return; }
+    var preset = FaceCrop.parse(currentFaceCrop);
+    FaceCrop.open({
+      src: src,
+      crop: (preset && preset.img === index) ? preset : null,
+      onConfirm: function(c) {
+        c.img = index;
+        currentFaceCrop = FaceCrop.stringify(c);
+        renderImagePreview();
+        showToast('已圈选人脸', 'success');
+      }
+    });
   }
 
   function removeImageItem(index) {
     var uc = currentImageUrls.length;
     if (index < uc) { currentImageUrls.splice(index, 1); }
     else { var fi = index - uc; URL.revokeObjectURL(currentImageFiles[fi].previewUrl); currentImageFiles.splice(fi, 1); }
+    // 删除图片后修正 face_crop：被删的正是取脸图则清空；在其之前的图被删则下标前移。
+    var fc = window.FaceCrop ? FaceCrop.parse(currentFaceCrop) : null;
+    if (fc) {
+      if (fc.img === index) currentFaceCrop = '';
+      else if (fc.img > index) { fc.img--; currentFaceCrop = FaceCrop.stringify(fc); }
+    }
     renderImagePreview();
   }
 
   function resetImageUpload() {
     currentImageFiles.forEach(function(item) { URL.revokeObjectURL(item.previewUrl); });
-    currentImageUrls = []; currentImageFiles = [];
+    currentImageUrls = []; currentImageFiles = []; currentFaceCrop = '';
     var grid = document.getElementById('indexImagePreviewGrid');
     grid.style.display = 'none'; grid.innerHTML = '';
     document.getElementById('indexImage').value = '';
@@ -650,6 +688,7 @@ VM.index = (function() {
       document.getElementById('indexSetting').value=c.setting||'';
       resetImageUpload();
       currentImageUrls=normalizeImages(c);
+      currentFaceCrop=c.face_crop||'';
       renderImagePreview();
       document.getElementById('indexModalOverlay').classList.add('active');
     }).catch(function(){showToast('获取数据失败','error');});
@@ -657,9 +696,15 @@ VM.index = (function() {
 
   var _autoSaveInProgress = false;
   function doSubmitFinal(editId, data) {
+    // currentImageUrls 已含新图上传后的完整顺序？—— 否：新图 URL 在 data.newUrls，
+    // 这里把它拼到 currentImageUrls 之后，与 renderImagePreview 的下标口径一致。
     var allImages=currentImageUrls.concat(data.newUrls||[]);
     if(allImages.length>0){data.images=allImages;data.image_url=allImages[0];}
     else{data.images=[];data.image_url='';}
+    // 取脸参数：下标基于 allImages；取脸图已被删除或越界则清空。
+    var fc = window.FaceCrop ? FaceCrop.parse(currentFaceCrop) : null;
+    if (fc && fc.img < allImages.length) data.face_crop = FaceCrop.stringify(fc);
+    else data.face_crop = '';
     delete data.newUrls;
     // 首图变了才清派生缩略图：api-shim 的 PUT 会合并旧记录，不清会留下陈旧缩略图；
     // 首图没变则保留，避免只改文字字段时卡片短暂回退原图。
@@ -705,10 +750,12 @@ VM.index = (function() {
       setting:document.getElementById('indexSetting').value.trim(),
     };
     if(currentImageFiles.length===0){doSubmitFinal(editId,data);return;}
-    var nu=[],pending=currentImageFiles.length,hasErr=false;
-    currentImageFiles.forEach(function(item){
+    // nu 按下标填充而非 push：上传完成顺序不定，push 会让 newUrls 顺序与
+    // currentImageFiles 不一致，取脸参数里的下标就会错位到别的图。
+    var nu=new Array(currentImageFiles.length),pending=currentImageFiles.length,hasErr=false;
+    currentImageFiles.forEach(function(item,idx){
       var fd=new FormData();fd.append('file',item.file);
-      fetch('/api/images/upload',{method:'POST',body:fd}).then(function(r){if(r.ok)return r.json();throw new Error();}).then(function(r){nu.push(r.image_url);}).catch(function(){hasErr=true;}).finally(function(){
+      fetch('/api/images/upload',{method:'POST',body:fd}).then(function(r){if(r.ok)return r.json();throw new Error();}).then(function(r){nu[idx]=r.image_url;}).catch(function(){hasErr=true;}).finally(function(){
         pending--;
         if(pending===0){
           if(hasErr){showToast('图片上传失败，请重试','error');return;}
@@ -935,6 +982,7 @@ VM.index = (function() {
     openDeleteModal:openDeleteModal, closeDeleteModal:closeDeleteModal, confirmDelete:confirmDelete,
     closeModal:closeModal, closeDetailModal:closeDetailModal, detailEdit:detailEdit,
     handleImageUpload:handleImageUpload, removeImageItem:removeImageItem, detailImageGo:detailImageGo, detailImageStep:detailImageStep,
+    cropImageFace:cropImageFace,
     handleCardClick:handleCardClick,
     enterExportMode:enterExportMode, cancelExport:cancelExport,
     toggleCardSelect:toggleCardSelect, toggleSelectAll:toggleSelectAll, confirmExport:confirmExport,
@@ -1658,6 +1706,11 @@ VM.relations = (function() {
   var gNodeIndex = new Map();       // id → node：替代每步线性 find
   var gNodeFams = new Map();        // id → 家族数组：替代每步重复拆分字符串
   var gLayout = { epoch: 0, timer: null, step: 0, total: 300, budgetMs: 8, running: false, paused: false };
+  // 节点头像缓存：id → { img: HTMLImageElement }（已按 face_crop 裁好的圆形画布）
+  // 或 id → null（该角色没有可用头像，避免反复重试）。key 里带 crop 签名，
+  // 取脸参数变了会自动重新裁。
+  var gAvatarCache = new Map();
+  var gAvatarSig = new Map();       // id → 当前缓存的 key（ref+crop 签名）
 
   function splitFamilies(s) { return (s || '').split(/[、,，]/).map(function(x) { return x.trim(); }).filter(Boolean); }
   function buildFamilyColors() {
@@ -2309,9 +2362,22 @@ VM.relations = (function() {
     });
     gNodes.forEach(function(n) {
       var fc = nodeFamilyColor(n);
-      gCtx.beginPath(); gCtx.arc(n.x, n.y, 16, 0, Math.PI * 2);
+      var av = gAvatarCache.get(n.id);
+      var r = 16;
+      // 底圆：无头像时是家族色圆；有头像时也先铺一层，防止图片未就绪时透出画布。
+      gCtx.beginPath(); gCtx.arc(n.x, n.y, r, 0, Math.PI * 2);
       gCtx.fillStyle = n === gDragNode ? '#c49a6c' : fc; gCtx.fill();
+      if (av) {
+        // 头像按圆形裁进节点圆内（图片本身已是圆形画布，直接缩放贴入即可）
+        gCtx.save();
+        gCtx.beginPath(); gCtx.arc(n.x, n.y, r, 0, Math.PI * 2); gCtx.clip();
+        gCtx.drawImage(av, n.x - r, n.y - r, r * 2, r * 2);
+        gCtx.restore();
+      }
+      // 家族色描边（有头像时也保留，用于区分家族）
+      gCtx.beginPath(); gCtx.arc(n.x, n.y, r, 0, Math.PI * 2);
       gCtx.strokeStyle = themeVar('--stroke-ring','#fffef9'); gCtx.lineWidth = 2; gCtx.stroke();
+      // 节点名称画在彩色圆外，取主题正文色：浅色主题深字、深色主题浅字，避免与画布同色看不见
       gCtx.fillStyle = themeVar('--text','#3d2b1f'); gCtx.font = '11px "PingFang SC","Microsoft YaHei",sans-serif'; gCtx.textAlign = 'center'; gCtx.textBaseline = 'top';
       var label = n.name || ('#' + n.id); if (label.length > 5) label = label.slice(0, 4) + '…';
       gCtx.fillText(label, n.x, n.y + 20);
@@ -2377,6 +2443,45 @@ VM.relations = (function() {
   function onMouseUp() { if (gDragNode) { gDragNode.fixed = false; gDragNode = null; } gDragging = false; gPanning = false; }
   function onWheel(e) { e.preventDefault(); gScale = Math.max(0.3, Math.min(3, gScale * (e.deltaY < 0 ? 1.1 : 0.9))); graphDraw(); }
 
+  // ---- 节点头像：把 face_crop.img 指定的那张图按 face_crop 裁成圆形画布并缓存 ----
+  // 返回缓存里的 Image（含已裁好的圆形内容）或 null（无图/无取脸/加载失败）。
+  // drawAvatar 只读缓存、绝不同步发起加载，避免拖拽重绘时反复卡顿。
+  // 取脸图引用优先用 faceRef（names 投影带出的、face_crop.img 指向的那张），
+  // 完整记录没有 faceRef 时退回首图 firstRef —— 与 face_crop.img 同源，语义一致。
+  function avatarRefOf(c) {
+    return (c && (c.faceRef || c.firstRef)) || '';
+  }
+  function avatarKey(c) {
+    var ref = avatarRefOf(c);
+    if (!c || !c.face_crop || !ref) return '';
+    return ref + '|' + c.face_crop;
+  }
+
+  function loadAvatars() {
+    if (!window.FaceCrop) return;
+    allCharacters.forEach(function(c) {
+      var key = avatarKey(c);
+      if (!key) { gAvatarCache.delete(c.id); gAvatarSig.delete(c.id); return; }
+      if (gAvatarSig.get(c.id) === key) return;   // 已加载/在途：不重复
+      gAvatarSig.set(c.id, key);
+      var crop = FaceCrop.parse(c.face_crop);
+      var src = safeImageSrc(avatarRefOf(c));
+      if (!crop || !src) { gAvatarCache.set(c.id, null); return; }
+      var im = new Image();
+      im.onload = function() {
+        FaceCrop.cropToCanvas(im, crop, 96).then(function(cv) {
+          // 直接把圆形画布存进缓存（不走 toDataURL）：Android 端图片来自
+          // appassets.androidplatform.net，对 file:// 页面而言是跨域，toDataURL 会因
+          // canvas 被污染而抛错；canvas 本身可直接被 drawImage 使用。
+          gAvatarCache.set(c.id, cv || null);
+          if (gNodes.length) graphDraw();
+        });
+      };
+      im.onerror = function() { gAvatarCache.set(c.id, null); };
+      im.src = src;
+    });
+  }
+
   function graphInit() {
     gCanvas = document.getElementById('graphCanvas');
     var wrap = document.getElementById('canvasWrap'), empty = document.getElementById('graphEmpty');
@@ -2407,10 +2512,12 @@ VM.relations = (function() {
         return { id: c.id, name: c.name, family: c.family || '', x: x, y: y, vx: 0, vy: 0, fixed: false };
       });
       indexGraphNodes();
+      loadAvatars();
       startLayout();   // 300 步按时间预算分块执行，期间让出事件循环
     } else {
       allCharacters.forEach(function(c) { var n = gNodeIndex.get(c.id) || gNodes.find(function(n) { return n.id === c.id; }); if (n) { n.name = c.name; n.family = c.family || ''; } });
       indexGraphNodes();
+      loadAvatars();
       if (gLayout.running) resumeLayout(); else graphDraw();
     }
     if (!gCanvas._bound) {

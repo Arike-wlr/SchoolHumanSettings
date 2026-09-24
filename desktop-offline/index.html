@@ -1004,7 +1004,7 @@
               <span style="font-size: 1.2rem; margin-right: 8px;">📷</span> 选择图片文件（可多选）
             </button>
             <div class="image-upload-hint" style="font-size: 0.8rem; color: var(--text-light); margin-top: 6px; text-align: center;">
-              支持 JPG、PNG、GIF 格式，可一次选择多张，建议尺寸 300×400
+              支持 JPG、PNG、GIF 格式，可一次选择多张，建议尺寸 300×400<br>点击缩略图可圈选人脸，关系网圆圈会显示这张脸
             </div>
           </div>
         </div>
@@ -1322,11 +1322,13 @@ function esc(s) {
 // currentImageFiles: 待上传的新文件数组 [{file, previewUrl}]
 let currentImageUrls = [];
 let currentImageFiles = [];
+let currentFaceCrop = '';   // 取脸参数（字符串 JSON；'' = 未取脸）
 
 function handleImageUpload(event) {
   const files = Array.from(event.target.files || []);
   if (files.length === 0) return;
 
+  let added = false;
   for (const file of files) {
     if (!file.type.startsWith('image/')) {
       showToast(`文件 ${file.name} 不是图片，已跳过`, 'error');
@@ -1337,10 +1339,33 @@ function handleImageUpload(event) {
       continue;
     }
     currentImageFiles.push({ file, previewUrl: URL.createObjectURL(file) });
+    added = true;
   }
   renderImagePreview();
   // 重置文件输入，允许再次选择同一文件
   event.target.value = '';
+  // 还从未取过脸时，直接为第一张图打开圈选浮层，减少一次点击。
+  if (added && !(window.FaceCrop && FaceCrop.parse(currentFaceCrop))) {
+    setTimeout(() => cropImageFace(0), 80);
+  }
+}
+
+// 圈选人脸：对指定图片打开取脸浮层，确认后把参数记进 currentFaceCrop。
+function cropImageFace(index) {
+  if (!window.FaceCrop) { showToast('取脸组件未加载', 'error'); return; }
+  const urlCount = currentImageUrls.length;
+  const url = index < urlCount ? currentImageUrls[index] : currentImageFiles[index - urlCount].previewUrl;
+  const preset = FaceCrop.parse(currentFaceCrop);
+  FaceCrop.open({
+    src: url,
+    crop: (preset && preset.img === index) ? preset : null,
+    onConfirm: (c) => {
+      c.img = index;
+      currentFaceCrop = FaceCrop.stringify(c);
+      renderImagePreview();
+      showToast('已圈选人脸', 'success');
+    },
+  });
 }
 
 function renderImagePreview() {
@@ -1354,14 +1379,20 @@ function renderImagePreview() {
     grid.innerHTML = '';
     return;
   }
+  const fc = window.FaceCrop ? FaceCrop.parse(currentFaceCrop) : null;
   grid.style.display = 'grid';
-  grid.innerHTML = items.map(it => `
-    <div style="position: relative; aspect-ratio: 1; border-radius: 6px; overflow: hidden; border: 1px solid var(--border);">
+  grid.innerHTML = items.map(it => {
+    const isFace = fc && fc.img === it.index;
+    return `
+    <div onclick="cropImageFace(${it.index})" title="点击圈选人脸"
+      style="position: relative; aspect-ratio: 1; border-radius: 6px; overflow: hidden; border: 2px solid ${isFace ? 'var(--accent)' : 'var(--border)'}; cursor: pointer;">
       <img src="${it.url}" alt="预览" style="width: 100%; height: 100%; object-fit: cover;">
-      <button type="button" onclick="removeImageItem(${it.index})" title="删除"
+      ${isFace ? `<span style="position:absolute;left:2px;bottom:2px;background:var(--accent);color:#fff;font-size:0.62rem;padding:1px 6px;border-radius:8px;pointer-events:none;">人脸</span>` : ''}
+      <button type="button" onclick="event.stopPropagation();removeImageItem(${it.index})" title="删除"
         style="position: absolute; top: 2px; right: 2px; width: 20px; height: 20px; border-radius: 50%; border: none; background: rgba(0,0,0,0.6); color: #fff; cursor: pointer; font-size: 12px; line-height: 1; display: flex; align-items: center; justify-content: center;">✕</button>
     </div>
-  `).join('');
+  `;
+  }).join('');
 }
 
 function removeImageItem(index) {
@@ -1373,6 +1404,12 @@ function removeImageItem(index) {
     URL.revokeObjectURL(currentImageFiles[fileIdx].previewUrl);
     currentImageFiles.splice(fileIdx, 1);
   }
+  // 删除图片后修正 face_crop：被删的正是取脸图则清空；在其之前的图被删则下标前移。
+  const fc = window.FaceCrop ? FaceCrop.parse(currentFaceCrop) : null;
+  if (fc) {
+    if (fc.img === index) currentFaceCrop = '';
+    else if (fc.img > index) { fc.img--; currentFaceCrop = FaceCrop.stringify(fc); }
+  }
   renderImagePreview();
 }
 
@@ -1380,6 +1417,7 @@ function resetImageUpload() {
   currentImageFiles.forEach(item => URL.revokeObjectURL(item.previewUrl));
   currentImageUrls = [];
   currentImageFiles = [];
+  currentFaceCrop = '';
   const grid = document.getElementById('imagePreviewGrid');
   grid.style.display = 'none';
   grid.innerHTML = '';
@@ -1466,6 +1504,7 @@ async function openEditModal(id) {
     // 处理图片预览（多图：用 images 数组，兼容旧 image_url）
     resetImageUpload();
     currentImageUrls = normalizeImages(c);
+    currentFaceCrop = c.face_crop || '';
     renderImagePreview();
     
     document.getElementById('modalOverlay').classList.add('active');
@@ -1523,6 +1562,9 @@ async function submitForm(e) {
       data.images = [];
       data.image_url = '';
     }
+    // 取脸参数：下标基于 allImages；取脸图已被删除或越界则清空。
+    const fc = window.FaceCrop ? FaceCrop.parse(currentFaceCrop) : null;
+    data.face_crop = (fc && fc.img < allImages.length) ? FaceCrop.stringify(fc) : '';
 
     const url = editId ? `${API}/${editId}` : API;
     const method = editId ? 'PUT' : 'POST';
@@ -1827,5 +1869,6 @@ function toggleSidebar() {
 <script src="search.js"></script>
 <script src="export-all.js"></script>
 <script src="copy-detail.js"></script>
+<script src="face-crop.js"></script>
 </body>
 </html>

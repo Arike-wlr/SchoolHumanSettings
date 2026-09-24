@@ -12,6 +12,9 @@
   --safe-top: env(safe-area-inset-top, 0px);
   --canvas-label-bg: #fffef9;
   --stroke-ring: #fffef9;
+  --canvas-from: #faf6f0;
+  --canvas-to: #f0e8db;
+  --canvas-grid: #e6dccd;
 }
 
 /* ====== 深色主题 ====== */
@@ -22,6 +25,9 @@ html[data-theme="dark"] {
   --shadow: 0 2px 12px rgba(0,0,0,.4);
   --canvas-label-bg: #2a2523;
   --stroke-ring: #1c1917;
+  --canvas-from: #1f1b19;
+  --canvas-to: #14110f;
+  --canvas-grid: #322c28;
   color-scheme: dark;
 }
 html[data-theme="dark"] body.home-active {
@@ -243,11 +249,11 @@ body.home-active { background: linear-gradient(180deg, #3d2b1f 0%, #5a3e2b 40%, 
 .graph-header { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; border-bottom: 1px solid var(--border); }
 .graph-title { font-size: .9rem; font-weight: 600; }
 .graph-hint { font-size: .7rem; color: var(--text-light); }
-.graph-canvas-wrap { position: relative; height: 280px; background: linear-gradient(180deg, #faf6f0 0%, #f0e8db 100%); touch-action: none; }
+.graph-canvas-wrap { position: relative; height: 280px; background: linear-gradient(180deg, var(--canvas-from) 0%, var(--canvas-to) 100%); touch-action: none; }
 .graph-canvas-wrap canvas { display: block; width: 100%; height: 100%; }
 .graph-empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--text-light); font-size: .82rem; pointer-events: none; }
 .graph-controls { position: absolute; top: 8px; right: 8px; display: flex; flex-direction: column; gap: 4px; }
-.graph-btn { width: 44px; height: 44px; border-radius: 50%; background: rgba(255,255,255,.9); border: 1px solid var(--border); color: var(--accent); font-size: 1.1rem; font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: center; padding: 0; }
+.graph-btn { width: 44px; height: 44px; border-radius: 50%; background: var(--card-bg); border: 1px solid var(--border); color: var(--accent); font-size: 1.1rem; font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: center; padding: 0; opacity: .92; }
 .graph-btn:active { background: var(--accent-pale); }
 
 /* 家族管理 */
