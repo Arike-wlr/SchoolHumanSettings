@@ -575,8 +575,8 @@
       <button class="modal-close" onclick="closeInfoModal()">✕</button>
     </div>
     <div class="modal-body" id="infoBody" style="text-align:left;max-height:60vh;overflow-y:auto;"></div>
-    <div class="modal-footer" style="justify-content:center;">
-      <button class="btn btn-primary btn-sm" onclick="startRelationFromInfo()">＋ 添加与此角色的关系</button>
+    <div class="modal-footer" style="justify-content:center;flex-wrap:wrap;gap:8px;">
+      <button class="btn btn-primary btn-sm" onclick="startRelationFromInfo()">＋ 添加关系</button>
       <button class="btn btn-ghost btn-sm" onclick="closeInfoModal()">关闭</button>
     </div>
   </div>
@@ -652,9 +652,18 @@ let edges = [];       // {id, from, to, type, desc}
 let nodeMap = {};
 let dragNode = null;
 let dragOffX = 0, dragOffY = 0;
+// 注意：平移视图时是直接位移所有节点坐标（见 onMouseMove），节点坐标里
+// 已经含了平移量。因此 offsetX/offsetY 【不再参与】布局计算
+// （fitToView 的居中、gSimulateStep 的中心引力、computeLayout 的播种
+//   一律用 cw/2、ch/2）。这两个变量仅在平移时累加、布局结束时归零，
+// 用于调试观察，切勿再当作"布局中心偏移"使用。
 let offsetX = 0, offsetY = 0;
 let scale = 1;
-const pinnedPos = new Map();  // id → {x, y} 手动拖动过的节点位置
+// 本次会话内被拖动过的节点位置（id → {x, y}）。
+// 只有内存态，**不写 localStorage**：刷新页面后一切归零、全部节点重新参与
+// 自动布局。历史上这里做过持久化（graphPinnedPos），结果拖过的节点会一直被
+// 钉在旧位置，攒多了整张图就塌成一团，且用户完全无从察觉 —— 这个坑已弃用。
+const pinnedPos = new Map();
 let canvas, ctx, cw, ch;
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -785,15 +794,14 @@ function initCanvas() {
   ctx = canvas.getContext('2d');
   ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
 
-  // 恢复上次保存的拖拽位置
-  const saved = localStorage.getItem('graphPinnedPos');
-  if (saved) {
-    try {
-      const data = JSON.parse(saved);
-      for (const [k, v] of Object.entries(data)) {
-        pinnedPos.set(Number(k), v);
-      }
-    } catch(e) {}
+  // 清理历史遗留的拖拽持久化记录。
+  // 旧版本会把"拖动过的节点位置"写进 localStorage（graphPinnedPos），刷新后
+  // 原样恢复 —— 结果拖过的节点被永久钉在旧位置，攒多了整张图就塌成一团
+  // （实测见过 68/80 个节点被钉在仅 3 个 y 值上）。该机制已移除，这里顺手
+  // 把残留数据删掉，省得占地方也省得日后误读。
+  if (localStorage.getItem('graphPinnedPos') !== null) {
+    localStorage.removeItem('graphPinnedPos');
+    console.info('[布局] 已移除旧的节点固定记录（graphPinnedPos），拖拽不再持久化');
   }
 
   // 计算初始布局
@@ -887,8 +895,12 @@ function gSimulateStep(cooling) {
   const P = layoutParams();
   const k = P.k, repulsion = P.repulsion, spring = P.spring;
   const cg = P.cg, famK = P.famK, famSpring = P.famSpring, dMax = P.dMax || Infinity;
-  const cx = cw / 2 + offsetX;
-  const cy = ch / 2 + offsetY;
+  // 中心引力参考点 = 画布中心（不含 offsetX/offsetY）：
+  // 平移视图时节点坐标已整体位移，若这里再叠加 offset，力场中心会和
+  // 实际图心错开，布局会朝一侧漂移。offset 只用于"用户手动平移"，
+  // 不参与布局计算。
+  const cx = cw / 2;
+  const cy = ch / 2;
 
   // 初始化加速度
   for (const n of nodes) { n.ax = 0; n.ay = 0; }
@@ -983,7 +995,7 @@ function gSimulateStep(cooling) {
 
 // 收敛后把整张图等比缩放+平移，使其恰好放进可视区（留边距）。
 // 只缩放视图、不改变拓扑，也不丢用户手动拖过的相对位置——
-// 所有节点按同一变换处理，钉住的相对关系自然保留。
+// 所有节点按同一变换处理，拖动固定下来的相对关系自然保留。
 // 注意：这里【不做硬夹】，个别出界交给"加高画布"或"局部回拉"处理，
 // 因为整体硬夹会把已收敛的间距压小、重新制造重叠（实测 5 处 → 12 处）。
 function fitToView() {
@@ -1009,20 +1021,24 @@ function fitToView() {
   let floor = 0.90;
   if (widthOver > 1.02) floor = 0.78;
   k = Math.max(floor, Math.min(1.05, k));
-  // 目标：图心对齐画布中心
+  // 目标：图心对齐画布中心。
+  // 注意：这里【不能】再加 offsetX/offsetY —— 平移视图时是所有节点坐标
+  // 一起被改掉的（见 onMouseMove），也就是说坐标里已经含了平移量。
+  // 再把 offset 加进目标中心等于平移被计入两次，整张图会被推离画布
+  // （Edge 干净打开时尤其明显：节点跑到 x 为负、只露一角）。
   const gcx = (minX + maxX) / 2, gcy = (minY + maxY) / 2;
-  const tx = cw / 2 + offsetX, ty = ch / 2 + offsetY;
+  const tx = cw / 2, ty = ch / 2;
   nodes.forEach(n => {
     n.x = tx + (n.x - gcx) * k;
     n.y = ty + (n.y - gcy) * k;
   });
-  // 钉住位置同步按同一变换更新，否则下次重排会跳回旧尺度
+  // 图已重新居中，平移偏移随之失效，归零以保持语义一致
+  offsetX = 0; offsetY = 0;
+  // 会话内的固定位置（拖动过的节点）同步按同一变换更新，否则整体缩放后
+  // 这些节点会跳回旧尺度；只改内存，不落盘。
   pinnedPos.forEach((v, id) => {
     pinnedPos.set(id, { x: tx + (v.x - gcx) * k, y: ty + (v.y - gcy) * k });
   });
-  const allPinned = {};
-  pinnedPos.forEach((v, id) => { allPinned[id] = v; });
-  localStorage.setItem('graphPinnedPos', JSON.stringify(allPinned));
 }
 
 // 收尾修正：把仍出界的节点沿最短方向拉回画布内侧。
@@ -1064,16 +1080,13 @@ function clampInsideView() {
     }
     if (!moved) break;
   }
-  // 同步钉住位置，避免下次重排跳回出界处
+  // 同步会话内的固定位置，避免下次重排跳回出界处（只改内存，不落盘）
   pinnedPos.forEach((v, id) => {
     pinnedPos.set(id, {
       x: Math.max(marginX, Math.min(cw - marginX, v.x)),
       y: Math.max(marginTop, Math.min(ch - marginBot, v.y)),
     });
   });
-  const allPinned = {};
-  pinnedPos.forEach((v, id) => { allPinned[id] = v; });
-  localStorage.setItem('graphPinnedPos', JSON.stringify(allPinned));
 }
 
 // 分帧迭代：每帧最多约 8ms 计算时间，避免卡界面。
@@ -1194,8 +1207,10 @@ function computeLayout() {
   const chars = allCharacters;
   if (chars.length === 0) return;
 
-  const cx = cw / 2 + offsetX;
-  const cy = ch / 2 + offsetY;
+  // 播种中心 = 画布中心。布局每次都会重新居中（fitToView），
+  // 所以这里不引入 offsetX/offsetY，否则播种位置会整体偏移。
+  const cx = cw / 2;
+  const cy = ch / 2;
   const nodeR = 28;
 
   // ====== 1. 家族归属（一个角色可属多个家族） ======
@@ -1243,7 +1258,9 @@ function computeLayout() {
       fams.forEach(f => { const fc = famCenter[f]; if (fc) { sx += fc.x; sy += fc.y; cnt++; } });
       if (cnt > 0) { bx = sx / cnt; by = sy / cnt; }
     }
-    const pinned = pinnedPos.get(c.id);
+    // 本次会话内拖动过的节点：固定在该位置（fixed=true），物理模拟不再移动它。
+    // 刷新后这个表是空的，所有节点都会重新参与布局。
+    const keep = pinnedPos.get(c.id);
     nodes.push({
       id: c.id, name: c.name, family: c.family || '',
       gender: c.gender,
@@ -1256,11 +1273,10 @@ function computeLayout() {
         const i = (fc && fc.img >= 0 && fc.img < imgs.length) ? fc.img : 0;
         return imgs[i] || '';
       })(),
-      // 已手动拖动过的节点：钉在原位（fixed=true），物理模拟不再移动它
-      x: pinned ? pinned.x : bx + (Math.random() - 0.5) * spread,
-      y: pinned ? pinned.y : by + (Math.random() - 0.5) * spread,
+      x: keep ? keep.x : bx + (Math.random() - 0.5) * spread,
+      y: keep ? keep.y : by + (Math.random() - 0.5) * spread,
       vx: 0, vy: 0, ax: 0, ay: 0,
-      fixed: !!pinned,
+      fixed: !!keep,
       r: nodeR,
     });
   });
@@ -1700,7 +1716,8 @@ function onMouseDown(e) {
     dragNode = node;
     dragOffX = mx - node.x;
     dragOffY = my - node.y;
-    // 拖动即"钉住"：物理模拟不再移动它，松手后也保持（写入 pinnedPos）
+    // 拖动期间固定该节点（物理模拟不再移动它），松手后由 onMouseUp 写入
+    // pinnedPos，作为"本次会话内保持"的位置；刷新即失效。
     node.fixed = true;
     node.vx = 0; node.vy = 0;
     canvas.style.cursor = 'grabbing';
@@ -1742,12 +1759,9 @@ function onMouseMove(e) {
 
 function onMouseUp(e) {
   if (dragNode) {
-    // 保存手动拖动后的位置
+    // 记住本次拖动后的位置：仅存内存，本次会话内保持该节点不动；
+    // 刷新页面后 pinnedPos 为空，节点重新参与自动布局。
     pinnedPos.set(dragNode.id, { x: dragNode.x, y: dragNode.y });
-    // 持久化到 localStorage
-    const allPinned = {};
-    pinnedPos.forEach((v, k) => { allPinned[k] = v; });
-    localStorage.setItem('graphPinnedPos', JSON.stringify(allPinned));
     canvas.style.cursor = 'default';
     dragNode = null;
   } else if (dragNode === null) {
@@ -1771,21 +1785,13 @@ function onWheel(e) {
   drawGraph();
 }
 
-// 双击节点查看角色；若该节点曾被手动拖动钉住，双击改为"解除钉住"并重新布局
+// 双击节点 = 查看角色信息（恒定行为）。
+// 注意：不要在这里做别的分叉 —— 曾经把"解除位置固定"绑在双击上，导致拖动过的
+// 节点再也无法双击查看，而那恰恰是最需要查看的节点。一个手势只做一件事。
 function onDblClick(e) {
   const rect = canvas.getBoundingClientRect();
   const node = findNodeAt(e.clientX - rect.left, e.clientY - rect.top);
   if (!node) return;
-  if (node.fixed) {
-    node.fixed = false;
-    pinnedPos.delete(node.id);
-    const allPinned = {};
-    pinnedPos.forEach((v, k) => { allPinned[k] = v; });
-    localStorage.setItem('graphPinnedPos', JSON.stringify(allPinned));
-    startGlayout();
-    showToast('已解除钉住：' + node.name, 'success');
-    return;
-  }
   showCharInfo(node.id);
 }
 
@@ -1826,6 +1832,7 @@ async function showCharInfo(charId) {
     if (c.setting) body += `<tr><td class="info-label">设定</td><td style="white-space:pre-wrap;line-height:1.6;">${esc(c.setting)}</td></tr>`;
     body += '</table>';
     document.getElementById('infoBody').innerHTML = body || '<p style="color:var(--text-light);text-align:center;">暂无详细信息</p>';
+
     document.getElementById('infoOverlay').classList.add('active');
   } catch(e) {
     showToast('获取角色信息失败', 'error');
