@@ -3,7 +3,8 @@
 // 引入方式：<script src="export-all.js"></script>（放在 </body> 前）
 // 功能：
 //   - 在侧边栏注入"📦 导出全部"入口
-//   - 一键把 角色 + 世界观 + 关系 汇总导出到一个 JSON 文件
+//   - 点击后先弹确认框（确定 / 取消），确认后才真正导出
+//   - 把 角色 + 世界观 + 关系 汇总导出到一个 JSON 文件
 //   - 各分区的字段与内容与各页"选择导出"完全一致（复用同一套字段映射）
 //   - 数据来自 /api/characters、/api/world-buildings、/api/relations
 //     （离线版由 api-shim.js 提供同名接口）
@@ -12,6 +13,49 @@
 (function () {
   if (window.__ocExportAll) return;
   window.__ocExportAll = true;
+
+  // ---------- 确认框样式（自包含，随组件注入一次） ----------
+  function injectStyle() {
+    if (document.getElementById('exportAllStyle')) return;
+    var style = document.createElement('style');
+    style.id = 'exportAllStyle';
+    style.textContent =
+      '.ea-overlay {' +
+      '  display: none; position: fixed; inset: 0; z-index: 10000;' +
+      '  background: rgba(0,0,0,.45);' +
+      '  align-items: center; justify-content: center; padding: 20px;' +
+      '}' +
+      '.ea-overlay.active { display: flex; }' +
+      '.ea-modal {' +
+      '  background: var(--card-bg, #fffef9); color: var(--text, #3d322b);' +
+      '  width: 100%; max-width: 380px;' +
+      '  border: 1px solid var(--border, #e0d5c7);' +
+      '  border-radius: var(--radius, 14px);' +
+      '  box-shadow: var(--shadow-lg, 0 8px 40px rgba(60,40,20,.12));' +
+      '  padding: 22px 20px 18px;' +
+      '  animation: eaPop .18s ease-out;' +
+      '}' +
+      '@keyframes eaPop { from { opacity: 0; transform: translateY(8px) scale(.97); } to { opacity: 1; transform: none; } }' +
+      '.ea-title {' +
+      '  font-size: 1.05rem; font-weight: 600; margin-bottom: 10px; text-align: center;' +
+      '  font-family: var(--font-serif, Georgia, serif);' +
+      '}' +
+      '.ea-msg { font-size: .88rem; color: var(--text-light, #8c7b6e); line-height: 1.65; text-align: center; }' +
+      '.ea-msg .ea-strong { color: var(--accent, #8b5e3c); font-weight: 600; }' +
+      '.ea-actions { display: flex; gap: 10px; margin-top: 20px; }' +
+      '.ea-btn {' +
+      '  flex: 1; padding: 11px; border-radius: var(--radius-sm, 8px);' +
+      '  font-size: .92rem; font-weight: 500; cursor: pointer;' +
+      '  font-family: inherit; transition: var(--transition, .25s);' +
+      '}' +
+      '.ea-btn:active { transform: scale(.97); }' +
+      '.ea-btn-cancel { background: transparent; color: var(--text-light, #8c7b6e); border: 1.5px solid var(--border, #e0d5c7); }' +
+      '.ea-btn-cancel:hover { background: var(--accent-pale, #f0e4d4); }' +
+      '.ea-btn-confirm { background: var(--accent, #8b5e3c); color: #fff; border: 1.5px solid var(--accent, #8b5e3c); }' +
+      '.ea-btn-confirm:hover { filter: brightness(1.08); }' +
+      'html[data-theme="dark"] .ea-overlay { background: rgba(0,0,0,.62); }';
+    document.head.appendChild(style);
+  }
 
   // 字段映射（与各页单独导出保持一致）
   function mapChar(c) {
@@ -32,7 +76,8 @@
     if (typeof showToast === 'function') showToast(msg, type || 'success');
   }
 
-  function exportAllData() {
+  // ---------- 真正的导出动作 ----------
+  function doExport() {
     Promise.all([
       fetch('/api/characters').then(function (r) { return r.json(); }),
       fetch('/api/world-buildings').then(function (r) { return r.json(); }),
@@ -58,7 +103,55 @@
       toast('导出失败，请重试', 'error');
     });
   }
-  window.exportAllData = exportAllData;
+
+  // ---------- 关闭确认框 ----------
+  function closeConfirm() {
+    var ov = document.getElementById('exportAllOverlay');
+    if (ov) ov.classList.remove('active');
+  }
+  window.closeExportAllConfirm = closeConfirm;
+
+  // ---------- 打开确认框（用户点确定后才导出） ----------
+  function openConfirm() {
+    injectStyle();
+    var overlay = document.getElementById('exportAllOverlay');
+    if (!overlay) {
+      overlay = document.createElement('div');
+      overlay.className = 'ea-overlay';
+      overlay.id = 'exportAllOverlay';
+      // 点遮罩空白处 = 取消
+      overlay.addEventListener('click', function (e) {
+        if (e.target === overlay) closeConfirm();
+      });
+      document.body.appendChild(overlay);
+    }
+    overlay.innerHTML =
+      '<div class="ea-modal" role="dialog" aria-modal="true" aria-labelledby="eaTitle">' +
+      '  <div class="ea-title" id="eaTitle">导出全部数据</div>' +
+      '  <div class="ea-msg">将把 <span class="ea-strong">角色</span>、<span class="ea-strong">世界观</span>、' +
+      '    <span class="ea-strong">关系</span> 汇总导出为一个 JSON 文件。<br>是否继续？</div>' +
+      '  <div class="ea-actions">' +
+      '    <button type="button" class="ea-btn ea-btn-cancel" id="eaCancelBtn">取消</button>' +
+      '    <button type="button" class="ea-btn ea-btn-confirm" id="eaConfirmBtn">确定导出</button>' +
+      '  </div>' +
+      '</div>';
+    overlay.classList.add('active');
+
+    document.getElementById('eaCancelBtn').addEventListener('click', closeConfirm);
+    document.getElementById('eaConfirmBtn').addEventListener('click', function () {
+      closeConfirm();
+      doExport();
+    });
+  }
+  window.openExportAllConfirm = openConfirm;
+
+  // Esc 关闭
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') closeConfirm();
+  });
+
+  // 向后兼容：原全局函数名保持可用（现在走确认框）
+  window.exportAllData = openConfirm;
 
   // ---------- 侧边栏入口注入 ----------
   function injectSidebar() {
@@ -70,7 +163,7 @@
     btn.href = 'javascript:void(0)';
     btn.title = '导出全部数据（角色+世界观+关系）到一个文件';
     btn.innerHTML = '<span class="sidebar-icon">📦</span><span class="sidebar-text">导出全部</span>';
-    btn.addEventListener('click', exportAllData);
+    btn.addEventListener('click', openConfirm);
     nav.appendChild(btn);
   }
   if (document.readyState === 'loading') {

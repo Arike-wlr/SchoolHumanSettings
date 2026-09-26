@@ -773,7 +773,7 @@ function render(d) {
         '</a>').join('') + '</div>'
     : '<div class="panel-note">还没有建立任何关系</div>');
 
-  html += panel('📐 关系明细', '手写关系为「数据质量」，去重对数为「含家族」',
+  html += panel('📐 关系明细', '手写关系为数据质量，去重对数含家族',
     '<div class="facts">' +
       fact('手写关系', R.total || 0, ' 条') +
       fact('去重对数', R.unique_pairs || 0, ' 对') +
@@ -954,7 +954,7 @@ toggleTheme = function() {
   if (body && body.style.display !== 'none') loadStats();
 };
 </script>
-<script src="search.js"></script>
-<script src="export-all.js"></script>
+<script src="search.js?v=2"></script>
+<script src="export-all.js?v=2"></script>
 </body>
 </html>
