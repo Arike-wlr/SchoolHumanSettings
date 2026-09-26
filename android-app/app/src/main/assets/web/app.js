@@ -170,9 +170,16 @@ function imageRefSig(ref) {
    ============================================================ */
 var CARD_BOX_W = 88, CARD_BOX_H = 64;
 
+// 缩略图基准尺寸：统一按「大屏档」128×92 生成。
+// 原因：缩略图是按 ref 持久化进 IndexedDB 的派生缓存，横竖屏切换时 ref 不变、
+// 不会重新生成。若按当前视口选档，pad 上会拿到手机档 88×64 再被放大而变糊。
+// 采用大屏档后，手机端只是在 88×64 显示盒里缩小显示（不会糊），一份缓存两端通用。
+function cardBoxSize() { return { w: 128, h: 92 }; }
+
 // 目标尺寸：两维都不小于显示物理像素（cover 后不放大）；源图更小则不放大。
 function thumbTargetSize(w, h, dpr) {
-  var s = Math.max((CARD_BOX_W * dpr) / w, (CARD_BOX_H * dpr) / h);
+  var box = cardBoxSize();
+  var s = Math.max((box.w * dpr) / w, (box.h * dpr) / h);
   if (!isFinite(s) || s <= 0 || s > 1) s = 1;
   return { w: Math.max(1, Math.round(w * s)), h: Math.max(1, Math.round(h * s)) };
 }
@@ -226,7 +233,7 @@ function cardThumbOf(c) {
    导航
    ============================================================ */
 var currentView = 'home';
-var viewInited = { home: true, index: false, worldview: false, relations: false, documents: false };
+var viewInited = { home: true, index: false, worldview: false, relations: false, documents: false, stats: false };
 
 function navigateTo(name) {
   if (currentView === name) return;
@@ -507,7 +514,7 @@ VM.index = (function() {
     var ph='';
     if(cu&&cu.trim()!==''){
       var bd=ic>1?'<span style="position:absolute;right:2px;bottom:2px;background:rgba(0,0,0,0.65);color:#fff;font-size:10px;padding:1px 4px;border-radius:7px;line-height:1.3;">共'+ic+'张</span>':'';
-      ph='<div style="flex-shrink:0;width:88px;position:relative;align-self:stretch;margin-right:4px;margin-top:4px;min-height:64px;"><div style="width:88px;height:100%;border-radius:4px;overflow:hidden;border:1px solid var(--border);background:#f8f9fa;">'+(safeImageSrc(cv)?'<img src="'+safeImageSrc(cv)+'" alt="'+esc(c.name)+'" loading="lazy" style="width:100%;height:100%;object-fit:cover;">':imageRepairHint())+'</div>'+bd+'</div>';
+      ph='<div style="flex-shrink:0;width:var(--card-thumb-w,88px);position:relative;align-self:stretch;margin-right:4px;margin-top:4px;min-height:var(--card-thumb-h,64px);"><div style="width:100%;height:100%;border-radius:4px;overflow:hidden;border:1px solid var(--border);background:#f8f9fa;">'+(safeImageSrc(cv)?'<img src="'+safeImageSrc(cv)+'" alt="'+esc(c.name)+'" loading="lazy" style="width:100%;height:100%;object-fit:cover;">':imageRepairHint())+'</div>'+bd+'</div>';
     }
     var tf='';
     if(c.alias) tf+='<div class="field-row"><span class="field-label">别名</span><span class="field-value">'+esc(c.alias)+'</span></div>';
@@ -1696,6 +1703,18 @@ VM.relations = (function() {
   var gEdges = [];
   var gScale = 1, gOffsetX = 0, gOffsetY = 0;
   var gDragNode = null, gDragging = false;
+
+  // 关系图节点半径：随画布尺寸自适应。
+  // 手机画布窄而矮（约 340×280），r=16 已经合适；平板上画布大得多，
+  // 沿用 16 会让节点显得又小又空，因此按画布宽度分档放大。
+  // 绘制（节点圆/头像裁剪）、关系线端点内缩、命中检测三处必须用同一个值，
+  // 否则会出现「点得中但画的位置不对」。
+  function gNodeR() {
+    var base = Math.min(gW, gH);
+    if (base >= 460) return 26;   // 横屏平板 / 大画布
+    if (base >= 340) return 20;   // 竖屏平板
+    return 16;                    // 手机
+  }
   var gLastTouchDist = 0, gPanning = false, gLastX = 0, gLastY = 0;
   var gLastTapTime = 0, gLastTapNodeId = null;
   var gTouchStartX = 0, gTouchStartY = 0, gTouchMoved = false;
@@ -2339,7 +2358,7 @@ VM.relations = (function() {
       var isB = ['CP', '朋友', '冤家', '亲属'].indexOf(e.type) !== -1, isT = e.type === '师生';
       var color = isB ? '#c2185b' : isT ? '#1565c0' : '#8b5e3c';
       var dx = b.x - a.x, dy = b.y - a.y, len = Math.sqrt(dx * dx + dy * dy) || 1;
-      var ux = dx / len, uy = dy / len, nr = 16, as_ = 7;
+      var ux = dx / len, uy = dy / len, nr = gNodeR(), as_ = 7;
       var sx = a.x + ux * nr, sy = a.y + uy * nr, ex = b.x - ux * nr, ey = b.y - uy * nr;
       gCtx.strokeStyle = color; gCtx.globalAlpha = 0.7; gCtx.lineWidth = isB ? 2.5 : 1.8;
       if (isT) gCtx.setLineDash([6, 4]);
@@ -2363,7 +2382,7 @@ VM.relations = (function() {
     gNodes.forEach(function(n) {
       var fc = nodeFamilyColor(n);
       var av = gAvatarCache.get(n.id);
-      var r = 16;
+      var r = gNodeR();
       // 底圆：无头像时是家族色圆；有头像时也先铺一层，防止图片未就绪时透出画布。
       gCtx.beginPath(); gCtx.arc(n.x, n.y, r, 0, Math.PI * 2);
       gCtx.fillStyle = n === gDragNode ? '#c49a6c' : fc; gCtx.fill();
@@ -2378,15 +2397,16 @@ VM.relations = (function() {
       gCtx.beginPath(); gCtx.arc(n.x, n.y, r, 0, Math.PI * 2);
       gCtx.strokeStyle = themeVar('--stroke-ring','#fffef9'); gCtx.lineWidth = 2; gCtx.stroke();
       // 节点名称画在彩色圆外，取主题正文色：浅色主题深字、深色主题浅字，避免与画布同色看不见
-      gCtx.fillStyle = themeVar('--text','#3d2b1f'); gCtx.font = '11px "PingFang SC","Microsoft YaHei",sans-serif'; gCtx.textAlign = 'center'; gCtx.textBaseline = 'top';
+      // 字号与偏移随节点半径缩放，否则大屏上标签会贴着大圆、显得过小
+      gCtx.fillStyle = themeVar('--text','#3d2b1f'); gCtx.font = Math.round(r * 0.69) + 'px "PingFang SC","Microsoft YaHei",sans-serif'; gCtx.textAlign = 'center'; gCtx.textBaseline = 'top';
       var label = n.name || ('#' + n.id); if (label.length > 5) label = label.slice(0, 4) + '…';
-      gCtx.fillText(label, n.x, n.y + 20);
+      gCtx.fillText(label, n.x, n.y + r + 4);
     });
     gCtx.restore();
   }
 
   function screenToCanvas(x, y) { return { x: (x - gOffsetX) / gScale, y: (y - gOffsetY) / gScale }; }
-  function nodeAt(x, y) { for (var i = gNodes.length - 1; i >= 0; i--) { var n = gNodes[i], dx = x - n.x, dy = y - n.y; if (dx * dx + dy * dy <= 22 * 22) return n; } return null; }
+  function nodeAt(x, y) { var tol = gNodeR() + 6; for (var i = gNodes.length - 1; i >= 0; i--) { var n = gNodes[i], dx = x - n.x, dy = y - n.y; if (dx * dx + dy * dy <= tol * tol) return n; } return null; }
 
   function onTouchStart(e) {
     e.preventDefault();
@@ -2553,10 +2573,24 @@ VM.relations = (function() {
   window.addEventListener('resize', function() {
     if (gCanvas && allCharacters.length > 0) {
       var wrap = document.getElementById('canvasWrap');
+      var prevR = gNodeR();          // 必须在更新 gW/gH 之前取：这是旧尺寸对应的半径
       gW = wrap.clientWidth; gH = wrap.clientHeight;
       gCanvas.width = gW * gDpr; gCanvas.height = gH * gDpr;
       gCanvas.style.width = gW + 'px'; gCanvas.style.height = gH + 'px';
-      gCtx.setTransform(gDpr, 0, 0, gDpr, 0, 0); graphDraw();
+      gCtx.setTransform(gDpr, 0, 0, gDpr, 0, 0);
+      // 半径档位跨档（手机↔平板，旋转/分屏都可能触发）：旧坐标是按旧半径排布的，
+      // 直接换半径会让节点互相压住。这里保持各节点相对位置做一次等比缩放即可，
+      // 不重新随机布局（否则用户拖过的位置会被打乱）。
+      var newR = gNodeR();
+      if (newR !== prevR && prevR > 0 && gNodes.length > 0) {
+        var k = newR / prevR;
+        gNodes.forEach(function(n) {
+          // 以画布中心为原点做线性缩放，让节点间距随半径同步放大/缩小
+          n.x = gW / 2 + (n.x - gW / 2) * k;
+          n.y = gH / 2 + (n.y - gH / 2) * k;
+        });
+      }
+      graphDraw();
     }
   });
 
@@ -2581,5 +2615,322 @@ VM.relations = (function() {
     graphZoom: graphZoom, graphReset: graphReset,
     graphRedraw: graphDraw
   };
+})();
+
+// ======================== 总览统计 ========================
+// 数据来自 fetch('/api/stats')：Android 端由 api-shim.js 直接聚合 IndexedDB，
+// 口径与 server/backend.py 的 /api/stats 保持一致（改口径要三处同改）。
+VM.stats = (function() {
+  var API = '/api/stats';
+  var loadedRevision = -1;
+  var loading = false;
+
+  var PALETTE = ['c1','c2','c3','c4','c5','c6','c7','c8'];
+  function pickColor(i) { return PALETTE[i % PALETTE.length]; }
+  function num(v) { return typeof v === 'number' ? v : 0; }
+
+  // 横向条形图
+  // 横向条形图。
+  //   maxRows —— 超出则截断
+  //   opts    —— { pct:false, unit:'字' }：不显示百分比，条尾显示原值 + 单位
+  function barChart(items, total, maxRows, opts) {
+    items = items || [];
+    if (!items.length) return '<div class="stats-note">暂无数据</div>';
+    opts = opts || {};
+    var showPct = opts.pct !== false;      // 默认显示百分比
+    var unit = opts.unit || '%';
+    if (maxRows && items.length > maxRows) items = items.slice(0, maxRows);
+    var sum = total || items.reduce(function(a, b) { return a + num(b.count); }, 0) || 1;
+    var max = items.reduce(function(a, b) { return Math.max(a, num(b.count)); }, 0) || 1;
+    return items.map(function(it, i) {
+      var w = Math.max(2, Math.round(num(it.count) / max * 100));
+      var suffix;
+      if (showPct) {
+        var pct = num(it.count) / sum * 100;
+        suffix = (pct >= 10 ? pct.toFixed(0) : pct.toFixed(1)) + '%';
+      } else {
+        suffix = unit;
+      }
+      return '<div class="stats-bar-row">' +
+        '<div class="stats-bar-meta">' +
+          '<span class="stats-bar-name" title="' + esc(it.name) + '">' + esc(it.name) + '</span>' +
+          '<span class="stats-bar-count">' + num(it.count) + '<span class="stats-bar-pct">' + suffix + '</span></span>' +
+        '</div>' +
+        '<div class="stats-bar-track"><div class="stats-bar-fill ' + pickColor(i) + '" style="width:' + w + '%"></div></div>' +
+      '</div>';
+    }).join('');
+  }
+
+  function pillGroup(items, total) {
+    items = items || [];
+    if (!items.length) return '<div class="stats-note">暂无数据</div>';
+    var sum = total || items.reduce(function(a, b) { return a + num(b.count); }, 0) || 1;
+    return '<div class="stats-pill-group">' + items.map(function(it, i) {
+      var pct = num(it.count) / sum * 100;
+      return '<span class="stats-pill">' +
+        '<span class="stats-pill-dot" style="background:var(--' + pickColor(i) + ')"></span>' +
+        esc(it.name) + ' <span class="stats-pill-count">' + num(it.count) + '</span>' +
+        '<span class="stats-pill-pct">' + pct.toFixed(0) + '%</span>' +
+      '</span>';
+    }).join('') + '</div>';
+  }
+
+  function facts(list) {
+    return '<div class="stats-facts">' + list.map(function(f) {
+      return '<div class="stats-fact"><div class="stats-fact-label">' + f[0] + '</div>' +
+        '<div class="stats-fact-value">' + esc(f[1]) + (f[2] ? '<small>' + f[2] + '</small>' : '') + '</div></div>';
+    }).join('') + '</div>';
+  }
+
+  function panel(title, note, body) {
+    return '<div class="stats-panel"><div class="stats-panel-head">' +
+      '<span class="stats-panel-title">' + title + '</span>' +
+      (note ? '<span class="stats-panel-note">' + note + '</span>' : '') +
+      '</div>' + body + '</div>';
+  }
+
+  function heroCard(label, value, unit, sub) {
+    var v = String(value);
+    return '<div class="stats-hero-card">' +
+      '<div class="stats-hero-label">' + label + '</div>' +
+      '<div class="stats-hero-value' + (v.length > 6 ? ' small' : '') + '">' + esc(v) +
+        (unit ? '<small>' + unit + '</small>' : '') + '</div>' +
+      '<div class="stats-hero-sub">' + (sub || '') + '</div>' +
+    '</div>';
+  }
+
+  // 家族规模卡
+  function famCards(list) {
+    if (!list || !list.length) return '<div class="stats-note">还没有家族划分</div>';
+    return '<div class="stats-fam-cards">' + list.map(function(f) {
+      return '<div class="stats-fam-card">' +
+        '<div class="stats-fam-name" title="' + esc(f.name) + '">' + esc(f.name) + '</div>' +
+        '<div class="stats-fam-count">' + num(f.count) + '<small>人</small></div>' +
+      '</div>';
+    }).join('') + '</div>';
+  }
+
+  // 完整度体检
+  function completenessView(comp) {
+    comp = comp || {};
+    var fields = comp.fields || [];
+    if (!fields.length) return '<div class="stats-note">暂无数据</div>';
+    var avg = num(comp.avg_pct);
+
+    var html = '<div class="stats-gap-meter">' +
+      '<div class="stats-gap-score">' + avg + '<small>%</small></div>' +
+      '<div class="stats-gap-meter-body">' +
+        '<div class="stats-gap-label">整体填写率（' + fields.length + ' 个字段的平均值）</div>' +
+        '<div class="stats-gap-track"><div class="stats-gap-fill" style="width:' + avg + '%"></div></div>' +
+      '</div></div>';
+
+    html += fields.map(function(f) {
+      var pct = num(f.pct);
+      var cls = pct >= 90 ? 'ok' : pct >= 70 ? 'mid' : pct >= 40 ? 'low' : 'bad';
+      return '<div class="stats-gap-row" title="' + esc(f.label) + '：已填 ' + num(f.filled) + ' / 缺 ' + num(f.missing) + '">' +
+        '<span class="stats-gap-row-label">' + esc(f.label) + '</span>' +
+        '<span class="stats-gap-row-track"><span class="stats-gap-row-fill ' + cls + '" style="width:' + pct + '%"></span></span>' +
+        '<span class="stats-gap-row-num"><b>' + pct + '%</b> 缺 ' + num(f.missing) + '</span>' +
+      '</div>';
+    }).join('');
+
+    // 待补充清单：只列缺失 >= 3 人的字段
+    var missing = comp.missing || {};
+    var labels = comp.label_map || {};
+    var gaps = Object.keys(missing)
+      .filter(function(k) { return (missing[k] || []).length >= 3; })
+      .map(function(k) { return { key: k, label: labels[k] || k, names: missing[k] || [] }; });
+
+    if (gaps.length) {
+      html += '<div class="stats-gap-missing"><div class="stats-gap-missing-title">📌 待补充（仅列缺失最多的前 10 位）</div>' +
+        gaps.map(function(g) {
+          return '<div class="stats-gap-missing-item"><b>' + esc(g.label) + '</b>' +
+            g.names.map(function(n) { return esc(n); }).join('、') + '</div>';
+        }).join('') +
+      '</div>';
+    }
+
+    return html;
+  }
+
+  // 角色之最列表
+  function crownList(items, unit) {
+    if (!items || !items.length) return '<div class="stats-note">暂无数据</div>';
+    return '<div class="stats-crown-list">' + items.map(function(it, i) {
+      var v = (typeof it.value === 'number') ? it.value.toLocaleString() : esc(it.value);
+      var sub = [it.university, it.region].filter(Boolean).join(' · ');
+      return '<div class="stats-crown-row">' +
+        '<span class="stats-crown-badge">' + (i === 0 ? '👑' : (i + 1)) + '</span>' +
+        '<span class="stats-crown-body">' +
+          '<span class="stats-crown-name">' + esc(it.name) + '</span>' +
+          (sub ? '<span class="stats-crown-sub">' + esc(sub) + '</span>' : '') +
+        '</span>' +
+        '<span class="stats-crown-val">' + v + '<small>' + unit + '</small></span>' +
+      '</div>';
+    }).join('') + '</div>';
+  }
+
+  function render(d) {
+    var C = d.characters || {}, W = d.worldview || {}, R = d.relations || {}, D = d.documents || {}, I = d.images || {};
+    var REG = d.regions || [], COMP = d.completeness || {}, FAM = d.families || {}, HL = d.highlights || {};
+    var regionTop = (C.region || []).filter(function(r) { return r.name !== '未填写'; });
+    var regionBlank = (C.region || []).filter(function(r) { return r.name === '未填写'; })[0];
+    // 人均关系 = 去重对数 * 2 / 角色数（含同家族自动关系）
+    var avgRel = num(C.total) ? (num(R.unique_pairs) * 2 / num(C.total)) : 0;
+
+    var html = '';
+
+    // ---------- 概览 ----------
+    html += '<div class="stats-hero">' +
+      heroCard('角色总数', num(C.total), '位', regionTop.length ? '覆盖 ' + regionTop.length + ' 个地区' : '尚未填写地区') +
+      heroCard('世界观条目', num(W.total), '条', (W.main_category || []).map(function(m) { return m.name + ' ' + m.count; }).join(' · ')) +
+      heroCard('关系总数', num(R.total), '条', num(R.unique_pairs) + ' 对角色 · ' + (R.types || []).length + ' 种类型') +
+      heroCard('文档 / 图片', num(D.total) + ' / ' + num(I.files), '', (D.size_display || '0 B') + ' 文档' + (I.size_display ? ' · ' + I.size_display + ' 图片' : '')) +
+    '</div>';
+
+    // ---------- 角色分布 ----------
+    html += '<div class="stats-section-title">角色分布</div>';
+    html += panel('📍 地区分布', 'Top ' + regionTop.length + (regionBlank ? ' · 未填写 ' + regionBlank.count : ''), barChart(regionTop, num(C.total), 12));
+    html += panel('⚧ 性别构成', num(C.total) + ' 位', pillGroup(C.gender, num(C.total)));
+    html += panel('🌗 存在状态', '按 status 字段', barChart(C.status, num(C.total)));
+    html += panel('🏛 家族规模', num(FAM.families) + ' 个家族 · ' + num(FAM.with_family) + ' 人有归属', famCards(FAM.list));
+
+    // ---------- 设定完整度体检 ----------
+    html += '<div class="stats-section-title">设定完整度体检</div>';
+    html += '<div class="stats-panel">' + completenessView(COMP) + '</div>';
+
+    // ---------- 角色之最 ----------
+    html += '<div class="stats-section-title">角色之最</div>';
+    html += panel('📝 设定最厚', 'setting 字数', crownList(HL.items && HL.items.longest_setting, '字'));
+    html += panel('🔗 关系最多', '两端计次', crownList(HL.items && HL.items.most_relations, '条'));
+    html += panel('🎭 关系类型最丰富', '不同类型数', crownList(HL.items && HL.items.richest_types, '种'));
+    html += panel('🖼 图片最多', '张数', crownList(HL.items && HL.items.most_images, '张'));
+    html += panel('👪 家族羁绊最多', '所属家族数', crownList(HL.items && HL.items.most_family, '个'));
+    html += panel('📊 设定篇幅分布', '共 ' + num(C.total) + ' 位', barChart(HL.setting_distribution, num(C.total)));
+
+    // 最长的世界观条目：Top N（兼容只返回单条的旧数据）
+    var worldRank = (HL.world_longest_list && HL.world_longest_list.length)
+      ? HL.world_longest_list
+      : (HL.world_longest ? [HL.world_longest] : []);
+    if (worldRank.length) {
+      html += panel('🌍 最长的世界观条目',
+        'Top ' + worldRank.length + ' · 榜首 ' + num(worldRank[0].chars).toLocaleString() + ' 字',
+        '<div class="stats-rank-list">' + worldRank.map(function(w, i) {
+          return '<div class="stats-rank-row">' +
+            '<span class="stats-rank-no">' + (i + 1) + '</span>' +
+            '<span class="stats-rank-name">' + esc(w.title) + '</span>' +
+            '<span class="stats-rank-val">' + num(w.chars).toLocaleString() + '</span>' +
+          '</div>';
+        }).join('') + '</div>');
+    }
+
+    // ---------- 关系网络 ----------
+    var famPairs = num(R.family_new_pairs);
+    html += '<div class="stats-section-title">关系网络</div>';
+    html += panel('📐 关系明细',
+      '手写 ' + num(R.total) + ' 条' + (famPairs ? ' + 同家族自动 ' + famPairs + ' 条' : '') +
+      ' · 去重 ' + num(R.unique_pairs) + ' 对',
+      facts([
+        ['手写关系', num(R.total)],
+        ['去重对数', num(R.unique_pairs)],
+        ['同家族关系', famPairs],
+        ['孤立角色', num(R.isolated_characters)],
+        ['双向互惠', num(R.mutual_pairs)],
+        ['重复关系', num(R.dup_pairs)],
+        ['未标类型', num(R.no_type)],
+        ['自环关系', num(R.self_loop)],
+        ['人均关系', avgRel.toFixed(2)]
+      ]));
+
+    if ((R.top_degree || []).length) {
+      html += panel('⭐ 关系度排行', '含同家族 · 两端计次',
+        '<div class="stats-rank-list">' + R.top_degree.map(function(it, i) {
+          return '<div class="stats-rank-row">' +
+            '<span class="stats-rank-no">' + (i + 1) + '</span>' +
+            '<span class="stats-rank-name">' + esc(it.name) + '</span>' +
+            '<span class="stats-rank-val">' + num(it.degree) + '</span>' +
+          '</div>';
+        }).join('') + '</div>');
+    }
+
+    if ((R.isolated || []).length) {
+      html += panel('🔌 孤立角色', '尚无任何关系 · Top ' + R.isolated.length,
+        '<div class="stats-pill-group">' + R.isolated.map(function(it) {
+          return '<span class="stats-pill">' + esc(it.name) +
+            (it.region ? ' <span class="stats-pill-pct">' + esc(it.region) + '</span>' : '') + '</span>';
+        }).join('') + '</div>');
+    }
+
+    // ---------- 地区圈子 ----------
+    html += '<div class="stats-section-title">地区圈子</div>';
+    html += panel('🤝 地区凝聚力', REG.length ? REG.length + ' 个活跃地区 · 内部关系占比' : '',
+      REG.length ? barChart(REG.map(function(r) {
+        return { name: r.name + '（' + r.inside + '/' + r.total + '）', count: num(r.cohesion) };
+      }), 100)
+      : '<div class="stats-note">关系数据不足（每个地区至少需 3 条关系）</div>');
+
+    html += panel('✍️ 设定厚度', '人均 setting 字数',
+      REG.length
+        ? barChart(REG.slice().sort(function(a, b) { return num(b.avg_setting) - num(a.avg_setting); })
+            .map(function(r) { return { name: r.name, count: num(r.avg_setting) }; }), 0, 0, { pct: false, unit: '字' })
+        : '<div class="stats-note">数据不足</div>');
+
+    // ---------- 世界观与内容 ----------
+    html += '<div class="stats-section-title">世界观与内容</div>';
+    html += panel('📚 大类分布', num(W.total) + ' 条', barChart(W.main_category, num(W.total)));
+    html += panel('✍️ 内容体量', '字数统计', facts([
+      ['世界观字数', num(W.content_chars).toLocaleString(), ' 字'],
+      ['平均每条', num(W.total) ? Math.round(num(W.content_chars) / num(W.total)).toLocaleString() : 0, ' 字'],
+      ['角色设定总字数', num(HL.total_setting_chars).toLocaleString(), ' 字']
+    ]));
+
+    // ---------- 素材与文档 ----------
+    html += '<div class="stats-section-title">素材与文档</div>';
+    html += '<div class="stats-panel"><div class="stats-facts">' +
+      '<div class="stats-fact"><div class="stats-fact-label">角色图片</div><div class="stats-fact-value">' + num(C.with_image) + '<small> 位有图</small></div></div>' +
+      '<div class="stats-fact"><div class="stats-fact-label">图片总数</div><div class="stats-fact-value">' + num(C.image_total) + '<small> 张</small></div></div>' +
+      '<div class="stats-fact"><div class="stats-fact-label">无图角色</div><div class="stats-fact-value">' + num(C.no_image) + '<small> 位</small></div></div>' +
+      '<div class="stats-fact"><div class="stats-fact-label">已取脸</div><div class="stats-fact-value">' + num(C.with_face_crop) + '<small> 位</small></div></div>' +
+      '<div class="stats-fact"><div class="stats-fact-label">文档数量</div><div class="stats-fact-value">' + num(D.total) + '<small> 个</small></div></div>' +
+      '<div class="stats-fact"><div class="stats-fact-label">文档占用</div><div class="stats-fact-value">' + esc(D.size_display || '—') + '</div></div>' +
+    '</div></div>';
+
+    html += '<div class="stats-generated">统计于 ' + esc(d.generated_at || '') + '</div>';
+
+    document.getElementById('statsBody').innerHTML = html;
+    document.getElementById('statsBody').style.display = '';
+    document.getElementById('statsLoadingState').style.display = 'none';
+    document.getElementById('statsErrorState').style.display = 'none';
+  }
+
+  function load(force) {
+    var revision = window.appDataRevision || 0;
+    if (!force && loadedRevision === revision) {
+      document.getElementById('statsLoadingState').style.display = 'none';
+      return;
+    }
+    if (loading) return;
+    loading = true;
+    document.getElementById('statsErrorState').style.display = 'none';
+    if (loadedRevision < 0) document.getElementById('statsLoadingState').style.display = '';
+
+    fetch(API).then(function(r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    }).then(function(d) {
+      loading = false;
+      loadedRevision = window.appDataRevision || 0;
+      render(d);
+    }).catch(function(e) {
+      loading = false;
+      document.getElementById('statsLoadingState').style.display = 'none';
+      document.getElementById('statsErrorText').textContent = '统计失败：' + e.message;
+      document.getElementById('statsErrorState').style.display = '';
+    });
+  }
+
+  function init() { load(true); }
+
+  return { init: init, refresh: function() { load(true); } };
 })();
 

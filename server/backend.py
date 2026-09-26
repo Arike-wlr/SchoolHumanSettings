@@ -8,6 +8,8 @@
 """
 
 import argparse
+import math
+import re
 import sqlite3
 import os
 import json
@@ -1283,6 +1285,503 @@ def global_search(q: str = ""):
 
 
 # ============================================================
+# 总览统计 API
+# ============================================================
+#
+# 口径说明（三端必须保持一致，改这里要同步改 desktop-offline/api-shim.js）：
+#   - 空字段（空串 / 只有空白）一律归入「未填写」。
+#   - 性别正常化为 男 / 女 / 其他 / 未填写；写了别的文字归「其他」。
+#   - 存在状态除空值归「存在」外，其余按原值分桶（"已消逝" / "普通人" 等）。
+#   - 家族从 characters.family 字段分号/逗号/顿号/斜杠分隔聚合。
+#   - 关系度 = 该角色作为 from 或 to 出现的关系条数（无向计次，自环算 1）。
+#   - 字数一律按 **Unicode 码点** 计数（Python 的 len 天然如此；JS 端必须用
+#     Array.from(str).length，用 str.length 会把 emoji 算成 2 个而对不上）。
+#   - **绝不解析 birth_time / birthday**，它们是自由文本。
+
+STATS_TOP_N = 12          # 各分布榜最多返回多少项
+STATS_RANK_N = 10         # 排行榜最多返回多少条
+STATS_WORLD_RANK_N = 10   # 「最长的世界观条目」榜单条数
+STATS_MAX_CROSS = 400     # 交叉矩阵最多返回多少行
+STATS_MIN_REGION = 3      # 地区凝聚力/设定厚度：该地区至少多少人/多少条关系才上榜
+
+# 完整度体检：检查的字段与中文名（顺序即展示顺序）
+STATS_COMPLETENESS_FIELDS = [
+    ("university", "代表高校"),
+    ("region", "地区"),
+    ("naming_rationale", "取名依据"),
+    ("gender", "性别"),
+    ("birthday", "生日"),
+    ("height", "身高"),
+    ("appearance", "外貌"),
+    ("identity_period", "身份时间"),
+    ("birth_time", "诞生时间"),
+    ("birthplace", "诞生地"),
+    ("setting", "设定描述"),
+    ("family", "家族"),
+    ("alias", "别名"),
+    ("images", "图片"),
+    ("face_crop", "人脸头像"),
+]
+
+
+def _norm_bucket(value: str, empty_label: str = "未填写") -> str:
+    """把自由文本字段归桶：空串/纯空白 → empty_label"""
+    v = (value or "").strip()
+    return v if v else empty_label
+
+
+def _norm_gender(value: str) -> str:
+    v = (value or "").strip()
+    if not v:
+        return "未填写"
+    if v in ("男", "男性", "M", "m", "male", "Male"):
+        return "男"
+    if v in ("女", "女性", "F", "f", "female", "Female"):
+        return "女"
+    return "其他"
+
+
+def _split_multi(value: str) -> list:
+    """把「家族」这类可能写了多个值的字段拆开。
+    分隔符：; ； , ， 、 / | 以及换行。字段本身若写成 "张氏 李氏" 不拆（空格不算分隔符）。"""
+    if not value:
+        return []
+    raw = re.split(r"[;；,，、/|\\\r\n]+", str(value))
+    out = []
+    for item in raw:
+        s = item.strip()
+        if s:
+            out.append(s)
+    return out
+
+
+def _dist_pairs(counter: dict, top_n: int = 0) -> list:
+    """把计数字典转成 [{name, count}]，按 count 降序，count 相同按名称升序。
+    top_n > 0 时只取前 top_n 项。"""
+    items = sorted(counter.items(), key=lambda kv: (-kv[1], kv[0]))
+    if top_n > 0:
+        items = items[:top_n]
+    return [{"name": k, "count": v} for k, v in items]
+
+
+def _round0(value) -> int:
+    """取整，**远离零** 舍入。同样不能用内置 round()（银行家舍入会让 552.5→552，
+    而 JS 的 Math.round 给 553）。与前端 statsRound0() 对应。"""
+    v = float(value or 0)
+    return int(math.floor(v + 0.5) if v >= 0 else math.ceil(v - 0.5))
+
+
+def _round1(value) -> float:
+    """保留 1 位小数，**远离零** 舍入。
+    不能用内置 round()：它是银行家舍入（四舍六入五成双），恰好落在 .x5 的值会与
+    JS 的 Math.round 差 1 个末位（实测 cohesion 31.25 → Py round 31.2 / JS 31.3）。
+    前端 api-shim.js 的 statsRound1() 做同样处理，两边必须一致。
+    实现与 JS 的 (v<0 ? -Math.round(-v*10) : Math.round(v*10))/10 完全对应。"""
+    v = float(value or 0) * 10
+    scaled = math.floor(v + 0.5) if v >= 0 else math.ceil(v - 0.5)
+    return scaled / 10
+
+
+def _char_text_len(value) -> int:
+    """字符体量：按码点计数（与 JS 的 Array.from(str).length 对齐）"""
+    return len(str(value or ""))
+
+
+@app.get("/api/stats")
+def get_stats():
+    """总览统计：角色 / 世界设定 / 关系 三类数据的聚合视图"""
+    conn = get_db()
+    cursor = conn.cursor()
+
+    # ---------- 角色 ----------
+    cursor.execute("SELECT * FROM characters ORDER BY sort_order ASC, id ASC")
+    chars = [char_to_dict(r) for r in cursor.fetchall()]
+
+    region_counter = {}
+    gender_counter = {}
+    status_counter = {}
+    family_counter = {}
+    university_counter = {}
+    image_count_total = 0
+    face_crop_count = 0
+    no_image_count = 0
+
+    for c in chars:
+        region_counter[_norm_bucket(c.get("region"))] = region_counter.get(_norm_bucket(c.get("region")), 0) + 1
+        g = _norm_gender(c.get("gender"))
+        gender_counter[g] = gender_counter.get(g, 0) + 1
+        # status 默认值是 "存在"，老数据可能是空串
+        st = (c.get("status") or "").strip() or "存在"
+        status_counter[st] = status_counter.get(st, 0) + 1
+        uni = (c.get("university") or "").strip()
+        if uni:
+            university_counter[uni] = university_counter.get(uni, 0) + 1
+        for fam in _split_multi(c.get("family")):
+            family_counter[fam] = family_counter.get(fam, 0) + 1
+
+        imgs = c.get("images") or []
+        if imgs:
+            image_count_total += len(imgs)
+        else:
+            no_image_count += 1
+        if (c.get("face_crop") or "").strip():
+            face_crop_count += 1
+
+    characters_block = {
+        "total": len(chars),
+        "with_image": len(chars) - no_image_count,
+        "no_image": no_image_count,
+        "image_total": image_count_total,
+        "with_face_crop": face_crop_count,
+        "region": _dist_pairs(region_counter, STATS_TOP_N),
+        "gender": _dist_pairs(gender_counter),
+        "status": _dist_pairs(status_counter),
+        "family": _dist_pairs(family_counter, STATS_TOP_N),
+        "university": _dist_pairs(university_counter, STATS_TOP_N),
+    }
+
+    # ---------- 亮点：每个地区的关系个数（用于地区凝聚力 / 设定厚度）----------
+    region_total_rel = {}      # 地区 -> 该地区角色涉及的关系数（两端计次）
+    region_inside_rel = {}     # 地区 -> 其中两端都在该地区的关系数
+    region_setting_sum = {}    # 地区 -> setting 字数合计
+    region_char_count = {}     # 地区 -> 角色数
+    for c in chars:
+        r = _norm_bucket(c.get("region"))
+        region_setting_sum[r] = region_setting_sum.get(r, 0) + _char_text_len(c.get("setting"))
+        region_char_count[r] = region_char_count.get(r, 0) + 1
+
+    # ---------- 世界设定 ----------
+    cursor.execute("SELECT * FROM world_buildings ORDER BY sort_order ASC, id ASC")
+    worlds = [dict(r) for r in cursor.fetchall()]
+
+    main_counter = {}
+    content_chars = 0
+    longest_entry = None        # (字数, 标题) —— 兼容旧字段，保留最长一条
+    world_rank = []             # [(字数, 标题)]，用于「最长的世界观条目」榜单
+    for w in worlds:
+        mc = _norm_bucket(w.get("main_category"), "未分类")
+        main_counter[mc] = main_counter.get(mc, 0) + 1
+        n = _char_text_len(w.get("content"))
+        content_chars += n
+        title = w.get("title") or ""
+        world_rank.append((n, title))
+        if longest_entry is None or n > longest_entry[0]:
+            longest_entry = (n, title)
+
+    # 按字数降序取前 N（同字数比标题，保证两端顺序一致）
+    world_rank.sort(key=lambda t: (-t[0], t[1]))
+    world_longest_list = [
+        {"title": t, "chars": n} for n, t in world_rank[:STATS_WORLD_RANK_N]
+    ]
+
+    world_block = {
+        "total": len(worlds),
+        "content_chars": content_chars,
+        "main_category": _dist_pairs(main_counter),
+        "longest": {"title": longest_entry[1], "chars": longest_entry[0]} if longest_entry else None,
+    }
+
+    # ---------- 关系 ----------
+    cursor.execute("""
+        SELECT r.*, c1.name AS from_name, c2.name AS to_name
+        FROM relations r
+        LEFT JOIN characters c1 ON r.from_char_id = c1.id
+        LEFT JOIN characters c2 ON r.to_char_id = c2.id
+        ORDER BY r.sort_order ASC, r.id ASC
+    """)
+    rels = [dict(r) for r in cursor.fetchall()]
+
+    name_by_id = {c["id"]: c.get("name") or f"#{c['id']}" for c in chars}
+    region_by_id = {c["id"]: _norm_bucket(c.get("region")) for c in chars}
+    univ_by_id = {c["id"]: (c.get("university") or "").strip() for c in chars}
+
+    type_counter = {}
+    degree = {}
+    pair_count = {}            # 无向配对 -> 关系条数（>1 说明重复）
+    cross_counter = {}         # (地区A, 地区B) -> count
+    mutual_pairs = set()       # 双向配对中"两端都指向对方"的
+    directed_seen = set()      # 有向对 (from,to)，用于查互惠
+    self_loop = 0
+    dup_pairs = 0
+    no_type = 0
+
+    for r in rels:
+        rt = (r.get("relation_type") or "").strip()
+        if rt:
+            type_counter[rt] = type_counter.get(rt, 0) + 1
+        else:
+            no_type += 1
+
+        a, b = r.get("from_char_id"), r.get("to_char_id")
+        if a == b:
+            self_loop += 1
+        pair = (a, b) if (a or 0) <= (b or 0) else (b, a)
+        pair_count[pair] = pair_count.get(pair, 0) + 1
+        directed_seen.add((a, b))
+
+        # 关系度：两端各 +1（自环只 +1）
+        degree[a] = degree.get(a, 0) + 1
+        if a != b:
+            degree[b] = degree.get(b, 0) + 1
+
+        ra, rb = region_by_id.get(a), region_by_id.get(b)
+        if ra and rb:
+            region_total_rel[ra] = region_total_rel.get(ra, 0) + 1
+            if ra != rb:
+                region_total_rel[rb] = region_total_rel.get(rb, 0) + 1
+            else:
+                region_inside_rel[ra] = region_inside_rel.get(ra, 0) + 1
+            key2 = (ra, rb) if ra <= rb else (rb, ra)
+            cross_counter[key2] = cross_counter.get(key2, 0) + 1
+
+    # 互惠关系：A→B 且 B→A 同时存在（任意类型）
+    for (a, b) in directed_seen:
+        if a != b and (b, a) in directed_seen:
+            mutual_pairs.add(frozenset((a, b)))
+    dup_pairs = sum(n - 1 for n in pair_count.values() if n > 1)
+    explicit_pairs = len(pair_count)   # 手写关系去重后的配对数（家族配对并入前）
+
+    # ---------- 家族关系：同家族的任意两人也算一条关系 ----------
+    # 只用于"计数"（关系度 / 去重对数 / 地区矩阵 / 连通性 / 凝聚力 / 人均），
+    # **不影响** 关系网的页面展示（那是另一套实现）。也不计入"数据质量"类指标
+    # （total / 未标类型 / 重复关系 / 自环 / 互惠），那些描述的是用户手写的关系。
+    fam_counter = {}           # 家族名 -> [角色 id]
+    for c in chars:
+        for f in _split_multi(c.get("family")):
+            fam_counter.setdefault(f, []).append(c["id"])
+
+    family_pair_set = set()    # 无向配对，同家族产生的
+    for f, ids in fam_counter.items():
+        uniq = sorted(set(ids))
+        for i in range(len(uniq)):
+            for j in range(i + 1, len(uniq)):
+                family_pair_set.add((uniq[i], uniq[j]))
+
+    # 把家族配对并入各项计数（不覆盖已存在的手写关系配对）
+    family_new_pairs = 0       # 家族配对中，手写关系里没有的
+    for (a, b) in family_pair_set:
+        pair = (a, b)
+        if pair in pair_count:
+            continue            # 已有手写关系，不重复计入计数
+        family_new_pairs += 1
+        pair_count[pair] = pair_count.get(pair, 0) + 1
+        degree[a] = degree.get(a, 0) + 1
+        degree[b] = degree.get(b, 0) + 1
+        ra, rb = region_by_id.get(a), region_by_id.get(b)
+        if ra and rb:
+            region_total_rel[ra] = region_total_rel.get(ra, 0) + 1
+            if ra != rb:
+                region_total_rel[rb] = region_total_rel.get(rb, 0) + 1
+            else:
+                region_inside_rel[ra] = region_inside_rel.get(ra, 0) + 1
+            key2 = (ra, rb) if ra <= rb else (rb, ra)
+            cross_counter[key2] = cross_counter.get(key2, 0) + 1
+
+    # 重新计算连通角色（家族关系可能让原本孤立的角色连上）
+    connected_ids = set(degree.keys())
+    isolated = [c for c in chars if c["id"] not in connected_ids]
+    rank = sorted(degree.items(), key=lambda kv: (-kv[1], name_by_id.get(kv[0], "")))[:STATS_RANK_N]
+
+    relations_block = {
+        # total = 手写关系条数；unique_pairs = 去重后的"关系对"总数（**已含同家族配对**）
+        "total": len(rels),
+        "explicit_total": len(rels),
+        "family_pairs": len(family_pair_set),
+        "family_new_pairs": family_new_pairs,
+        "unique_pairs": len(pair_count),
+        "explicit_pairs": explicit_pairs,
+        "self_loop": self_loop,
+        "dup_pairs": dup_pairs,
+        "no_type": no_type,
+        "mutual_pairs": len(mutual_pairs),
+        "connected_characters": len(connected_ids),
+        "isolated_characters": len(isolated),
+        "types": _dist_pairs(type_counter),
+        "top_degree": [
+            {"id": cid, "name": name_by_id.get(cid, f"#{cid}"), "degree": d}
+            for cid, d in rank
+        ],
+        "isolated": [
+            {"id": c["id"], "name": c.get("name") or "", "region": c.get("region") or ""}
+            for c in isolated[:STATS_RANK_N]
+        ],
+        "cross_region": [
+            {"from": k[0], "to": k[1], "count": v}
+            for k, v in sorted(cross_counter.items(), key=lambda kv: (-kv[1], kv[0]))[:STATS_MAX_CROSS]
+        ],
+    }
+
+    # ---------- 地区凝聚力 + 设定厚度 ----------
+    cohesion = []
+    for r, total in region_total_rel.items():
+        if total < STATS_MIN_REGION:
+            continue
+        inside = region_inside_rel.get(r, 0)
+        n_chars = region_char_count.get(r, 0)
+        sum_setting = region_setting_sum.get(r, 0)
+        cohesion.append({
+            "name": r,
+            "characters": n_chars,
+            "total": total,
+            "inside": inside,
+            "outside": total - inside,
+            "cohesion": _round1(inside / total * 100) if total else 0.0,
+            # 取整到字：与前端一样的「远离零」规则，避免 .5 时差 1
+            "avg_setting": _round0(sum_setting / n_chars) if n_chars else 0,
+        })
+    cohesion.sort(key=lambda x: (-x["cohesion"], x["name"]))
+    region_block = cohesion
+
+    # ---------- 设定完整度体检 ----------
+    completeness = []
+    missing_map = {}   # 字段 -> 待补充角色名列表
+    for field, label in STATS_COMPLETENESS_FIELDS:
+        filled = 0
+        missing_names = []
+        for c in chars:
+            if field == "images":
+                ok = bool(c.get("images"))
+            elif field == "face_crop":
+                ok = bool((c.get("face_crop") or "").strip())
+            else:
+                ok = bool((c.get(field) or "").strip())
+            if ok:
+                filled += 1
+            else:
+                missing_names.append(c.get("name") or f"#{c['id']}")
+        total = len(chars) or 1
+        completeness.append({
+            "field": field,
+            "label": label,
+            "filled": filled,
+            "missing": len(chars) - filled,
+            "pct": _round1(filled / total * 100),
+        })
+        if missing_names:
+            missing_map[field] = missing_names[:STATS_RANK_N]
+
+    # 平均完整度（按字段百分比取均值）
+    avg_completeness = _round1(
+        sum(item["pct"] for item in completeness) / len(completeness)
+    ) if completeness else 0.0
+
+    completeness_block = {
+        "fields": completeness,
+        "avg_pct": avg_completeness,
+        "missing": missing_map,
+        "label_map": {f: l for f, l in STATS_COMPLETENESS_FIELDS},
+    }
+
+    # ---------- 家族规模 ----------
+    family_block = [
+        {"name": k, "count": v} for k, v in
+        sorted(family_counter.items(), key=lambda kv: (-kv[1], kv[0]))[:STATS_TOP_N]
+    ]
+    family_with = sum(1 for c in chars if (c.get("family") or "").strip())
+    family_summary = {
+        "families": len(family_counter),
+        "with_family": family_with,
+        "without_family": len(chars) - family_with,
+        "list": family_block,
+    }
+
+    # ---------- 角色之最 ----------
+    def _top(score_fn, limit=STATS_RANK_N):
+        scored = [(c, score_fn(c)) for c in chars]
+        scored = [(c, s) for c, s in scored if s]
+        scored.sort(key=lambda cs: (-cs[1], cs[0].get("name") or ""))
+        return [
+            {"id": c["id"], "name": c.get("name") or "", "region": c.get("region") or "",
+             "university": c.get("university") or "", "value": s}
+            for c, s in scored[:limit]
+        ]
+
+    # 每个角色的关系类型种数
+    type_kinds = {}
+    for r in rels:
+        rt = (r.get("relation_type") or "").strip()
+        if not rt:
+            continue
+        for cid in (r.get("from_char_id"), r.get("to_char_id")):
+            type_kinds.setdefault(cid, set()).add(rt)
+
+    highlights = {
+        "longest_setting": _top(lambda c: _char_text_len(c.get("setting"))),
+        "most_relations": _top(lambda c: degree.get(c["id"], 0)),
+        "richest_types": _top(lambda c: len(type_kinds.get(c["id"], ()))),
+        "most_images": _top(lambda c: len(c.get("images") or [])),
+        "most_family": _top(lambda c: len(_split_multi(c.get("family")))),
+    }
+
+    # 设定篇幅分布（按字数分档，比"最短"更有信息量）
+    buckets = [
+        ("≥1000 字", lambda n: n >= 1000),
+        ("500–999 字", lambda n: 500 <= n < 1000),
+        ("200–499 字", lambda n: 200 <= n < 500),
+        ("1–199 字", lambda n: 0 < n < 200),
+        ("未填写", lambda n: n == 0),
+    ]
+    setting_dist = []
+    for label, pred in buckets:
+        cnt = sum(1 for c in chars if pred(_char_text_len(c.get("setting"))))
+        if cnt or label == "未填写":
+            setting_dist.append({"name": label, "count": cnt})
+
+    world_longest = None
+    if longest_entry and longest_entry[0]:
+        world_longest = {"title": longest_entry[1], "chars": longest_entry[0]}
+
+    highlights_block = {
+        "items": highlights,
+        "world_longest": world_longest,
+        "world_longest_list": world_longest_list,
+        "setting_distribution": setting_dist,
+        "total_setting_chars": sum(_char_text_len(c.get("setting")) for c in chars),
+    }
+
+    # ---------- 文档 ----------
+    doc_count = 0
+    doc_bytes = 0
+    if os.path.exists(UPLOAD_DIR):
+        for fname in os.listdir(UPLOAD_DIR):
+            fpath = os.path.join(UPLOAD_DIR, fname)
+            if os.path.isfile(fpath):
+                doc_count += 1
+                try:
+                    doc_bytes += os.path.getsize(fpath)
+                except OSError:
+                    pass
+    documents_block = {
+        "total": doc_count,
+        "size_display": format_size(doc_bytes),
+        "size_bytes": doc_bytes,
+    }
+
+    if os.path.exists(IMAGE_DIR):
+        image_files = [f for f in os.listdir(IMAGE_DIR) if os.path.isfile(os.path.join(IMAGE_DIR, f))]
+    else:
+        image_files = []
+    image_block = {
+        "files": len(image_files),
+        "size_display": format_size(sum(os.path.getsize(os.path.join(IMAGE_DIR, f)) for f in image_files)),
+    }
+
+    conn.close()
+
+    return {
+        "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "characters": characters_block,
+        "worldview": world_block,
+        "relations": relations_block,
+        "regions": region_block,
+        "completeness": completeness_block,
+        "families": family_summary,
+        "highlights": highlights_block,
+        "documents": documents_block,
+        "images": image_block,
+    }
+
+
 # 数据同步 API（供手机端上传/下载全量数据）
 # ============================================================
 from pydantic import BaseModel as PydanticModel
@@ -1355,6 +1854,11 @@ def serve_documents():
 @app.get("/relations")
 def serve_relations():
     return FileResponse(os.path.join(DESKTOP_DIR, "relations.html"))
+
+
+@app.get("/stats")
+def serve_stats():
+    return FileResponse(os.path.join(DESKTOP_DIR, "stats.html"))
 
 
 @app.get("/")

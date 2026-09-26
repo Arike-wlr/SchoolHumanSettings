@@ -1,0 +1,960 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>高校拟人 OC · 总览统计</title>
+<script>
+// 防闪烁：尽早应用主题
+(function(){
+  try {
+    var t = localStorage.getItem('oc-theme');
+    if (t === 'dark' || (!t && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+      document.documentElement.setAttribute('data-theme', 'dark');
+    }
+  } catch(e) {}
+})();
+</script>
+<style>
+  /* ====== 全局 ====== */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #f5f0eb;
+    --card-bg: #fffef9;
+    --text: #3d322b;
+    --text-light: #8c7b6e;
+    --accent: #8b5e3c;
+    --accent-light: #c49a6c;
+    --accent-pale: #f0e4d4;
+    --danger: #c0392b;
+    --danger-bg: #fce4e4;
+    --border: #e0d5c7;
+    --shadow: 0 2px 16px rgba(60,40,20,.08);
+    --shadow-lg: 0 8px 40px rgba(60,40,20,.12);
+    --radius: 14px;
+    --radius-sm: 8px;
+    --font-serif: 'Georgia', 'Noto Serif SC', 'SimSun', serif;
+    --font-sans: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+    --transition: 0.25s cubic-bezier(.4,0,.2,1);
+    --input-bg: #fefdf9;
+    --body-glow-1: rgba(196,154,108,.08);
+    --body-glow-2: rgba(139,94,60,.06);
+    /* 图表色板 */
+    --c1: #c49a6c; --c2: #8b5e3c; --c3: #6b8e7b; --c4: #7b6b8e;
+    --c5: #8e7b6b; --c6: #b5651d; --c7: #5e7a8b; --c8: #a0522d;
+    --track: #f0e8dc;
+  }
+
+  html[data-theme="dark"] {
+    --bg: #1c1917;
+    --card-bg: #262220;
+    --text: #ece3d8;
+    --text-light: #a89a8c;
+    --accent: #c49a6c;
+    --accent-light: #d9b58a;
+    --accent-pale: #3a2f26;
+    --danger: #e07060;
+    --danger-bg: #3a2523;
+    --border: #3d3733;
+    --shadow: 0 2px 16px rgba(0,0,0,.4);
+    --shadow-lg: 0 8px 40px rgba(0,0,0,.5);
+    --input-bg: #1f1c1a;
+    --body-glow-1: rgba(196,154,108,.05);
+    --body-glow-2: rgba(139,94,60,.04);
+    --c1: #d9b58a; --c2: #c49a6c; --c3: #8fb3a0; --c4: #a294b8;
+    --c5: #b3a293; --c6: #d98a4a; --c7: #8aa8b8; --c8: #c9703f;
+    --track: #332c27;
+    color-scheme: dark;
+  }
+
+  html[data-theme="dark"] .header {
+    background: linear-gradient(135deg, #12100e 0%, #1e1815 40%, #2a211b 100%);
+  }
+  html[data-theme="dark"] .modal-close { background: #332c27; }
+  html[data-theme="dark"] .modal-close:hover { background: #443a33; }
+
+  body {
+    font-family: var(--font-sans);
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    background-image:
+      radial-gradient(ellipse at 20% 10%, var(--body-glow-1) 0%, transparent 60%),
+      radial-gradient(ellipse at 80% 90%, var(--body-glow-2) 0%, transparent 60%);
+  }
+
+  /* ====== 主题切换按钮 ====== */
+  .theme-toggle {
+    background: rgba(255,255,255,.08);
+    color: #f5ede4;
+    border: 1px solid rgba(255,255,255,.15);
+    border-radius: 20px;
+    padding: 6px 14px;
+    font-size: .78rem;
+    cursor: pointer;
+    font-family: var(--font-sans);
+    transition: var(--transition);
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .theme-toggle:hover { background: rgba(255,255,255,.16); }
+  .theme-toggle .theme-toggle-icon { font-size: .95rem; line-height: 1; }
+
+  /* ====== Header ====== */
+  .header {
+    background: linear-gradient(135deg, #3d2b1f 0%, #5a3e2b 40%, #7a5543 100%);
+    color: #f5ede4;
+    padding: 20px 24px;
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+  }
+  .header::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='0.03'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+    pointer-events: none;
+  }
+  .header h1 { font-family: var(--font-serif); font-size: 2rem; font-weight: 400; letter-spacing: 0.06em; }
+  .header .subtitle { margin-top: 6px; font-size: .92rem; opacity: .7; letter-spacing: .08em; }
+
+  /* ====== 侧边栏布局 ====== */
+  .app-layout { display: flex; min-height: 100vh; }
+
+  .sidebar {
+    width: 180px;
+    background: linear-gradient(180deg, #2a1a12 0%, #1a0e08 100%);
+    color: #f5ede4;
+    display: flex;
+    flex-direction: column;
+    transition: width 0.3s cubic-bezier(.4,0,.2,1);
+    flex-shrink: 0;
+    overflow: hidden;
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    z-index: 10;
+    box-shadow: 2px 0 16px rgba(0,0,0,.15);
+  }
+  .sidebar.collapsed { width: 54px; }
+
+  .sidebar-toggle {
+    background: none;
+    border: none;
+    color: #b8a090;
+    font-size: 1.2rem;
+    padding: 14px 16px 6px;
+    cursor: pointer;
+    transition: var(--transition);
+    text-align: left;
+    letter-spacing: .04em;
+  }
+  .sidebar.collapsed .sidebar-toggle { text-align: center; padding-left: 0; padding-right: 0; }
+  .sidebar-toggle:hover { color: #fff; }
+
+  .sidebar-nav { display: flex; flex-direction: column; padding: 8px; gap: 3px; flex: 1; }
+
+  .sidebar-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    color: #c8b8a8;
+    text-decoration: none;
+    font-size: .88rem;
+    font-family: var(--font-sans);
+    transition: var(--transition);
+    white-space: nowrap;
+  }
+  .sidebar-item:hover { background: rgba(255,255,255,.06); color: #f5ede4; }
+  .sidebar-item.active { background: rgba(139,94,60,.3); color: #f5ede4; font-weight: 500; }
+
+  .sidebar-icon { font-size: 1.15rem; flex-shrink: 0; width: 22px; text-align: center; }
+  .sidebar-text { transition: opacity 0.2s, width 0.2s; overflow: hidden; }
+  .sidebar.collapsed .sidebar-text { opacity: 0; width: 0; }
+  .sidebar.collapsed .sidebar-item { gap: 0; justify-content: center; padding: 10px 0; }
+
+  .sidebar-footer { padding: 12px; border-top: 1px solid rgba(255,255,255,.08); text-align: center; }
+  .sidebar.collapsed .sidebar-footer { display: none; }
+
+  .main-content { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+
+  /* ====== Container ====== */
+  .container { max-width: 1200px; margin: 0 auto; padding: 24px 20px 60px; width: 100%; }
+
+  /* ====== 概览卡片 ====== */
+  .stat-hero {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 14px;
+    margin-bottom: 28px;
+  }
+  .hero-card {
+    background: var(--card-bg);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    padding: 20px 18px;
+    position: relative;
+    overflow: hidden;
+    transition: var(--transition);
+  }
+  .hero-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+    background: var(--c1);
+    opacity: .85;
+  }
+  .hero-card:nth-child(1)::before { background: var(--c1); }
+  .hero-card:nth-child(2)::before { background: var(--c3); }
+  .hero-card:nth-child(3)::before { background: var(--c4); }
+  .hero-card:nth-child(4)::before { background: var(--c5); }
+  .hero-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-lg); }
+  .hero-label { font-size: .78rem; color: var(--text-light); letter-spacing: .05em; }
+  .hero-value {
+    font-family: var(--font-serif);
+    font-size: 2.1rem;
+    color: var(--accent);
+    line-height: 1.15;
+    margin-top: 6px;
+    word-break: break-all;
+  }
+  .hero-value.small { font-size: 1.25rem; }
+  .hero-sub { font-size: .76rem; color: var(--text-light); margin-top: 6px; line-height: 1.5; }
+
+  /* ====== 区块标题 ====== */
+  .section-title {
+    font-family: var(--font-serif);
+    font-size: 1.25rem;
+    color: var(--accent);
+    letter-spacing: .06em;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+    margin: 32px 0 18px;
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+  }
+  .section-title:first-of-type { margin-top: 0; }
+  .section-title .section-hint { font-family: var(--font-sans); font-size: .76rem; color: var(--text-light); letter-spacing: 0; font-weight: 400; }
+
+  /* ====== 分布卡片网格 ====== */
+  .stat-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 18px;
+  }
+  .panel {
+    background: var(--card-bg);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    padding: 18px 20px 20px;
+    min-width: 0;
+  }
+  .panel-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 8px;
+    margin-bottom: 14px;
+  }
+  .panel-title { font-size: .95rem; font-weight: 600; color: var(--text); }
+  .panel-note { font-size: .72rem; color: var(--text-light); flex-shrink: 0; }
+
+  /* ====== 横向条形 ====== */
+  .bar-row { margin-bottom: 11px; }
+  .bar-row:last-child { margin-bottom: 0; }
+  .bar-meta {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 10px;
+    font-size: .82rem;
+    margin-bottom: 4px;
+  }
+  .bar-name { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .bar-count { color: var(--accent); font-weight: 600; flex-shrink: 0; font-variant-numeric: tabular-nums; }
+  .bar-count .bar-pct { color: var(--text-light); font-weight: 400; font-size: .74rem; margin-left: 5px; }
+  .bar-track { height: 8px; background: var(--track); border-radius: 4px; overflow: hidden; }
+  .bar-fill { height: 100%; border-radius: 4px; transition: width .5s cubic-bezier(.4,0,.2,1); min-width: 2px; }
+  .bar-fill.c1 { background: var(--c1); }
+  .bar-fill.c2 { background: var(--c2); }
+  .bar-fill.c3 { background: var(--c3); }
+  .bar-fill.c4 { background: var(--c4); }
+  .bar-fill.c5 { background: var(--c5); }
+  .bar-fill.c6 { background: var(--c6); }
+  .bar-fill.c7 { background: var(--c7); }
+  .bar-fill.c8 { background: var(--c8); }
+
+  /* ====== 性别 / 状态 pills ====== */
+  .pill-group { display: flex; flex-wrap: wrap; gap: 8px; }
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 7px 14px;
+    border-radius: 20px;
+    background: var(--accent-pale);
+    color: var(--text);
+    font-size: .82rem;
+  }
+  .pill .pill-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .pill .pill-count { color: var(--accent); font-weight: 600; font-variant-numeric: tabular-nums; }
+  .pill .pill-pct { color: var(--text-light); font-size: .74rem; }
+
+  /* ====== 排行列表 ====== */
+  .rank-list { display: flex; flex-direction: column; gap: 2px; }
+  .rank-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 9px 10px;
+    border-radius: var(--radius-sm);
+    text-decoration: none;
+    color: var(--text);
+    transition: var(--transition);
+  }
+  a.rank-row:hover { background: var(--accent-pale); }
+  .rank-no {
+    width: 24px; height: 24px;
+    flex-shrink: 0;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: .74rem; font-weight: 600;
+    background: var(--track);
+    color: var(--text-light);
+  }
+  .rank-row:nth-child(1) .rank-no { background: var(--c1); color: #fff; }
+  .rank-row:nth-child(2) .rank-no { background: var(--c2); color: #fff; }
+  .rank-row:nth-child(3) .rank-no { background: var(--c3); color: #fff; }
+  .rank-name { flex: 1; min-width: 0; font-size: .9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .rank-sub { font-size: .74rem; color: var(--text-light); flex-shrink: 0; }
+  .rank-val { font-size: .88rem; color: var(--accent); font-weight: 600; flex-shrink: 0; font-variant-numeric: tabular-nums; }
+
+  /* ====== 明细小格 ====== */
+  .facts {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: 12px;
+  }
+  .fact { padding: 12px 14px; background: var(--bg); border-radius: var(--radius-sm); }
+  .fact-label { font-size: .74rem; color: var(--text-light); }
+  .fact-value { font-size: 1.15rem; color: var(--accent); font-weight: 600; margin-top: 3px; font-variant-numeric: tabular-nums; }
+  .fact-value small { font-size: .74rem; color: var(--text-light); font-weight: 400; margin-left: 3px; }
+
+  /* ====== 关系矩阵 ====== */
+  .matrix-wrap { overflow: auto; max-height: 460px; border-radius: var(--radius-sm); }
+  table.matrix { border-collapse: collapse; font-size: .78rem; white-space: nowrap; }
+  table.matrix th, table.matrix td { border: 1px solid var(--border); padding: 5px 10px; text-align: center; }
+  table.matrix thead th {
+    position: sticky; top: 0; z-index: 2;
+    background: var(--card-bg);
+    color: var(--text-light);
+    font-weight: 500;
+  }
+  table.matrix tbody th {
+    position: sticky; left: 0; z-index: 1;
+    background: var(--card-bg);
+    color: var(--text);
+    font-weight: 500;
+    text-align: right;
+  }
+  table.matrix thead th:first-child { z-index: 3; left: 0; }
+  table.matrix td.zero { color: var(--text-light); opacity: .3; }
+  table.matrix td.hot { color: #fff; font-weight: 600; }
+
+  /* ====== 完整度体检 ====== */
+  .gap-meter {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 12px 14px;
+    background: var(--bg);
+    border-radius: var(--radius-sm);
+    margin-bottom: 14px;
+  }
+  .gap-meter-score {
+    font-family: var(--font-serif);
+    font-size: 2rem;
+    color: var(--accent);
+    line-height: 1;
+    flex-shrink: 0;
+    font-variant-numeric: tabular-nums;
+  }
+  .gap-meter-score small { font-size: .85rem; color: var(--text-light); font-family: var(--font-sans); }
+  .gap-meter-body { flex: 1; min-width: 0; }
+  .gap-meter-label { font-size: .8rem; color: var(--text); margin-bottom: 5px; }
+  .gap-meter-track { height: 8px; background: var(--track); border-radius: 4px; overflow: hidden; }
+  .gap-meter-fill { height: 100%; border-radius: 4px; background: linear-gradient(90deg, var(--c2), var(--c1)); transition: width .6s cubic-bezier(.4,0,.2,1); }
+
+  .gap-row { display: flex; align-items: center; gap: 10px; margin-bottom: 9px; cursor: default; }
+  .gap-row:last-child { margin-bottom: 0; }
+  .gap-row-label { width: 74px; flex-shrink: 0; font-size: .82rem; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .gap-row-track { flex: 1; height: 18px; background: var(--track); border-radius: 5px; overflow: hidden; position: relative; }
+  .gap-row-fill { display: block; height: 100%; border-radius: 5px; transition: width .6s cubic-bezier(.4,0,.2,1); min-width: 3px; }
+  .gap-row-fill.ok { background: var(--c3); }
+  .gap-row-fill.mid { background: var(--c1); }
+  .gap-row-fill.low { background: var(--c6); }
+  .gap-row-fill.bad { background: var(--danger); }
+  .gap-row-num { width: 92px; flex-shrink: 0; font-size: .76rem; color: var(--text-light); text-align: right; font-variant-numeric: tabular-nums; }
+  .gap-row-num b { color: var(--accent); font-size: .84rem; }
+  .gap-missing { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
+  .gap-missing-title { font-size: .76rem; color: var(--text-light); margin-bottom: 8px; }
+  .gap-missing-item { font-size: .78rem; color: var(--text-light); line-height: 1.9; }
+  .gap-missing-item b { color: var(--text); font-weight: 500; margin-right: 4px; }
+
+  /* ====== 角色之最 ====== */
+  .crown-list { display: flex; flex-direction: column; gap: 3px; }
+  .crown-row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 10px; border-radius: var(--radius-sm);
+    text-decoration: none; color: var(--text);
+    transition: var(--transition);
+  }
+  a.crown-row:hover { background: var(--accent-pale); }
+  .crown-badge {
+    width: 26px; height: 26px; flex-shrink: 0;
+    border-radius: 50%; display: flex; align-items: center; justify-content: center;
+    font-size: .8rem; background: var(--track);
+  }
+  .crown-row:nth-child(1) .crown-badge { background: #f6e6c8; }
+  html[data-theme="dark"] .crown-row:nth-child(1) .crown-badge { background: #4a3a22; }
+  .crown-body { flex: 1; min-width: 0; }
+  .crown-name { font-size: .88rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .crown-sub { font-size: .72rem; color: var(--text-light); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .crown-val { font-size: .86rem; color: var(--accent); font-weight: 600; flex-shrink: 0; font-variant-numeric: tabular-nums; }
+  .crown-val small { font-size: .7rem; color: var(--text-light); font-weight: 400; margin-left: 2px; }
+
+  /* ====== 家族规模 ====== */
+  .fam-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+  .fam-card {
+    padding: 12px 14px;
+    background: var(--bg);
+    border-radius: var(--radius-sm);
+    border-left: 3px solid var(--c1);
+  }
+  .fam-card:nth-child(2n) { border-left-color: var(--c3); }
+  .fam-card:nth-child(3n) { border-left-color: var(--c4); }
+  .fam-name { font-size: .86rem; color: var(--text); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .fam-count { font-size: 1.3rem; color: var(--accent); font-weight: 600; margin-top: 4px; font-variant-numeric: tabular-nums; }
+  .fam-count small { font-size: .72rem; color: var(--text-light); font-weight: 400; margin-left: 2px; }
+
+  /* ====== 空 / 加载 ====== */
+  .empty { text-align: center; padding: 70px 20px; color: var(--text-light); }
+  .empty .icon { font-size: 3rem; margin-bottom: 12px; opacity: .5; animation: spin 1.2s linear infinite; display: inline-block; }
+  .empty.static .icon { animation: none; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ====== Toast ====== */
+  .toast {
+    position: fixed;
+    top: 20px; right: 20px;
+    z-index: 2000;
+    padding: 12px 24px;
+    border-radius: var(--radius-sm);
+    background: #2d2a26;
+    color: #f5ede4;
+    font-size: .9rem;
+    box-shadow: var(--shadow-lg);
+    transform: translateX(120%);
+    transition: var(--transition);
+    max-width: 380px;
+  }
+  .toast.show { transform: translateX(0); }
+  .toast.error { background: var(--danger); }
+
+  /* ====== 响应式 ====== */
+  @media (max-width: 768px) {
+    .header h1 { font-size: 1.5rem; }
+    .stat-grid { grid-template-columns: 1fr; }
+    .sidebar { width: 54px; }
+    .sidebar-text, .sidebar-footer { display: none; }
+    .sidebar-toggle { text-align: center; padding-left: 0; padding-right: 0; }
+    .sidebar-item { gap: 0; justify-content: center; padding: 10px 0; }
+  }
+</style>
+</head>
+<body>
+<div class="app-layout">
+
+<!-- ====== 侧边栏 ====== -->
+<aside class="sidebar" id="sidebar">
+  <button class="sidebar-toggle" onclick="toggleSidebar()" title="展开/收起侧边栏">☰</button>
+  <nav class="sidebar-nav">
+    <a href="/" class="sidebar-item">
+      <span class="sidebar-icon">📖</span><span class="sidebar-text">角色设定</span>
+    </a>
+    <a href="/worldview" class="sidebar-item">
+      <span class="sidebar-icon">🌍</span><span class="sidebar-text">世界观设定</span>
+    </a>
+    <a href="/relations" class="sidebar-item">
+      <span class="sidebar-icon">🔗</span><span class="sidebar-text">关系网</span>
+    </a>
+    <a href="/documents" class="sidebar-item">
+      <span class="sidebar-icon">📄</span><span class="sidebar-text">文档管理</span>
+    </a>
+    <a href="/stats" class="sidebar-item active">
+      <span class="sidebar-icon">📊</span><span class="sidebar-text">总览统计</span>
+    </a>
+  </nav>
+  <div class="sidebar-footer">
+    <button class="theme-toggle" onclick="toggleTheme()" title="切换深色/浅色模式">
+      <span class="theme-toggle-icon" id="themeIcon">🌙</span><span id="themeLabel">深色</span>
+    </button>
+  </div>
+</aside>
+
+<div class="main-content">
+
+<!-- ====== Header ====== -->
+<header class="header">
+  <h1>总览统计</h1>
+  <p class="subtitle">设定簿的数字化切片 · <span id="statsGeneratedAt">加载中…</span></p>
+</header>
+
+<div class="container" id="statsRoot">
+  <div class="empty" id="statsLoading"><span class="icon">⏳</span><p>正在统计…</p></div>
+  <div class="empty static" id="statsError" style="display:none;">
+    <div class="icon" style="animation:none;">⚠️</div>
+    <p id="statsErrorText">统计失败</p>
+    <button class="theme-toggle" style="background:var(--accent);border-color:var(--accent);color:#fff;margin-top:12px;" onclick="loadStats()">重试</button>
+  </div>
+  <div id="statsBody" style="display:none;"></div>
+</div>
+
+</div><!-- /main-content -->
+</div><!-- /app-layout -->
+
+<div class="toast" id="toast"></div>
+
+<script>
+function toggleSidebar() {
+  document.getElementById('sidebar').classList.toggle('collapsed');
+}
+
+// ====== 主题 ======
+function applyTheme(theme) {
+  const html = document.documentElement;
+  if (theme === 'dark') html.setAttribute('data-theme', 'dark');
+  else html.removeAttribute('data-theme');
+  const icon = document.getElementById('themeIcon');
+  const label = document.getElementById('themeLabel');
+  if (icon) icon.textContent = theme === 'dark' ? '☀️' : '🌙';
+  if (label) label.textContent = theme === 'dark' ? '浅色' : '深色';
+}
+function toggleTheme() {
+  const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+  const next = isDark ? 'light' : 'dark';
+  try { localStorage.setItem('oc-theme', next); } catch(e) {}
+  applyTheme(next);
+}
+
+// ====== Toast ======
+let toastTimer;
+function showToast(msg, type) {
+  const toast = document.getElementById('toast');
+  toast.textContent = msg;
+  toast.className = 'toast ' + (type || '') + ' show';
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { toast.classList.remove('show'); }, 2500);
+}
+
+// ====== 工具 ======
+const esc = (s) => String(s == null ? '' : s)
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+
+const PALETTE = ['c1','c2','c3','c4','c5','c6','c7','c8'];
+const pickColor = (i) => PALETTE[i % PALETTE.length];
+
+// 面板容器
+function panel(title, note, body) {
+  return '<div class="panel"><div class="panel-head">' +
+    '<span class="panel-title">' + title + '</span>' +
+    (note ? '<span class="panel-note">' + note + '</span>' : '') +
+    '</div>' + body + '</div>';
+}
+
+// 横向条形图。items: [{name, count}]
+//   total  —— 百分比分母（省略则用 items 之和）
+//   opts   —— { unit: '字' } 等：条尾单位；'%' 表示按百分比显示（默认，不传即 '%'）
+//             opts.pct = false 时不显示百分比，只显示原值 + unit
+function barChart(items, total, opts) {
+  if (!items || !items.length) return '<div class="panel-note">暂无数据</div>';
+  opts = opts || {};
+  const showPct = opts.pct !== false;          // 默认显示百分比
+  const unit = opts.unit || '%';
+  const sum = total || items.reduce((a, b) => a + b.count, 0) || 1;
+  const max = Math.max.apply(null, items.map(i => i.count)) || 1;
+  return items.map((it, i) => {
+    const w = Math.max(2, Math.round(it.count / max * 100));
+    let suffix;
+    if (showPct) {
+      const pct = (it.count / sum * 100);
+      suffix = (pct >= 10 ? pct.toFixed(0) : pct.toFixed(1)) + '%';
+    } else {
+      suffix = unit;
+    }
+    return '<div class="bar-row">' +
+      '<div class="bar-meta">' +
+        '<span class="bar-name" title="' + esc(it.name) + '">' + esc(it.name) + '</span>' +
+        '<span class="bar-count">' + it.count + '<span class="bar-pct">' + suffix + '</span></span>' +
+      '</div>' +
+      '<div class="bar-track"><div class="bar-fill ' + pickColor(i) + '" style="width:' + w + '%"></div></div>' +
+    '</div>';
+  }).join('');
+}
+
+
+function pillGroup(items, total) {
+  if (!items || !items.length) return '<div class="panel-note">暂无数据</div>';
+  const sum = total || items.reduce((a, b) => a + b.count, 0) || 1;
+  return '<div class="pill-group">' + items.map((it, i) => {
+    const pct = (it.count / sum * 100);
+    return '<span class="pill">' +
+      '<span class="pill-dot" style="background:var(--' + pickColor(i) + ')"></span>' +
+      esc(it.name) + ' <span class="pill-count">' + it.count + '</span>' +
+      '<span class="pill-pct">' + pct.toFixed(0) + '%</span>' +
+    '</span>';
+  }).join('') + '</div>';
+}
+
+// 关系同地区/跨地区矩阵
+function buildMatrix(cross, regions) {
+  if (!cross || !cross.length) return '<div class="panel-note">暂无跨地区关系数据</div>';
+  // 收集涉及的地区，按出现频次排序
+  const freq = {};
+  cross.forEach(r => { freq[r.from] = (freq[r.from] || 0) + r.count; freq[r.to] = (freq[r.to] || 0) + r.count; });
+  const list = (regions && regions.length ? regions.map(r => r.name) : Object.keys(freq))
+    .filter(n => freq[n] != null)
+    .sort((a, b) => freq[b] - freq[a])
+    .slice(0, 14);
+  if (!list.length) return '<div class="panel-note">暂无跨地区关系数据</div>';
+  const idx = {};
+  list.forEach((n, i) => { idx[n] = i; });
+  const m = list.map(() => list.map(() => 0));
+  let max = 0;
+  cross.forEach(r => {
+    const a = idx[r.from], b = idx[r.to];
+    if (a == null || b == null) return;
+    m[a][b] += r.count;
+    if (a !== b) m[b][a] += r.count;
+    if (m[a][b] > max) max = m[a][b];
+  });
+  const base = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#8b5e3c';
+  const rgb = hexToRgb(base) || { r: 139, g: 94, b: 60 };
+  let html = '<div class="matrix-wrap"><table class="matrix"><thead><tr><th></th>';
+  list.forEach(n => { html += '<th>' + esc(n) + '</th>'; });
+  html += '</tr></thead><tbody>';
+  m.forEach((row, i) => {
+    html += '<tr><th>' + esc(list[i]) + '</th>';
+    row.forEach((v, j) => {
+      if (!v) { html += '<td class="zero">·</td>'; return; }
+      const t = max ? v / max : 0;
+      const alpha = 0.18 + t * 0.82;
+      const cls = t > 0.55 ? ' class="hot"' : '';
+      html += '<td' + cls + ' style="background:rgba(' + rgb.r + ',' + rgb.g + ',' + rgb.b + ',' + alpha.toFixed(2) + ')">' + v + '</td>';
+    });
+    html += '</tr>';
+  });
+  html += '</tbody></table></div>';
+  return html;
+}
+
+function hexToRgb(hex) {
+  const h = (hex || '').replace('#', '');
+  if (h.length !== 6) return null;
+  return { r: parseInt(h.slice(0,2),16), g: parseInt(h.slice(2,4),16), b: parseInt(h.slice(4,6),16) };
+}
+
+// ====== 渲染 ======
+function render(d) {
+  const C = d.characters || {};
+  const W = d.worldview || {};
+  const R = d.relations || {};
+  const D = d.documents || {};
+  const I = d.images || {};
+  const REG = d.regions || [];
+  const COMP = d.completeness || {};
+  const FAM = d.families || {};
+  const HL = d.highlights || {};
+
+  document.getElementById('statsGeneratedAt').textContent = '统计于 ' + (d.generated_at || '');
+
+  const regionTop = (C.region || []).filter(r => r.name !== '未填写');
+  const regionBlank = (C.region || []).find(r => r.name === '未填写');
+  // 人均关系 = 去重对数 * 2 / 角色数（含同家族自动关系）
+  const avgRel = C.total ? ((R.unique_pairs || 0) * 2 / C.total) : 0;
+
+  let html = '';
+
+  // ---------- 概览 ----------
+  html += '<div class="stat-hero">' +
+    heroCard('角色总数', C.total || 0, '位', (regionTop.length ? '覆盖 ' + regionTop.length + ' 个地区' : '尚未填写地区')) +
+    heroCard('世界观条目', W.total || 0, '条', (W.main_category || []).map(m => m.name + ' ' + m.count).join(' · ')) +
+    heroCard('关系总数', R.total || 0, '条', R.unique_pairs + ' 对角色 · ' + (R.types || []).length + ' 种类型') +
+    heroCard('文档 / 图片', (D.total || 0) + ' / ' + (I.files || 0), '', (D.size_display || '0 B') + ' 文档 · ' + (I.size_display || '—') + ' 图片') +
+  '</div>';
+
+  // ---------- 角色分布 ----------
+  html += '<h2 class="section-title">角色分布<span class="section-hint">共 ' + (C.total || 0) + ' 位角色</span></h2>';
+  html += '<div class="stat-grid">';
+
+  html += panel('📍 地区分布',
+    'Top ' + regionTop.length + (regionBlank ? ' · 未填写 ' + regionBlank.count : ''),
+    barChart(regionTop, C.total));
+
+  html += panel('⚧ 性别构成', (C.total || 0) + ' 位', pillGroup(C.gender, C.total));
+
+  html += panel('🌗 存在状态', '按 status 字段', barChart(C.status, C.total));
+
+  html += panel('🏛 家族规模', (FAM.families || 0) + ' 个家族 · ' + (FAM.with_family || 0) + ' 人有归属',
+    famCards(FAM.list));
+
+  html += '</div>';
+
+  // ---------- 设定完整度体检 ----------
+  html += '<h2 class="section-title">设定完整度体检<span class="section-hint">' +
+    (COMP.avg_pct || 0) + '% · 平均填写率</span></h2>';
+  html += '<div class="panel">' + completenessView(COMP) + '</div>';
+
+  // ---------- 角色之最 ----------
+  html += '<h2 class="section-title">角色之最<span class="section-hint">设定 ' +
+    (HL.total_setting_chars || 0).toLocaleString() + ' 字 · 平均 ' +
+    (C.total ? Math.round((HL.total_setting_chars || 0) / C.total) : 0) + ' 字/人</span></h2>';
+  html += '<div class="stat-grid">';
+
+  html += panel('📝 设定最厚', 'setting 字数', crownList(HL.items && HL.items.longest_setting, '字'));
+  html += panel('🔗 关系最多', '两端计次', crownList(HL.items && HL.items.most_relations, '条'));
+  html += panel('🎭 关系类型最丰富', '不同类型数', crownList(HL.items && HL.items.richest_types, '种'));
+  html += panel('🖼 图片最多', '张数', crownList(HL.items && HL.items.most_images, '张'));
+  html += panel('👪 家族羁绊最多', '所属家族数', crownList(HL.items && HL.items.most_family, '个'));
+  html += panel('📊 设定篇幅分布', '共 ' + (C.total || 0) + ' 位', barChart(HL.setting_distribution, C.total));
+
+  html += '</div>';
+
+  // 最长的世界观条目：Top N（world_longest_list；兼容只返回单条的旧数据）
+  const worldRank = (HL.world_longest_list && HL.world_longest_list.length)
+    ? HL.world_longest_list
+    : (HL.world_longest ? [HL.world_longest] : []);
+  if (worldRank.length) {
+    html += '<div class="panel" style="margin-top:18px;"><div class="panel-head">' +
+      '<span class="panel-title">🌍 最长的世界观条目</span><span class="panel-note">' +
+      'Top ' + worldRank.length + ' · 榜首 ' + (worldRank[0].chars || 0).toLocaleString() + ' 字</span></div>' +
+      '<div class="rank-list">' + worldRank.map((w, i) =>
+        '<a class="rank-row" href="/worldview">' +
+          '<span class="rank-no">' + (i + 1) + '</span>' +
+          '<span class="rank-name" title="' + esc(w.title) + '">' + esc(w.title) + '</span>' +
+          '<span class="rank-val">' + (w.chars || 0).toLocaleString() +
+            '<span style="font-size:.74rem;color:var(--text-light);font-weight:400"> 字</span></span>' +
+        '</a>').join('') + '</div></div>';
+  }
+
+  // ---------- 关系网络 ----------
+  // total = 手写关系条数；unique_pairs = 含"同家族自动关系"的去重对数
+  const famPairs = R.family_new_pairs || 0;
+  html += '<h2 class="section-title">关系网络<span class="section-hint">手写 ' + (R.total || 0) +
+    ' 条' + (famPairs ? ' + 同家族自动 ' + famPairs + ' 条' : '') +
+    ' · 去重 ' + (R.unique_pairs || 0) + ' 对 · 涉及 ' + (R.connected_characters || 0) +
+    ' 位角色 · 人均 ' + avgRel.toFixed(2) + ' 条</span></h2>';
+  html += '<div class="stat-grid">';
+
+  html += panel('⭐ 关系度排行', '含同家族 · 两端计次', (R.top_degree || []).length
+    ? '<div class="rank-list">' + R.top_degree.map((it, i) =>
+        '<a class="rank-row" href="/relations">' +
+          '<span class="rank-no">' + (i + 1) + '</span>' +
+          '<span class="rank-name">' + esc(it.name) + '</span>' +
+          '<span class="rank-val">' + it.degree + '</span>' +
+        '</a>').join('') + '</div>'
+    : '<div class="panel-note">还没有建立任何关系</div>');
+
+  html += panel('📐 关系明细', '手写关系为「数据质量」，去重对数为「含家族」',
+    '<div class="facts">' +
+      fact('手写关系', R.total || 0, ' 条') +
+      fact('去重对数', R.unique_pairs || 0, ' 对') +
+      fact('同家族关系', famPairs, ' 条') +
+      fact('孤立角色', R.isolated_characters || 0) +
+      fact('双向互惠', R.mutual_pairs || 0) +
+      fact('重复关系', R.dup_pairs || 0) +
+      fact('未标类型', R.no_type || 0) +
+      fact('自环关系', R.self_loop || 0) +
+    '</div>');
+
+  if ((R.isolated || []).length) {
+    html += panel('🔌 孤立角色', '尚无任何关系 · Top ' + R.isolated.length,
+      '<div class="pill-group">' + R.isolated.map(it =>
+        '<span class="pill">' + esc(it.name) +
+        (it.region ? ' <span class="pill-pct">' + esc(it.region) + '</span>' : '') + '</span>').join('') + '</div>');
+  }
+
+  html += '</div>';
+
+  // ---------- 地区圈子 ----------
+  html += '<h2 class="section-title">地区圈子<span class="section-hint">凝聚力＝同地区内部关系占比 · 设定厚度＝人均设定字数</span></h2>';
+  html += '<div class="stat-grid">';
+
+  html += panel('🤝 地区凝聚力', (REG.length ? REG.length + ' 个活跃地区' : ''),
+    REG.length ? barChart(REG.map(r => ({
+        name: r.name + '（' + r.inside + '/' + r.total + '）',
+        count: r.cohesion
+      })), 100)
+      : '<div class="panel-note">关系数据不足（每个地区至少需 3 条关系）</div>');
+
+  html += panel('✍️ 设定厚度', '人均 setting 字数',
+    REG.length
+      ? barChart(REG.slice().sort((a, b) => b.avg_setting - a.avg_setting)
+          .map(r => ({ name: r.name, count: r.avg_setting })), 0, { pct: false, unit: '字' })
+      : '<div class="panel-note">数据不足</div>');
+
+  html += panel('🕸 地区关系矩阵', '越深关系越多',
+    buildMatrix(R.cross_region, regionTop));
+
+  html += '</div>';
+
+  // ---------- 世界观 ----------
+  html += '<h2 class="section-title">世界观与内容<span class="section-hint">共 ' + (W.total || 0) + ' 条设定</span></h2>';
+  html += '<div class="stat-grid">';
+
+  html += panel('📚 大类分布', (W.total || 0) + ' 条', barChart(W.main_category, W.total));
+
+  html += panel('✍️ 内容体量', '字数统计',
+    '<div class="facts">' +
+      fact('设定字数', (W.content_chars || 0).toLocaleString(), ' 字') +
+      fact('平均每条', W.total ? Math.round((W.content_chars || 0) / W.total).toLocaleString() : 0, ' 字') +
+      fact('角色设定总字数', (HL.total_setting_chars || 0).toLocaleString(), ' 字') +
+    '</div>');
+
+  html += '</div>';
+
+  // ---------- 素材 ----------
+  html += '<h2 class="section-title">素材与文档</h2>';
+  html += '<div class="panel"><div class="facts">' +
+    fact('角色图片', C.with_image || 0, ' 位有图') +
+    fact('图片总数', C.image_total || 0, ' 张') +
+    fact('无图角色', C.no_image || 0, ' 位') +
+    fact('已取脸', C.with_face_crop || 0, ' 位') +
+    fact('文档数量', D.total || 0, ' 个') +
+    fact('图片占用', I.size_display || '—') +
+    fact('文档占用', D.size_display || '—') +
+  '</div></div>';
+
+  document.getElementById('statsBody').innerHTML = html;
+  document.getElementById('statsBody').style.display = '';
+  document.getElementById('statsLoading').style.display = 'none';
+}
+
+// 家族规模卡
+function famCards(list) {
+  if (!list || !list.length) return '<div class="panel-note">还没有家族划分</div>';
+  return '<div class="fam-cards">' + list.map(f =>
+    '<div class="fam-card"><div class="fam-name" title="' + esc(f.name) + '">' + esc(f.name) + '</div>' +
+    '<div class="fam-count">' + f.count + '<small>人</small></div></div>').join('') + '</div>';
+}
+
+// 完整度体检
+function completenessView(comp) {
+  const fields = comp.fields || [];
+  if (!fields.length) return '<div class="panel-note">暂无数据</div>';
+  const avg = comp.avg_pct || 0;
+
+  let html = '<div class="gap-meter">' +
+    '<div class="gap-meter-score">' + avg + '<small>%</small></div>' +
+    '<div class="gap-meter-body">' +
+      '<div class="gap-meter-label">整体填写率（' + fields.length + ' 个字段的平均值）</div>' +
+      '<div class="gap-meter-track"><div class="gap-meter-fill" style="width:' + avg + '%"></div></div>' +
+    '</div></div>';
+
+  html += fields.map(f => {
+    const pct = f.pct || 0;
+    const cls = pct >= 90 ? 'ok' : pct >= 70 ? 'mid' : pct >= 40 ? 'low' : 'bad';
+    return '<div class="gap-row" title="' + esc(f.label) + '：已填 ' + f.filled + ' / 缺 ' + f.missing + '">' +
+      '<span class="gap-row-label">' + esc(f.label) + '</span>' +
+      '<span class="gap-row-track"><span class="gap-row-fill ' + cls + '" style="width:' + pct + '%"></span></span>' +
+      '<span class="gap-row-num"><b>' + pct + '%</b> 缺 ' + f.missing + '</span>' +
+    '</div>';
+  }).join('');
+
+  // 待补充清单：只挑缺得多的字段（缺 >=3 人）
+  const missing = comp.missing || {};
+  const labels = comp.label_map || {};
+  const gaps = Object.keys(missing)
+    .filter(k => missing[k].length >= 3)
+    .map(k => ({ key: k, label: labels[k] || k, names: missing[k] }));
+
+  if (gaps.length) {
+    html += '<div class="gap-missing"><div class="gap-missing-title">📌 待补充（仅列缺失最多的前 10 位）</div>' +
+      gaps.map(g => '<div class="gap-missing-item"><b>' + esc(g.label) + '</b>' +
+        g.names.map(n => esc(n)).join('、') + '</div>').join('') +
+    '</div>';
+  }
+
+  return html;
+}
+
+// 角色之最列表
+function crownList(items, unit) {
+  if (!items || !items.length) return '<div class="panel-note">暂无数据</div>';
+  return '<div class="crown-list">' + items.map((it, i) =>
+    '<a class="crown-row" href="/">' +
+      '<span class="crown-badge">' + (i === 0 ? '👑' : (i + 1)) + '</span>' +
+      '<span class="crown-body">' +
+        '<span class="crown-name">' + esc(it.name) + '</span>' +
+        '<span class="crown-sub">' + esc([it.university, it.region].filter(Boolean).join(' · ')) + '</span>' +
+      '</span>' +
+      '<span class="crown-val">' + (typeof it.value === 'number' ? it.value.toLocaleString() : esc(it.value)) +
+        '<small>' + unit + '</small></span>' +
+    '</a>').join('') + '</div>';
+}
+
+function heroCard(label, value, unit, sub) {
+  return '<div class="hero-card">' +
+    '<div class="hero-label">' + label + '</div>' +
+    '<div class="hero-value' + (String(value).length > 6 ? ' small' : '') + '">' + esc(value) +
+      (unit ? '<small style="font-size:.9rem;color:var(--text-light);margin-left:4px;font-family:var(--font-sans)">' + unit + '</small>' : '') +
+    '</div>' +
+    '<div class="hero-sub">' + (sub || '') + '</div>' +
+  '</div>';
+}
+
+function fact(label, value, unit) {
+  return '<div class="fact"><div class="fact-label">' + label + '</div>' +
+    '<div class="fact-value">' + esc(value) + (unit ? '<small>' + unit + '</small>' : '') + '</div></div>';
+}
+
+// ====== 加载 ======
+function loadStats() {
+  document.getElementById('statsError').style.display = 'none';
+  document.getElementById('statsLoading').style.display = '';
+  document.getElementById('statsBody').style.display = 'none';
+  fetch('/api/stats')
+    .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+    .then(d => render(d))
+    .catch(e => {
+      document.getElementById('statsLoading').style.display = 'none';
+      document.getElementById('statsErrorText').textContent = '统计失败：' + e.message;
+      document.getElementById('statsError').style.display = '';
+    });
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  applyTheme(document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light');
+  loadStats();
+});
+
+// 主题切换后矩阵的配色依赖 CSS 变量，用当前值重绘
+const _origToggleTheme = toggleTheme;
+toggleTheme = function() {
+  _origToggleTheme();
+  const body = document.getElementById('statsBody');
+  if (body && body.style.display !== 'none') loadStats();
+};
+</script>
+<script src="search.js"></script>
+<script src="export-all.js"></script>
+</body>
+</html>

@@ -17,6 +17,7 @@ var routeMap = map[string]string{
 	"/worldview": "worldview.html",
 	"/relations": "relations.html",
 	"/documents": "documents.html",
+	"/stats":     "stats.html",
 }
 
 func main() {

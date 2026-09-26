@@ -15,6 +15,12 @@
   --canvas-from: #faf6f0;
   --canvas-to: #f0e8db;
   --canvas-grid: #e6dccd;
+  /* 统计图表色板 */
+  --c1: #c49a6c; --c2: #8b5e3c; --c3: #6b8e7b; --c4: #7b6b8e;
+  --c5: #8e7b6b; --c6: #b5651d; --c7: #5e7a8b; --c8: #a0522d;
+  --track: #f0e8dc;
+  /* 列表卡片缩略图显示盒（手机档）。生成端统一按大屏档出图，见 app.js cardBoxSize() */
+  --card-thumb-w: 88px; --card-thumb-h: 64px;
 }
 
 /* ====== 深色主题 ====== */
@@ -28,6 +34,9 @@ html[data-theme="dark"] {
   --canvas-from: #1f1b19;
   --canvas-to: #14110f;
   --canvas-grid: #322c28;
+  --c1: #d9b58a; --c2: #c49a6c; --c3: #8fb3a0; --c4: #a294b8;
+  --c5: #b3a293; --c6: #d98a4a; --c7: #8aa8b8; --c8: #c9703f;
+  --track: #332c27;
   color-scheme: dark;
 }
 html[data-theme="dark"] body.home-active {
@@ -379,3 +388,341 @@ html[data-theme="dark"] #view-home .card { background: var(--card-bg); box-shado
 /* ====== 首页底部操作按钮排布（主题切换 + 导出全部） ====== */
 #view-home .footer-actions { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
 #view-home .footer-actions .theme-toggle { margin: 0; }
+
+/* ==================== 总览统计 View ==================== */
+#view-stats .header { padding-bottom: 14px; }
+.stats-container { padding: 14px 14px 24px; }
+
+.stats-section-title {
+  font-family: var(--font-serif);
+  font-size: 1.05rem;
+  color: var(--accent);
+  letter-spacing: .06em;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+  margin: 22px 0 12px;
+}
+.stats-container > .stats-section-title:first-child { margin-top: 0; }
+
+/* ---- 概览卡 ---- */
+.stats-hero { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.stats-hero-card {
+  background: var(--card-bg);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 14px 14px 12px;
+  position: relative;
+  overflow: hidden;
+}
+.stats-hero-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; opacity: .85; }
+.stats-hero-card:nth-child(1)::before { background: var(--c1); }
+.stats-hero-card:nth-child(2)::before { background: var(--c3); }
+.stats-hero-card:nth-child(3)::before { background: var(--c4); }
+.stats-hero-card:nth-child(4)::before { background: var(--c5); }
+.stats-hero-label { font-size: .72rem; color: var(--text-light); letter-spacing: .04em; }
+.stats-hero-value {
+  font-family: var(--font-serif);
+  font-size: 1.7rem;
+  color: var(--accent);
+  line-height: 1.2;
+  margin-top: 5px;
+  word-break: break-all;
+}
+.stats-hero-value.small { font-size: 1.1rem; }
+.stats-hero-value small { font-size: .72rem; color: var(--text-light); font-weight: 400; font-family: var(--font-sans); margin-left: 3px; }
+.stats-hero-sub { font-size: .68rem; color: var(--text-light); margin-top: 5px; line-height: 1.45; }
+
+/* ---- 面板 ---- */
+.stats-panel {
+  background: var(--card-bg);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 14px 16px 16px;
+  margin-bottom: 12px;
+}
+.stats-panel-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 12px; }
+.stats-panel-title { font-size: .9rem; font-weight: 600; color: var(--text); }
+.stats-panel-note { font-size: .68rem; color: var(--text-light); flex-shrink: 0; }
+.stats-note { font-size: .78rem; color: var(--text-light); padding: 4px 0; }
+
+/* ---- 横向条形 ---- */
+.stats-bar-row { margin-bottom: 10px; }
+.stats-bar-row:last-child { margin-bottom: 0; }
+.stats-bar-meta { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; font-size: .8rem; margin-bottom: 4px; }
+.stats-bar-name { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stats-bar-count { color: var(--accent); font-weight: 600; flex-shrink: 0; font-variant-numeric: tabular-nums; }
+.stats-bar-pct { color: var(--text-light); font-weight: 400; font-size: .7rem; margin-left: 5px; }
+.stats-bar-track { height: 7px; background: var(--track); border-radius: 4px; overflow: hidden; }
+.stats-bar-fill { height: 100%; border-radius: 4px; min-width: 2px; transition: width .45s cubic-bezier(.4,0,.2,1); }
+.stats-bar-fill.c1 { background: var(--c1); }
+.stats-bar-fill.c2 { background: var(--c2); }
+.stats-bar-fill.c3 { background: var(--c3); }
+.stats-bar-fill.c4 { background: var(--c4); }
+.stats-bar-fill.c5 { background: var(--c5); }
+.stats-bar-fill.c6 { background: var(--c6); }
+.stats-bar-fill.c7 { background: var(--c7); }
+.stats-bar-fill.c8 { background: var(--c8); }
+
+/* ---- Pills ---- */
+.stats-pill-group { display: flex; flex-wrap: wrap; gap: 7px; }
+.stats-pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 12px; border-radius: 18px;
+  background: var(--accent-pale); color: var(--text);
+  font-size: .78rem;
+}
+.stats-pill-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+.stats-pill-count { color: var(--accent); font-weight: 600; font-variant-numeric: tabular-nums; }
+.stats-pill-pct { color: var(--text-light); font-size: .7rem; }
+
+/* ---- 排行 ---- */
+.stats-rank-list { display: flex; flex-direction: column; gap: 2px; }
+.stats-rank-row { display: flex; align-items: center; gap: 10px; padding: 8px 6px; border-radius: var(--radius-sm); }
+.stats-rank-no {
+  width: 22px; height: 22px; flex-shrink: 0; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: .7rem; font-weight: 600;
+  background: var(--track); color: var(--text-light);
+}
+.stats-rank-row:nth-child(1) .stats-rank-no { background: var(--c1); color: #fff; }
+.stats-rank-row:nth-child(2) .stats-rank-no { background: var(--c2); color: #fff; }
+.stats-rank-row:nth-child(3) .stats-rank-no { background: var(--c3); color: #fff; }
+.stats-rank-name { flex: 1; min-width: 0; font-size: .86rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stats-rank-val { font-size: .84rem; color: var(--accent); font-weight: 600; flex-shrink: 0; font-variant-numeric: tabular-nums; }
+
+/* ---- 明细格 ---- */
+.stats-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); gap: 10px; }
+.stats-fact { padding: 10px 12px; background: var(--bg); border-radius: var(--radius-sm); }
+.stats-fact-label { font-size: .7rem; color: var(--text-light); }
+.stats-fact-value { font-size: 1.02rem; color: var(--accent); font-weight: 600; margin-top: 3px; font-variant-numeric: tabular-nums; }
+.stats-fact-value small { font-size: .68rem; color: var(--text-light); font-weight: 400; margin-left: 2px; }
+
+.stats-generated { text-align: center; font-size: .68rem; color: var(--text-light); opacity: .7; margin-top: 18px; }
+
+/* ---- 家族规模卡 ---- */
+.stats-fam-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(74px, 1fr)); gap: 8px; }
+.stats-fam-card {
+  background: var(--bg); border-radius: var(--radius-sm);
+  padding: 10px 8px; text-align: center;
+}
+.stats-fam-name {
+  font-size: .76rem; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  margin-bottom: 5px;
+}
+.stats-fam-count {
+  font-family: var(--font-serif); font-size: 1.18rem; color: var(--accent);
+  font-weight: 600; font-variant-numeric: tabular-nums;
+}
+.stats-fam-count small { font-size: .64rem; color: var(--text-light); font-weight: 400; margin-left: 2px; }
+
+/* ---- 完整度体检 ---- */
+.stats-gap-meter { display: flex; align-items: center; gap: 14px; margin-bottom: 16px; }
+.stats-gap-score {
+  font-family: var(--font-serif); font-size: 2rem; color: var(--accent);
+  font-weight: 600; line-height: 1; flex-shrink: 0; font-variant-numeric: tabular-nums;
+}
+.stats-gap-score small { font-size: .8rem; color: var(--text-light); font-weight: 400; margin-left: 2px; }
+.stats-gap-meter-body { flex: 1; min-width: 0; }
+.stats-gap-label { font-size: .7rem; color: var(--text-light); margin-bottom: 6px; }
+.stats-gap-track { height: 8px; background: var(--track); border-radius: 4px; overflow: hidden; }
+.stats-gap-fill { height: 100%; background: var(--accent); border-radius: 4px; transition: width .5s cubic-bezier(.4,0,.2,1); }
+
+.stats-gap-row { display: flex; align-items: center; gap: 9px; padding: 5px 0; font-size: .78rem; }
+.stats-gap-row-label { width: 74px; flex-shrink: 0; color: var(--text-light); font-size: .72rem; }
+.stats-gap-row-track { flex: 1; min-width: 0; height: 6px; background: var(--track); border-radius: 3px; overflow: hidden; }
+.stats-gap-row-fill { display: block; height: 100%; border-radius: 3px; transition: width .45s cubic-bezier(.4,0,.2,1); }
+.stats-gap-row-fill.ok { background: var(--c2); }
+.stats-gap-row-fill.mid { background: var(--c4); }
+.stats-gap-row-fill.low { background: var(--c6); }
+.stats-gap-row-fill.bad { background: #c0533a; }
+.stats-gap-row-num {
+  width: 72px; flex-shrink: 0; text-align: right; font-size: .7rem;
+  color: var(--text-light); font-variant-numeric: tabular-nums;
+}
+.stats-gap-row-num b { color: var(--text); font-weight: 600; }
+
+.stats-gap-missing {
+  margin-top: 14px; padding: 12px; background: var(--accent-pale);
+  border-radius: var(--radius-sm);
+}
+.stats-gap-missing-title { font-size: .72rem; color: var(--accent); font-weight: 600; margin-bottom: 8px; }
+.stats-gap-missing-item { font-size: .74rem; color: var(--text); line-height: 1.7; margin-bottom: 4px; }
+.stats-gap-missing-item b { color: var(--text-light); font-weight: 600; margin-right: 6px; }
+
+/* ---- 角色之最 ---- */
+.stats-crown-list { display: flex; flex-direction: column; gap: 2px; }
+.stats-crown-row { display: flex; align-items: center; gap: 10px; padding: 6px 4px; border-radius: var(--radius-sm); }
+.stats-crown-badge {
+  width: 22px; height: 22px; flex-shrink: 0; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: .7rem; font-weight: 600;
+  background: var(--track); color: var(--text-light);
+}
+.stats-crown-row:nth-child(1) .stats-crown-badge { background: transparent; font-size: .95rem; }
+.stats-crown-body { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.stats-crown-name { font-size: .84rem; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stats-crown-sub { font-size: .68rem; color: var(--text-light); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 1px; }
+.stats-crown-val {
+  font-size: .86rem; color: var(--accent); font-weight: 600;
+  flex-shrink: 0; font-variant-numeric: tabular-nums;
+}
+.stats-crown-val small { font-size: .66rem; color: var(--text-light); font-weight: 400; margin-left: 2px; }
+
+.btn-stats-retry {
+  margin-top: 12px; padding: 9px 22px;
+  background: var(--accent); color: #fff; border: none;
+  border-radius: var(--radius); font-size: .86rem; cursor: pointer;
+  font-family: var(--font-sans);
+}
+
+/* ============================================================
+   Pad / 大屏适配（纯 CSS 断点，不改结构、不改 JS）
+   ------------------------------------------------------------
+   断点策略：
+     ≥ 768px   竖屏平板 —— 放宽内容宽度、卡片多列、关系图加高
+     ≥ 1024px  横屏平板 / 更大 —— 进一步加宽，统计页多列
+   与 desktop-offline/ 的 768px 断点保持同一节奏，手机端完全不受影响。
+   ============================================================ */
+
+/* ---------- 竖屏平板（≥768px） ---------- */
+@media (min-width: 768px) {
+
+  /* 缩略图显示盒放大（生成端已按大屏档 128×92 出图，此处放大不会糊） */
+  :root { --card-thumb-w: 104px; --card-thumb-h: 76px; }
+
+  /* 主内容整体留白与最大宽度：避免列表被拉到整屏宽后一行文字过长 */
+  .stats-container { padding: 18px 28px 32px; max-width: 960px; margin: 0 auto; }
+
+  /* 通用 header：大屏加宽内边距，标题略放大 */
+  .header { padding: 18px 28px; padding-top: max(18px, env(safe-area-inset-top, 0px)); }
+  .header h1 { font-size: 1.3rem; }
+  .header .subtitle { font-size: .78rem; }
+
+  /* ---- 首页 ---- */
+  #view-home .brand .app-icon { width: 96px; height: 96px; border-radius: 22px; }
+  #view-home .brand h1 { font-size: 1.7rem; }
+  #view-home .brand .subtitle { font-size: .8rem; }
+  .home-search { max-width: 460px; font-size: .92rem; padding: 13px 20px; }
+  #view-home .cards {
+    grid-template-columns: repeat(3, 1fr);
+    gap: 18px;
+    max-width: 720px;
+    padding: 32px 28px;
+  }
+  /* 5 张卡在 3 列下排成 3 + 2，第二行两张靠左，留白自然 */
+  #view-home .card { padding: 28px 18px 22px; }
+  #view-home .card-icon { width: 64px; height: 64px; font-size: 2rem; }
+  #view-home .card-title { font-size: 1.02rem; }
+  #view-home .card-desc { font-size: .78rem; }
+
+  /* ---- 角色 / 世界观 / 关系列表：单列改多列 ---- */
+  #view-index .card-list,
+  #view-worldview .card-list,
+  #view-relations .card-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+    gap: 12px;
+    padding: 6px 28px 28px;
+  }
+
+  /* 工具栏 / 标签栏 / 上传区同步加宽，与列表左右对齐 */
+  #view-index .toolbar { padding: 14px 28px 10px; }
+  #view-worldview .toolbar { padding: 6px 28px 10px; }
+  #view-relations .toolbar { padding: 14px 28px 10px; }
+  .region-tabs, .cat-tabs, .type-tabs { padding-left: 28px; padding-right: 28px; }
+  .main-cat-tabs { padding: 10px 28px 6px; }
+  .export-bar { margin: 6px 28px 0; }
+  .action-bar { margin: 4px 28px 8px; }
+  #view-worldview .btn-add { width: auto; margin: 4px 28px 8px; display: inline-block; padding-left: 26px; padding-right: 26px; }
+  .btn-export-trigger { width: auto; margin: 6px 28px 8px; display: inline-block; padding-left: 26px; padding-right: 26px; }
+
+  /* 大屏下"添加/导出"按钮不必占满整行 */
+  #view-index .btn-add { width: auto; align-self: flex-start; padding-left: 26px; padding-right: 26px; }
+  #view-relations .btn-add { width: auto; }
+
+  .upload-zone { margin: 16px 28px 10px; padding: 28px; }
+  .count-bar { padding: 0 28px 10px; }
+  /* 文档列表元素是等高卡片，可直接多列 */
+  .file-list { padding: 0 28px 28px; display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 10px; }
+
+  /* ---- 关系图：大屏加高，节点密度更舒服 ---- */
+  .graph-section { margin: 4px 28px 12px; }
+  .graph-canvas-wrap { height: 420px; }
+
+  /* ---- 全局搜索面板 ---- */
+  .gs-panel { max-width: 640px; max-height: 76vh; }
+
+  /* ---- 弹窗：手机是「全屏铺满」，平板上改成「居中卡片」 ---- */
+  .modal-overlay { align-items: center; justify-content: center; background: rgba(20,12,5,.5); padding: 24px; }
+  .modal {
+    width: 100%; max-width: 680px;
+    min-height: 0; max-height: 88vh;
+    border-radius: var(--radius);
+    overflow: hidden;
+    box-shadow: 0 12px 48px rgba(0,0,0,.28);
+  }
+  /* 弹窗体内部滚动（原来靠 overlay 滚，大屏改为卡片内滚） */
+  .modal-body { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; padding-bottom: 28px; }
+  .modal-header { padding-top: 16px; }         /* 顶部安全区已由居中卡片消解，无需 32px 反刘海留白 */
+  .modal-footer { position: sticky; bottom: 0; }
+  /* 删除确认等窄弹窗（内联 max-width:400px 在卡片模式下会覆盖，这里恢复其意图） */
+  #indexDeleteOverlay .modal, #worldDeleteOverlay .modal,
+  #relDeleteOverlay .modal, #docDeleteOverlay .modal { max-width: 420px; }
+
+  /* 文档查看器：手机是「底部半屏抽屉」，平板上保持抽屉语义但收窄居中，
+     避免被上面的通用居中规则改成悬浮卡片（会露出底部缝隙、丢掉 slideUp 动画）。 */
+  #view-documents .modal-overlay { align-items: flex-end; padding: 0; background: rgba(0,0,0,.5); }
+  #view-documents .modal {
+    max-width: 860px;
+    max-height: 86vh;
+    border-radius: 16px 16px 0 0;
+    animation: slideUp .25s ease-out;
+  }
+
+  /* 深色模式：overlay 背板在大屏也要压暗（手机是不透明的，大屏需半透明遮罩） */
+  html[data-theme="dark"] .modal-overlay { background: rgba(0,0,0,.62); }
+
+  /* 详情页图片在大屏上可以更大一些 */
+  #indexDetailImage { padding: 0 24px !important; }
+
+  /* ---- 统计页：概览卡与家族卡多列 ---- */
+  .stats-hero { grid-template-columns: repeat(4, 1fr); gap: 12px; }
+  .stats-hero-value { font-size: 1.9rem; }
+  .stats-facts { grid-template-columns: repeat(auto-fit, minmax(112px, 1fr)); }
+  .stats-fam-cards { grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 10px; }
+  .stats-panel { padding: 16px 20px 18px; }
+  /* 世界观卡片行（.card-row）本就 auto-fill，放宽最小列宽即可 */
+  .card-row { grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; }
+}
+
+/* ---------- 横屏平板 / 更大屏（≥1024px） ---------- */
+@media (min-width: 1024px) {
+
+  :root { --card-thumb-w: 128px; --card-thumb-h: 92px; }
+
+  .stats-container { max-width: 1120px; padding: 20px 36px 40px; }
+  .header { padding-left: 36px; padding-right: 36px; }
+
+  #view-home .cards { grid-template-columns: repeat(3, 1fr); max-width: 820px; }
+
+  /* 横屏平板宽度充足（≥1024px 有效内容宽约 950px+），列宽收到 320px
+     让常见尺寸能排下 3 列，而不是留一大片空白 */
+  #view-index .card-list,
+  #view-worldview .card-list,
+  #view-relations .card-list { grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); padding-left: 36px; padding-right: 36px; }
+
+  #view-index .toolbar, #view-worldview .toolbar, #view-relations .toolbar { padding-left: 36px; padding-right: 36px; }
+  .region-tabs, .cat-tabs, .type-tabs, .main-cat-tabs { padding-left: 36px; padding-right: 36px; }
+  .export-bar, .action-bar { margin-left: 36px; margin-right: 36px; }
+  #view-worldview .btn-add, .btn-export-trigger { margin-left: 36px; }
+  .upload-zone { margin-left: 36px; margin-right: 36px; }
+  .count-bar { padding-left: 36px; padding-right: 36px; }
+  .file-list { padding-left: 36px; padding-right: 36px; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); }
+
+  .graph-section { margin-left: 36px; margin-right: 36px; }
+  .graph-canvas-wrap { height: 520px; }
+
+  .modal { max-width: 780px; }
+  .gs-panel { max-width: 720px; }
+}
