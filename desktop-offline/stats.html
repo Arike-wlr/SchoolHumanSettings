@@ -433,9 +433,13 @@
   }
   .crown-row:nth-child(1) .crown-badge { background: #f6e6c8; }
   html[data-theme="dark"] .crown-row:nth-child(1) .crown-badge { background: #4a3a22; }
-  .crown-body { flex: 1; min-width: 0; }
+  /* crown-body 必须是 flex 纵向容器：内部的 crown-name / crown-sub 都是 <span>（inline），
+     不设 flex-direction:column 的话副行会紧贴在姓名后面同一行显示。 */
+  .crown-body { flex: 1; min-width: 0; display: flex; flex-direction: column; }
   .crown-name { font-size: .88rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .crown-sub { font-size: .72rem; color: var(--text-light); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* 无副行（如缺学校/地区）时不留多余高度 */
+  .crown-sub:empty { display: none; }
   .crown-val { font-size: .86rem; color: var(--accent); font-weight: 600; flex-shrink: 0; font-variant-numeric: tabular-nums; }
   .crown-val small { font-size: .7rem; color: var(--text-light); font-weight: 400; margin-left: 2px; }
 
@@ -739,10 +743,7 @@ function render(d) {
   html += '<div class="stat-grid">';
 
   html += panel('📝 设定最厚', 'setting 字数', crownList(HL.items && HL.items.longest_setting, '字'));
-  html += panel('🔗 关系最多', '两端计次', crownList(HL.items && HL.items.most_relations, '条'));
-  html += panel('🎭 关系类型最丰富', '不同类型数', crownList(HL.items && HL.items.richest_types, '种'));
   html += panel('🖼 图片最多', '张数', crownList(HL.items && HL.items.most_images, '张'));
-  html += panel('👪 家族羁绊最多', '所属家族数', crownList(HL.items && HL.items.most_family, '个'));
   html += panel('📊 设定篇幅分布', '共 ' + (C.total || 0) + ' 位', barChart(HL.setting_distribution, C.total));
 
   html += '</div>';
@@ -776,15 +777,18 @@ function render(d) {
 
   // 关系度排行点人名 → 进关系网并聚焦该角色（高亮 ta 的家族与关系圈），
   // 而不是跳到角色详情卡：这里用户关心的是"ta 的关系"，不是 ta 的档案。
-  html += panel('⭐ 关系度排行', '含同家族 · 两端计次', (R.top_degree || []).length
-    ? '<div class="rank-list">' + R.top_degree.map((it, i) =>
-        '<a class="rank-row" href="' + (it.id != null ? '/relations?focus=' + encodeURIComponent(it.id) : '/relations') + '">' +
-          '<span class="rank-no">' + (i + 1) + '</span>' +
-          '<span class="rank-name">' + esc(it.name) + '</span>' +
-          '<span class="rank-val">' + it.degree + '</span>' +
-          '<span class="crown-go">›</span>' +
-        '</a>').join('') + '</div>'
-    : '<div class="panel-note">还没有建立任何关系</div>');
+  // 显示格式与其余榜单完全统一（crownList）：徽章 + 姓名 + 学校·地区 + 数值。
+  // top_degree 数据项是 {id, name, degree, university, region}，只有数值字段名不同
+  // （degree → value），故做一层映射后交给 crownList 渲染。
+  html += panel('⭐ 关系度排行', '含同家族 · 两端计次',
+    crownList((R.top_degree || []).map(it => ({
+      id: it.id, name: it.name, value: it.degree,
+      university: it.university, region: it.region
+    })), '条', { focusRelations: true, placeholder: '还没有建立任何关系' }));
+
+  // 这两个榜本质是"关系"指标，从「角色之最」移来；点击进关系网聚焦该角色高亮 ta 的关系圈。
+  html += panel('🎭 关系类型最丰富', '不同类型数', crownList(HL.items && HL.items.richest_types, '种', { focusRelations: true }));
+  html += panel('👪 家族羁绊最多', '所属家族数', crownList(HL.items && HL.items.most_family, '个', { focusRelations: true }));
 
   html += panel('📐 关系明细', '手写关系为数据质量，去重对数含家族',
     '<div class="facts">' +
@@ -909,22 +913,31 @@ function completenessView(comp) {
   return html;
 }
 
-// 角色之最列表：每行直达该角色的详情页（/index?char=ID，与全局搜索同一入口）
+// 角色之最列表：默认每行直达该角色的详情页（/index?char=ID，与全局搜索同一入口）
 // 带 &return=stats：角色页据此在「关掉详情」时跳回本统计页（像 [[文档]] 链接那样）
-// 后端/离线版的 highlights.items.* 每条都带 id；缺 id 时退回角色列表页，避免生成坏链接
-function crownList(items, unit) {
-  if (!items || !items.length) return '<div class="panel-note">暂无数据</div>';
-  return '<div class="crown-list">' + items.map((it, i) =>
-    '<a class="crown-row" href="' + (it.id != null ? '/index?char=' + encodeURIComponent(it.id) + '&return=stats' : '/index') + '">' +
+// 后端/离线版的 highlights.items.* 每条都带 id；缺 id 时退回对应列表页，避免生成坏链接
+// opts.focusRelations 为真时改为「进关系网并聚焦该角色」（高亮 ta 的家族与关系圈）——
+// 用于"关系类型最丰富""家族羁绊最多"这两个本质是"关系"的榜，与关系度排行同语义。
+function crownList(items, unit, opts) {
+  if (!items || !items.length) return '<div class="panel-note">' + esc((opts && opts.placeholder) || '暂无数据') + '</div>';
+  const toRelations = opts && opts.focusRelations;
+  return '<div class="crown-list">' + items.map((it, i) => {
+    const href = (it.id != null)
+      ? (toRelations ? '/relations?focus=' + encodeURIComponent(it.id)
+                     : '/index?char=' + encodeURIComponent(it.id) + '&return=stats')
+      : (toRelations ? '/relations' : '/index');
+    const sub = [it.university, it.region].filter(Boolean).join(' · ');
+    return '<a class="crown-row" href="' + href + '">' +
       '<span class="crown-badge">' + (i === 0 ? '👑' : (i + 1)) + '</span>' +
       '<span class="crown-body">' +
         '<span class="crown-name">' + esc(it.name) + '</span>' +
-        '<span class="crown-sub">' + esc([it.university, it.region].filter(Boolean).join(' · ')) + '</span>' +
+        (sub ? '<span class="crown-sub">' + esc(sub) + '</span>' : '') +
       '</span>' +
       '<span class="crown-val">' + (typeof it.value === 'number' ? it.value.toLocaleString() : esc(it.value)) +
         '<small>' + unit + '</small></span>' +
       '<span class="crown-go">›</span>' +
-    '</a>').join('') + '</div>';
+    '</a>';
+  }).join('') + '</div>';
 }
 
 function heroCard(label, value, unit, sub) {

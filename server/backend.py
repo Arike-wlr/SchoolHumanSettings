@@ -1600,7 +1600,15 @@ def get_stats():
         "isolated_characters": len(isolated),
         "types": _dist_pairs(type_counter),
         "top_degree": [
-            {"id": cid, "name": name_by_id.get(cid, f"#{cid}"), "degree": d}
+            {
+                "id": cid,
+                "name": name_by_id.get(cid, f"#{cid}"),
+                "degree": d,
+                # 学校 / 地区：让统计页「关系度排行」与其它榜单一样能显示副行（crown-sub）。
+                # 空地区归「未填写」，与角色分布口径一致；学校为空则前端自动不渲染副行。
+                "university": univ_by_id.get(cid, ""),
+                "region": region_by_id.get(cid, ""),
+            }
             for cid, d in rank
         ],
         "isolated": [

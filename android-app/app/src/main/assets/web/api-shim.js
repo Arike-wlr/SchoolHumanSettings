@@ -564,10 +564,11 @@ async function computeStats() {
   var worldLongestList = worldRank.slice(0, STATS_WORLD_RANK_N);
 
   // ---------- 关系 ----------
-  var nameById = {}, regionById = {};
+  var nameById = {}, regionById = {}, univById = {};
   chars.forEach(function(c) {
     nameById[c.id] = c.name || ('#' + c.id);
     regionById[c.id] = statsBucket(c.region);
+    univById[c.id] = (c.university || '').trim();
   });
 
   var typeC = {}, degree = {}, pairCount = {}, crossC = {};
@@ -657,7 +658,12 @@ async function computeStats() {
 
   var degreeIds = Object.keys(degree);
   var rank = degreeIds.map(function(id) {
-    return { id: parseInt(id, 10), name: nameById[id] || ('#' + id), degree: degree[id] };
+    // university / region：供统计页「关系度排行」显示副行，与后端 get_stats() 口径一致。
+    // regionById 走 statsBucket（空值归「未填写」）；学校取原始字段，空则不显示。
+    return {
+      id: parseInt(id, 10), name: nameById[id] || ('#' + id), degree: degree[id],
+      university: univById[id] || '', region: regionById[id] || ''
+    };
   }).sort(function(a, b) {
     return b.degree - a.degree || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
   }).slice(0, STATS_RANK_N);

@@ -3126,13 +3126,17 @@ VM.stats = (function() {
 
   // 角色之最列表：每行可点，直达该角色的卡片详情（VM.index 的详情弹窗）
   // items 每条都带 id（后端/离线版一致）；缺 id 时退化为不可点，避免生成坏链接
-  function crownList(items, unit) {
-    if (!items || !items.length) return '<div class="stats-note">暂无数据</div>';
+  // opts.focusRelations 为真时改为「切到关系网并聚焦该角色」（高亮 ta 的家族与关系圈）——
+  // 用于"关系类型最丰富""家族羁绊最多"这两个本质是"关系"的榜，与关系度排行同语义。
+  function crownList(items, unit, opts) {
+    if (!items || !items.length) return '<div class="stats-note">' + esc((opts && opts.placeholder) || '暂无数据') + '</div>';
+    var toRelations = !!(opts && opts.focusRelations);
+    var handler = toRelations ? 'openRelationFocusFromStats' : 'openCharDetailFromStats';
     return '<div class="stats-crown-list">' + items.map(function(it, i) {
       var v = (typeof it.value === 'number') ? it.value.toLocaleString() : esc(it.value);
       var sub = [it.university, it.region].filter(Boolean).join(' · ');
       var clickable = (it.id != null);
-      var oc = clickable ? ' onclick="openCharDetailFromStats(' + it.id + ')"' : '';
+      var oc = clickable ? ' onclick="' + handler + '(' + it.id + ')"' : '';
       return '<div class="stats-crown-row' + (clickable ? ' tappable' : '') + '"' + oc + '>' +
         '<span class="stats-crown-badge">' + (i === 0 ? '👑' : (i + 1)) + '</span>' +
         '<span class="stats-crown-body">' +
@@ -3177,10 +3181,7 @@ VM.stats = (function() {
     // ---------- 角色之最 ----------
     html += '<div class="stats-section-title">角色之最</div>';
     html += panel('📝 设定最厚', 'setting 字数', crownList(HL.items && HL.items.longest_setting, '字'));
-    html += panel('🔗 关系最多', '两端计次', crownList(HL.items && HL.items.most_relations, '条'));
-    html += panel('🎭 关系类型最丰富', '不同类型数', crownList(HL.items && HL.items.richest_types, '种'));
     html += panel('🖼 图片最多', '张数', crownList(HL.items && HL.items.most_images, '张'));
-    html += panel('👪 家族羁绊最多', '所属家族数', crownList(HL.items && HL.items.most_family, '个'));
     html += panel('📊 设定篇幅分布', '共 ' + num(C.total) + ' 位', barChart(HL.setting_distribution, num(C.total)));
 
     // 最长的世界观条目：Top N（兼容只返回单条的旧数据）
@@ -3220,19 +3221,20 @@ VM.stats = (function() {
         ['人均关系', avgRel.toFixed(2)]
       ]));
 
-    if ((R.top_degree || []).length) {
-      html += panel('⭐ 关系度排行', '含同家族 · 两端计次',
-        '<div class="stats-rank-list">' + R.top_degree.map(function(it, i) {
-          var clickable = (it.id != null);
-          var oc = clickable ? ' onclick="openRelationFocusFromStats(' + it.id + ')"' : '';
-          return '<div class="stats-rank-row' + (clickable ? ' tappable' : '') + '"' + oc + '>' +
-            '<span class="stats-rank-no">' + (i + 1) + '</span>' +
-            '<span class="stats-rank-name">' + esc(it.name) + '</span>' +
-            '<span class="stats-rank-val">' + num(it.degree) + '</span>' +
-            (clickable ? '<span class="stats-rank-go">›</span>' : '') +
-          '</div>';
-        }).join('') + '</div>');
-    }
+    // 显示格式与其余榜单完全统一（crownList）：徽章 + 姓名 + 学校·地区 + 数值。
+    // top_degree 数据项是 {id, name, degree, university, region}，只有数值字段名不同
+    // （degree → value），故做一层映射后交给 crownList 渲染。
+    html += panel('⭐ 关系度排行', '含同家族 · 两端计次',
+      crownList((R.top_degree || []).map(function(it) {
+        return {
+          id: it.id, name: it.name, value: it.degree,
+          university: it.university, region: it.region
+        };
+      }), '条', { focusRelations: true, placeholder: '还没有建立任何关系' }));
+
+    // 这两个榜从「角色之最」移来（本质是"关系"指标）；点击切关系网并聚焦该角色。
+    html += panel('🎭 关系类型最丰富', '不同类型数', crownList(HL.items && HL.items.richest_types, '种', { focusRelations: true }));
+    html += panel('👪 家族羁绊最多', '所属家族数', crownList(HL.items && HL.items.most_family, '个', { focusRelations: true }));
 
     if ((R.isolated || []).length) {
       html += panel('🔌 孤立角色', '尚无任何关系 · Top ' + R.isolated.length,
