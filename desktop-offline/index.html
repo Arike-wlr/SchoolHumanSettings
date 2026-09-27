@@ -1106,9 +1106,17 @@ function getRegionsByCount(groups) {
 document.addEventListener('DOMContentLoaded', () => {
   applyTheme(document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light');
   loadCharacters();
-  // 按 id 直达角色详情（全局搜索 /index?char=ID、统计页「角色之最」「关系度排行」都用这个入口）
-  const gsChar = new URLSearchParams(location.search).get('char');
-  if (gsChar) openDetailModal(parseInt(gsChar, 10));
+  // 按 id 直达角色详情（全局搜索 /index?char=ID、统计页「角色之最」都用这个入口）
+  // 从统计页跳来的会多带 &return=stats：关掉详情时自动跳回统计页（像 [[文档]] 链接那样）。
+  const params = new URLSearchParams(location.search);
+  const gsChar = params.get('char');
+  if (gsChar) {
+    if (params.get('return') === 'stats') {
+      detailReturnTo = '/stats';
+      detailReturnCharId = String(parseInt(gsChar, 10));
+    }
+    openDetailModal(parseInt(gsChar, 10));
+  }
 });
 
 // ====== 加载角色列表 ======
@@ -1646,8 +1654,17 @@ document.addEventListener('keydown', function(e) {
 
 // ====== 详情查看 ======
 let detailCharId = null;
+// 从统计页榜单点进来的返回意图：关掉详情后跳回该地址（空 = 不返回）。
+// 仅在「关的就是当初跳进来的那条」时生效；用户自己又点了别的角色则放弃，不把人弹走。
+let detailReturnTo = '';
+let detailReturnCharId = null;
 
 async function openDetailModal(id) {
+  // 用户自己点了别的角色（或从卡片列表打开）：放弃「关掉就返回统计页」的语义
+  if (detailReturnTo && detailReturnCharId != null && String(id) !== detailReturnCharId) {
+    detailReturnTo = '';
+    detailReturnCharId = null;
+  }
   try {
     const res = await fetch(`${API}/${id}`);
     // 后端对不存在的 id 返回 404 + {detail:"角色不存在"}；若只看 res.json() 会把它当角色用、
@@ -1710,12 +1727,19 @@ function detailSection(label, value) {
 function closeDetailModal() {
   document.getElementById('detailOverlay').classList.remove('active');
   detailCharId = null;
+  // 从统计页跳来的：关掉详情 = 这次跳转结束，跳回统计页（一次性语义，避免反复触发）
+  const t = detailReturnTo;
+  detailReturnTo = '';
+  detailReturnCharId = null;
+  if (t) location.href = t;
 }
 
 function detailEdit() {
   if (detailCharId) {
     const id = detailCharId;
     editReturnToDetail = id;   // 记住是从卡片详情进入编辑，保存后回到卡片
+    detailReturnTo = '';       // 切去编辑不算「关闭详情」，别把用户弹回统计页
+    detailReturnCharId = null;
     closeDetailModal();
     openEditModal(id);
   }

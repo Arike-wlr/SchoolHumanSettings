@@ -317,6 +317,9 @@ VM.index = (function() {
   var detailImages = [];
   var detailImageIdx = 0;
   var editReturnToDetail = null;   // 从卡片详情进入编辑时记下 id，保存/取消后回到该卡片
+  // 从统计页榜单点进来的：记下来源视图名，关掉详情弹窗后切回该视图
+  // （Android 是单页应用，不走 URL，只能靠内存里传这个标记，与 [[文档]] 链接的返回语义一致）。
+  var detailReturnView = null;
   var loadGeneration = 0;
   var loadedRevision = -1;   // 已加载完成的数据版本（同版本返回不再查询/重绘）
   var loadingRevision = -1;  // 同版本请求在途标记，避免重复发起
@@ -855,7 +858,8 @@ VM.index = (function() {
   window.cancelEditIndex = cancelEdit;
   window.closeModalAutoSaveIndex = closeModalAutoSave;
 
-  function openDetailModal(id){
+  function openDetailModal(id, returnView){
+    detailReturnView = returnView || null;   // 传 'stats' 表示「从统计页跳来」，关掉详情要回去
     fetch(API+'/'+id).then(function(r){return r.json();}).then(function(c){
       detailCharId=c.id;
       document.getElementById('indexDetailName').textContent=c.name;
@@ -883,8 +887,15 @@ VM.index = (function() {
   }
 
   function detailSection(label,value){return '<div class="detail-section"><div class="detail-label">'+label+'</div><div class="detail-value">'+esc(value)+'</div></div>';}
-  function closeDetailModal(){document.getElementById('indexDetailOverlay').classList.remove('active');detailCharId=null;}
-  function detailEdit(){if(detailCharId){var id=detailCharId;editReturnToDetail=id;closeDetailModal();openEditModal(id);}}
+  function closeDetailModal(){
+    document.getElementById('indexDetailOverlay').classList.remove('active');
+    detailCharId=null;
+    // 从统计页点进来的：关掉详情 = 这次跳转结束，切回统计页（像 [[文档]] 链接那样关掉就跳回去）
+    var rv=detailReturnView;detailReturnView=null;
+    if(rv)navigateTo(rv);
+  }
+  // 注意：切去编辑框不算「关闭详情」，先清掉返回意图，别把用户弹回统计页
+  function detailEdit(){if(detailCharId){var id=detailCharId;editReturnToDetail=id;detailReturnView=null;closeDetailModal();openEditModal(id);}}
 
   // 导出
   function updateExportButtons(){
@@ -1049,6 +1060,8 @@ VM.worldview = (function() {
   var deleteTargetId = null;
   var detailEntryId = null;
   var editReturnToDetail = null;   // 从卡片详情进入编辑时记下 id，保存/取消后回到该卡片
+  // 从统计页榜单点进来的：关掉详情弹窗后切回该视图（与 VM.index 同款返回语义）
+  var detailReturnView = null;
   // 从世界观详情的 [[文档]] 链接跳到文档页时，记下来源条目与文档名，
   // 用户关掉文档查看器后据此切回「刚刚在看的那条设定」。
   var docReturnTo = null;
@@ -1326,7 +1339,8 @@ VM.worldview = (function() {
   window.cancelEditWorld = cancelEdit;
   window.closeModalAutoSaveWorld = closeModalAutoSave;
 
-  function openDetailModal(id) {
+  function openDetailModal(id, returnView) {
+    detailReturnView = returnView || null;   // 传 'stats' 表示「从统计页跳来」，关掉详情要回去
     fetch(API + '/' + id).then(function(r) { return r.json(); }).then(function(e) {
       detailEntryId = e.id;
       document.getElementById('worldDetailTitle').textContent = e.title;
@@ -1338,8 +1352,15 @@ VM.worldview = (function() {
       document.getElementById('worldDetailOverlay').classList.add('active');
     }).catch(function() { showToast('获取详情失败', 'error'); });
   }
-  function closeDetailModal() { document.getElementById('worldDetailOverlay').classList.remove('active'); detailEntryId = null; }
-  function detailEdit() { if (detailEntryId) { var id = detailEntryId; editReturnToDetail = id; closeDetailModal(); openEditModal(id); } }
+  function closeDetailModal() {
+    document.getElementById('worldDetailOverlay').classList.remove('active');
+    detailEntryId = null;
+    // 从统计页点进来的：关掉详情 = 这次跳转结束，切回统计页（像 [[文档]] 链接那样关掉就跳回去）
+    var rv = detailReturnView; detailReturnView = null;
+    if (rv) navigateTo(rv);
+  }
+  // 注意：切去编辑框不算「关闭详情」，先清掉返回意图，别把用户弹回统计页
+  function detailEdit() { if (detailEntryId) { var id = detailEntryId; editReturnToDetail = id; detailReturnView = null; closeDetailModal(); openEditModal(id); } }
 
   // ====== 文档链接功能 ======
   // 渲染详情内容时把 [[doc:文件名|显示文字]] 或 [[文件名|显示文字]] 转成可点击链接
@@ -1385,10 +1406,12 @@ VM.worldview = (function() {
       return;
     }
     var backId = docReturnTo;
+    // 文档往返只是中间过程：保留「从统计页跳来」的返回意图，回来后关掉详情仍应回统计页
+    var rv = detailReturnView;
     abandonDocReturnTo();
     if (typeof navigateTo === 'function') navigateTo('worldview');
     setTimeout(function() {
-      if (VM.worldview && VM.worldview.openDetailModal) VM.worldview.openDetailModal(backId);
+      if (VM.worldview && VM.worldview.openDetailModal) VM.worldview.openDetailModal(backId, rv);
     }, 350);
   }
 
@@ -2867,14 +2890,15 @@ VM.relations = (function() {
 })();
 
 // 从统计页榜单跳到对应详情（角色 / 世界观）。
-// Android 是单页应用，这里不新开页面，而是切视图 + 打开该条目的详情弹窗。
+// Android 是单页应用，这里不新开页面，而是切视图 + 打开该条目的详情弹窗；
+// 并登记「来源 = 统计页」，用户关掉详情弹窗时切回统计页（像 [[文档]] 链接那样关掉就跳回去）。
 //   openCharDetail(id) —— 切到角色视图并打开该角色详情
 //   openWorldDetail(id) —— 先查该条目的 main_category，切好大类 tab，再打开详情
 // 两个入口都做了「条目不存在」容错：详情模块内部 fetch 失败会 toast，不会弹空窗。
 function openCharDetailFromStats(id) {
   if (id == null) return;
   navigateTo('index');                       // 会触发 VM.index.init()（首次）或 refresh()
-  if (VM.index && VM.index.openDetailModal) VM.index.openDetailModal(id);
+  if (VM.index && VM.index.openDetailModal) VM.index.openDetailModal(id, 'stats');
 }
 
 // 统计页「关系度排行」点人名：切到关系网视图并聚焦该角色（高亮 ta 的家族 + 有关系的人）。
@@ -2902,7 +2926,7 @@ function openWorldDetailFromStats(id) {
         e.main_category !== VM.worldview.getMainCategory()) {
       VM.worldview.selectMainCategory(e.main_category);
     }
-    VM.worldview.openDetailModal(e.id);
+    VM.worldview.openDetailModal(e.id, 'stats');
   }).catch(function () {
     showToast('找不到该设定，可能已被删除', 'error');
   });

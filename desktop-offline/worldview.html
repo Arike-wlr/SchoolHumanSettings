@@ -979,9 +979,18 @@ document.getElementById('deleteOverlay').addEventListener('click', function(e) {
 
 // ====== 详情查看 ======
 let detailEntryId = null;
+// 从统计页榜单点进来的返回意图：关掉详情后跳回该地址（空 = 不返回）。
+// 仅在「关的就是当初跳进来的那条」时生效；用户自己又点了别的条目则放弃，不把人弹走。
+let detailReturnTo = '';
+let detailReturnEntryId = null;
 
 async function openDetailModal(id, opts) {
   const fromHistory = !!(opts && opts.fromHistory);
+  // 用户自己点了别的条目（或从卡片列表打开）：放弃「关掉就返回统计页」的语义
+  if (detailReturnTo && detailReturnEntryId != null && String(id) !== detailReturnEntryId) {
+    detailReturnTo = '';
+    detailReturnEntryId = null;
+  }
   try {
     const res = await fetch(`${API}/${id}`);
     // 后端对不存在的 id 返回 404 + {detail:"世界设定不存在"}；只看 res.json() 会把它当条目用
@@ -1098,12 +1107,19 @@ document.getElementById('docLinkOverlay').addEventListener('click', function(e) 
 function closeDetailModal() {
   document.getElementById('detailOverlay').classList.remove('active');
   detailEntryId = null;
+  // 从统计页跳来的：关掉详情 = 这次跳转结束，跳回统计页（一次性语义，避免反复触发）
+  const t = detailReturnTo;
+  detailReturnTo = '';
+  detailReturnEntryId = null;
+  if (t) location.href = t;
 }
 
 function detailEdit() {
   if (detailEntryId) {
     const id = detailEntryId;
     editReturnToDetail = id;   // 记住是从卡片详情进入编辑，保存后回到卡片
+    detailReturnTo = '';       // 切去编辑不算「关闭详情」，别把用户弹回统计页
+    detailReturnEntryId = null;
     closeDetailModal();
     openEditModal(id);
   }
@@ -1112,6 +1128,8 @@ function detailEdit() {
 function detailDelete() {
   if (detailEntryId) {
     const title = document.getElementById('detailTitle').textContent;
+    detailReturnTo = '';       // 切去删除确认不算「关闭详情」，别把用户弹回统计页
+    detailReturnEntryId = null;
     closeDetailModal();
     openDeleteModal(detailEntryId, title);
   }
@@ -1275,8 +1293,15 @@ async function openEntryById(id, opts) {
   }
 }
 (function () {
-  const gsWb = new URLSearchParams(location.search).get('wb');
+  const params = new URLSearchParams(location.search);
+  const gsWb = params.get('wb');
   if (gsWb) {
+    // 从统计页跳来（&return=stats）：登记返回意图，关掉详情就跳回统计页。
+    // 必须在 replaceState 之前读——下面的 replaceState 会把 return 从地址栏抹掉。
+    if (params.get('return') === 'stats') {
+      detailReturnTo = '/stats';
+      detailReturnEntryId = String(parseInt(gsWb, 10));
+    }
     // 带 ?wb= 进来时先把「本条详情」压进历史，这样用户从这进来的第一个动作
     // 若是按「后退」，能直接回到进入前的状态（而不是退出去离开本页）。
     history.replaceState({ wb: parseInt(gsWb, 10) }, '', '?wb=' + gsWb);
@@ -1293,6 +1318,9 @@ window.addEventListener('popstate', function (ev) {
     // 以免和这次后退操作互相打架。
     openEntryById(parseInt(wb, 10), { fromHistory: true });
   } else {
+    // 用户按的是浏览器「后退」：返回已由浏览器完成，别再自作主张跳一次统计页
+    detailReturnTo = '';
+    detailReturnEntryId = null;
     closeDetailModal();
   }
 });

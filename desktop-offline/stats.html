@@ -756,7 +756,7 @@ function render(d) {
       '<span class="panel-title">🌍 最长的世界观条目</span><span class="panel-note">' +
       'Top ' + worldRank.length + ' · 榜首 ' + (worldRank[0].chars || 0).toLocaleString() + ' 字</span></div>' +
       '<div class="rank-list">' + worldRank.map((w, i) =>
-        '<a class="rank-row" href="' + (w.id != null ? '/worldview?wb=' + encodeURIComponent(w.id) : '/worldview') + '">' +
+        '<a class="rank-row" href="' + (w.id != null ? '/worldview?wb=' + encodeURIComponent(w.id) + '&return=stats' : '/worldview') + '">' +
           '<span class="rank-no">' + (i + 1) + '</span>' +
           '<span class="rank-name" title="' + esc(w.title) + '">' + esc(w.title) + '</span>' +
           '<span class="rank-val">' + (w.chars || 0).toLocaleString() +
@@ -910,11 +910,12 @@ function completenessView(comp) {
 }
 
 // 角色之最列表：每行直达该角色的详情页（/index?char=ID，与全局搜索同一入口）
+// 带 &return=stats：角色页据此在「关掉详情」时跳回本统计页（像 [[文档]] 链接那样）
 // 后端/离线版的 highlights.items.* 每条都带 id；缺 id 时退回角色列表页，避免生成坏链接
 function crownList(items, unit) {
   if (!items || !items.length) return '<div class="panel-note">暂无数据</div>';
   return '<div class="crown-list">' + items.map((it, i) =>
-    '<a class="crown-row" href="' + (it.id != null ? '/index?char=' + encodeURIComponent(it.id) : '/index') + '">' +
+    '<a class="crown-row" href="' + (it.id != null ? '/index?char=' + encodeURIComponent(it.id) + '&return=stats' : '/index') + '">' +
       '<span class="crown-badge">' + (i === 0 ? '👑' : (i + 1)) + '</span>' +
       '<span class="crown-body">' +
         '<span class="crown-name">' + esc(it.name) + '</span>' +
