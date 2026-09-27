@@ -86,7 +86,6 @@ Settings/
 │   ├── search.js               #   全局搜索
 │   ├── export-all.js           #   一键导出（含确认弹窗）
 │   ├── copy-detail.js          #   详情复制
-│   ├── sync.js / sync-ui.js    #   局域网同步
 │   └── （页面源码，由 server/backend.py 托管）
 ├── android-app/                # Android 离线版（WebView + SPA，IndexedDB 本地存储）
 │   └── app/src/main/
@@ -175,6 +174,20 @@ APK 使用 debug 签名，安装时可能需要允许"未知来源"。
 3. 在电脑上查询本机 IP：`ipconfig`（或 PowerShell：`Get-NetIPAddress -AddressFamily IPv4`），记下当前网络适配器的 IPv4 地址
 4. 手机浏览器访问 `http://<电脑IP>:8000` 验证连通性
 5. 打开 App → 同步 → 服务器地址填 `<电脑IP>:8000` → 测试 → 上传/下载
+
+### 同步速度
+
+同步是增量的：只有变动的角色 / 设定 / 关系 / 文档才会传输，图片靠内容哈希去重，传过就不再传。
+
+服务器上现有约 **136 MB 图片**和 **320 MB 文档**（含两个 87 MB / 75 MB 的 docx），所以：
+
+- 首次同步、或服务器上那份图被清理过时，仍然要按实际流量走，快不了；
+- 日常「上传到电脑」**不应该**再传输图片 —— 上传前只需确认"服务器上那张图还在不在"。
+  这个核验走 `POST /api/images/exists` 批量完成（旧版后端自动降级为 `HEAD`，再降级为
+  "GET 后立刻断开"，都不会下载整张图）。
+- 同步完成后的状态栏会附一段耗时分解：`｜耗时 12.3s（拉取数据 0.4s / 算差异+核验图片 0.2s /
+  图片 3.1s / 写数据 2.0s / 文档 6.5s）`。**嫌慢先看这段数字**，哪一段大就是哪一段的问题。
+- ⚠️ **改了 `server/backend.py` 后必须重启后端**，否则跑着的还是旧进程，会退回降级路径。
 
 ### 常见问题
 
@@ -295,6 +308,8 @@ powershell -ExecutionPolicy Bypass -File server/check_sync.ps1 -Fix   # 诊断 +
 - `POST /api/characters/{id}/upload-image` — 为角色上传图片
 - `DELETE /api/characters/{id}/images/{index}` — 删除角色某张图片
 - `GET /api/images/{filename}` — 读取图片
+- `HEAD /api/images/{filename}` — 仅返回图片是否存在与大小（同步核验用，不传正文）
+- `POST /api/images/exists` — 批量核验图片是否仍存在（请求体 `{"urls":[...]}`，返回 `existing` / `missing`）
 - `DELETE /api/images/{filename}` — 删除图片
 - `GET /api/files/images/{cache_key}/{img_name}` — 读取 docx 内提取的图片
 

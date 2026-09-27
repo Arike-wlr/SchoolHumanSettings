@@ -725,6 +725,14 @@
   }
   window.executeSyncConfirm = executeSyncConfirm;
 
+  // 同步耗时分解：让"这次为什么慢"有据可查（手机上看不到控制台）。
+  function syncTimingMsg(result) {
+    const t = result && result.timings;
+    if (!t) return '';
+    const total = (t.totalMs / 1000).toFixed(1);
+    return `｜耗时 ${total}s${t.text ? '（' + t.text + '）' : ''}`;
+  }
+
   // 实际执行下载；scope 为 null 表示全量（向后兼容）。
   async function doDownloadExecute(scope, blockKey) {
     const status = document.getElementById('syncStatus');
@@ -738,7 +746,7 @@
       const docSync = result.documentsSynced != null ? `，文档同步 ${result.documentsSynced} 个` : '';
       const pending = result.pending && (result.pending.chars + result.pending.worlds + result.pending.rels);
       const pendingMsg = pending > 0 ? `（仍有 ${pending} 项未选块变更未同步）` : '';
-      status.textContent = `${label}完成：${result.characters} 角色、${result.worldBuildings} 设定、${result.relations} 关系、${result.documents} 文档${chgMsg}${docSync}${pendingMsg}`;
+      status.textContent = `${label}完成：${result.characters} 角色、${result.worldBuildings} 设定、${result.relations} 关系、${result.documents} 文档${chgMsg}${docSync}${pendingMsg}${syncTimingMsg(result)}`;
       status.className = 'sync-status success';
       loadLocalStats();
       // 刷新当前页面数据；旧请求由视图自己的序号保护。
@@ -764,7 +772,7 @@
       const docSync = result.documentsSynced != null ? `，文档同步 ${result.documentsSynced} 个` : '';
       const pending = result.pending && (result.pending.chars + result.pending.worlds + result.pending.rels);
       const pendingMsg = pending > 0 ? `（仍有 ${pending} 项未选块变更未同步）` : '';
-      status.textContent = `${label}完成：${result.characters} 角色、${result.worldBuildings} 设定、${result.relations} 关系、${result.documents} 文档${chgMsg}${docSync}${pendingMsg}`;
+      status.textContent = `${label}完成：${result.characters} 角色、${result.worldBuildings} 设定、${result.relations} 关系、${result.documents} 文档${chgMsg}${docSync}${pendingMsg}${syncTimingMsg(result)}`;
       status.className = 'sync-status success';
       if (typeof markAppDataChanged === 'function') markAppDataChanged();
       if (typeof refreshCurrentView === 'function') refreshCurrentView();

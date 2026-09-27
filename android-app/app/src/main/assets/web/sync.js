@@ -4,7 +4,8 @@
 // ============================================================
 
 // 模块版本号：用于验证手机是否加载了最新代码
-const SYNC_VERSION = '抗大抗大越抗越大';
+// （本次改动的可辨识标记：批量图片存在性核验，不再逐张下载整图）
+const SYNC_VERSION = '抗大抗大越抗越大 · 批量核验';
 
 // 默认 scope：四个块全部启用（与历史"一锅端"行为一致）。
 // downloadFromServer / uploadToServer 接受 scope 参数以支持只同步某一个块。
@@ -224,6 +225,89 @@ async function canonicalImageDataUrl(dataUrl) {
   return blobToDataUrl(await normalizeImageBlob(dataUrlToBlob(dataUrl)));
 }
 
+// ---------- 同步耗时分解（纯观测，不参与同步逻辑） ----------
+// 手机上不方便看控制台，sync-ui 会把 done() 的结果贴到状态栏，
+// 下次嫌慢时一眼就能看出时间花在哪一段。
+function createSyncTimer() {
+  const startedAt = Date.now();
+  let last = startedAt;
+  const phases = [];
+  return {
+    lap(label) {
+      const now = Date.now();
+      phases.push({ label, ms: now - last });
+      last = now;
+    },
+    done() {
+      phases.push({ label: '收尾', ms: Date.now() - last });
+      const totalMs = Date.now() - startedAt;
+      const text = phases.filter(p => p.ms >= 100)
+        .map(p => `${p.label} ${(p.ms / 1000).toFixed(1)}s`).join(' / ');
+      try { console.log(`[sync] 总耗时 ${(totalMs / 1000).toFixed(1)}s${text ? ' —— ' + text : ''}`); } catch (e) {}
+      return { totalMs, phases, text };
+    },
+  };
+}
+
+// ---------- 图片存在性核验：只问"还在不在"，不搬正文 ----------
+// 历史教训：上传前的核验原本走 fetchImageWithRetry(candidate)，那是把整张图
+// 下载下来、再解码一遍，只为看一个状态码。43 张图合计约 137 MB，每次上传都
+// 白跑一趟 —— 这就是"同步一次要挺久"的主因。现在分三级：
+//   ① 批量接口 POST /api/images/exists —— 一次请求问完全部（服务端新版本才有）
+//   ② HEAD —— 只回状态码与长度（服务端新版本才有）
+//   ③ GET + 立即取消响应体 —— 任何服务端都能用，收到响应头就断开
+// 旧版后端下自动降级，功能语义不变（谁存在、谁 404 的判定完全一致）。
+async function probeImagesExist(urls, base) {
+  if (!urls.length) return new Set();
+  try {
+    const res = await fetch(base + '/api/images/exists', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ urls }),
+      signal: AbortSignal.timeout(15000),
+    });
+    // 404/405：服务端还是没有这个接口的旧版本 → 交给下一级兜底
+    if (res.status === 404 || res.status === 405) return null;
+    if (!res.ok) throw imageFailure(`图片核验失败 (${res.status})`, 'IMAGE_HTTP', res.status);
+    const data = await res.json();
+    if (!data || !Array.isArray(data.existing)) return null;
+    return new Set(data.existing);
+  } catch (e) {
+    if (e && e.code === 'IMAGE_HTTP') throw e;
+    // 网络/超时/解析失败：退回逐张核验，别让整轮同步因为这一步失败
+    return null;
+  }
+}
+
+function isProbeTimeout(e) {
+  return !!e && (e.name === 'TimeoutError' || e.name === 'AbortError');
+}
+
+/** 单张存在性核验 → { ok, status }；只读状态码，不下载正文、不解码。 */
+async function checkImageExists(fullUrl, timeoutMs = 10000) {
+  try {
+    const res = await fetch(fullUrl, { method: 'HEAD', signal: AbortSignal.timeout(timeoutMs) });
+    // 405/501：该方法不被支持 → 用 GET 兜底
+    if (res.status !== 405 && res.status !== 501) return { ok: res.ok, status: res.status };
+  } catch (e) {
+    if (isProbeTimeout(e)) return { ok: false, status: 0 };
+    throw e;
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(fullUrl, { signal: controller.signal });
+    // 只要状态码：立刻取消正文。剩下的字节不再下载，更不做图片解码。
+    if (res.body && res.body.cancel) { try { await res.body.cancel(); } catch (e) {} }
+    return { ok: res.ok, status: res.status };
+  } catch (e) {
+    if (isProbeTimeout(e)) return { ok: false, status: 0 };
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 function cacheServerUrls(record) {
   if (!record) return [];
   const urls = Array.isArray(record.serverUrls) ? record.serverUrls.slice() : [];
@@ -352,7 +436,9 @@ async function convertServerImagesToDataUrl(characters, serverUrl, onProgress) {
       pending.push(entry);
     }
   }
-  await runBounded(pending, 2, async (item, index) => {
+  // 并发 4：图片是同步里最大的流量项，串行/2 并发会把带宽闲置掉。
+  // 上限仍保持"有界"，避免同时解码太多原图把手机内存打满。
+  await runBounded(pending, 4, async (item, index) => {
     onProgress && onProgress(`正在下载图片 (${skipped + index + 1}/${entries.size})...`);
     try {
       const blob = await fetchImageWithRetry(item.fullUrl);
@@ -376,38 +462,61 @@ function imageExtension(mime) {
   return mime === 'image/jpeg' ? 'jpg' : mime.split('/')[1].replace('+xml', '');
 }
 
-// 上传只做一次 POST；缓存映射复用前先确认当前服务器仍有资源。
-// 处理对象是"只在本地存在"的图片：img:// 引用（新形态）与 data URL（旧数据）。
+// 上传前核验：找出"本地有、服务器上已经没了"的图片。
+// 只做存在性核验，绝不下载正文、绝不解码 —— 详见 probeImagesExist 的注释。
+// 返回的 Set 元素是本地图片标识（img:// 引用或 data URL），供后续上传与
+// 差异重算复用，避免同一轮里对同一批图片核验两次。
 async function verifyUploadImageMappings(characters, serverUrl, cacheIndex) {
   const base = normalizeServerBase(serverUrl);
   const current = new URL(base).origin;
-  const staleDataUrls = new Set();   // 元素是本地图片标识：img:// 引用或 data URL
+  const stale = new Set();   // 元素是本地图片标识：img:// 引用或 data URL
   const localRefs = new Set();
   for (const c of characters) for (const ref of imageList(c)) if (isLocalOnlyImageRef(ref)) localRefs.add(ref);
+  if (localRefs.size === 0) return stale;
+
+  // 先把每个本地图对应的候选服务器地址收齐，让这一轮只发一批请求，
+  // 而不是每张图各发一条。
+  const candidatesByRef = new Map();
+  const allUrls = [];
   for (const localRef of localRefs) {
     const cached = cacheRecordForData(cacheIndex, localRef);
-    const candidates = cacheServerUrls(cached).filter(u => /^https?:\/\//i.test(u))
+    const urls = cacheServerUrls(cached)
+      .filter(u => /^https?:\/\//i.test(u))
       .map(u => resolveServerImageUrl(base, u)).filter(u => new URL(u).origin === current);
-    if (candidates.length === 0) continue;
-    let missing = false;
-    for (const candidate of candidates) {
-      try {
-        await fetchImageWithRetry(candidate);
-        missing = false;
-        break;
-      } catch (error) {
-        if (error.status === 404) missing = true;
-        else throw error;
-      }
-    }
-    if (missing) staleDataUrls.add(localRef);
+    if (urls.length === 0) continue;   // 从没传过 → 必然要传，无需核验
+    candidatesByRef.set(localRef, urls);
+    for (const u of urls) if (!allUrls.includes(u)) allUrls.push(u);
   }
-  return staleDataUrls;
+  if (candidatesByRef.size === 0) return stale;
+
+  const existing = await probeImagesExist(allUrls, base);
+  if (existing) {
+    // 一个本地图只要还有一个候选地址在服务器上，就不算失效。
+    for (const [localRef, urls] of candidatesByRef) {
+      if (!urls.some(u => existing.has(u))) stale.add(localRef);
+    }
+    return stale;
+  }
+
+  // 兜底：服务端还没有批量接口，逐张核验（只取状态码）
+  await runBounded([...candidatesByRef.entries()], 4, async ([localRef, urls]) => {
+    let alive = false;
+    for (const url of urls) {
+      const probe = await checkImageExists(url);
+      if (probe.ok) { alive = true; break; }
+      if (probe.status !== 404) throw imageFailure(`图片核验失败 (${probe.status})`, 'IMAGE_HTTP', probe.status);
+    }
+    if (!alive) stale.add(localRef);
+  });
+  return stale;
 }
 
-async function convertDataUrlImagesToServerUrl(characters, serverUrl, onProgress, cacheIndex) {
+async function convertDataUrlImagesToServerUrl(characters, serverUrl, onProgress, cacheIndex, staleDataUrls) {
   const base = normalizeServerBase(serverUrl);
   cacheIndex = cacheIndex || await loadImageCacheIndex();
+  // 本轮 verifyUploadImageMappings 已经批量核验过一遍的失效名单。传进来之后，
+  // 不在名单里的本地图就直接信任缓存映射，不再重复核验（原来是每张图再下一次整图）。
+  const knownStale = (staleDataUrls instanceof Set) ? staleDataUrls : null;
   const localRefs = new Set();
   for (const c of characters) for (const ref of imageList(c)) if (isLocalOnlyImageRef(ref)) localRefs.add(ref);
   if (localRefs.size === 0) return;
@@ -425,12 +534,22 @@ async function convertDataUrlImagesToServerUrl(characters, serverUrl, onProgress
         if (new URL(candidate).origin === current) { cachedFull = candidate; break; }
       }
     }
+    if (cachedFull && knownStale && !knownStale.has(localRef)) {
+      // 已核验过且判定存活 → 直接用缓存映射，一个请求都不发
+      serverRefByLocal.set(localRef, serverImageRef(cachedFull, base));
+      skipped++;
+      continue;
+    }
     if (cachedFull) {
       try {
-        await fetchImageWithRetry(cachedFull);
-        serverRefByLocal.set(localRef, serverImageRef(cachedFull, base));
-        skipped++;
-        continue;
+        // 只问状态码，不下载正文、不解码
+        const probe = await checkImageExists(cachedFull);
+        if (probe.ok) {
+          serverRefByLocal.set(localRef, serverImageRef(cachedFull, base));
+          skipped++;
+          continue;
+        }
+        if (probe.status !== 404) { failed.push(imageFailure(`图片核验失败 (${probe.status})`, 'IMAGE_HTTP', probe.status)); continue; }
       } catch (error) {
         if (error.status !== 404) { failed.push(error); continue; }
       }
@@ -613,6 +732,7 @@ async function downloadFromServer(onProgress, scope) {
   scope = scope || SYNC_SCOPE_ALL;
   const url = getServerUrl();
   if (!url) throw new Error('未配置服务器地址');
+  const timer = createSyncTimer();
 
   // 1. 并行拉取服务器全量数据
   onProgress && onProgress('正在拉取服务器数据...');
@@ -635,6 +755,7 @@ async function downloadFromServer(onProgress, scope) {
   if (scope.chars && serverChars.some(c => (c.images && c.images.length) || c.image_url)) {
     await convertServerImagesToDataUrl(serverChars, url, onProgress);
   }
+  timer.lap('拉取数据+图片');
 
   // 3. 获取本地数据
   const [localChars, localWorlds, localRels, localDocs] = await Promise.all([
@@ -705,6 +826,7 @@ async function downloadFromServer(onProgress, scope) {
     }
   }
 
+  timer.lap('写数据');
   // 9. 文档增量同步（name + size 比较）
   let docDeleted = 0, toDownload = [];
   if (scope.docs) {
@@ -727,6 +849,7 @@ async function downloadFromServer(onProgress, scope) {
       await docDB.create({ name: doc.name, blob, size: doc.size, modified: doc.modified });
     }
   }
+  timer.lap('文档');
 
   onProgress && onProgress('下载完成');
   return {
@@ -744,6 +867,7 @@ async function downloadFromServer(onProgress, scope) {
       worlds: scope.worlds ? 0 : worldChanges,
       rels: scope.rels ? 0 : relChanges,
     },
+    timings: timer.done(),
   };
 }
 
@@ -753,6 +877,7 @@ async function uploadToServer(onProgress, scope) {
   scope = scope || SYNC_SCOPE_ALL;
   const url = getServerUrl();
   if (!url) throw new Error('未配置服务器地址');
+  const timer = createSyncTimer();
 
   // 1. 读取本地数据
   onProgress && onProgress('正在读取本地数据...');
@@ -776,6 +901,7 @@ async function uploadToServer(onProgress, scope) {
   const serverWorlds = await worldRes.json();
   const serverRels = await relRes.json();
   const serverDocs = await docListRes.json();
+  timer.lap('拉取数据');
 
   // 3. 计算增量差异；比较副本只用于身份判断，写回仍使用原始本地记录。
   const cacheIndex = await loadImageCacheIndex();
@@ -811,6 +937,7 @@ async function uploadToServer(onProgress, scope) {
   const charChanges = charDiff.added.length + charDiff.deleted.length + charDiff.modified.length;
   const worldChanges = worldDiff.added.length + worldDiff.deleted.length + worldDiff.modified.length;
   const relChanges = relDiff.added.length + relDiff.deleted.length + relDiff.modified.length;
+  timer.lap('算差异+核验图片');
 
   // 4. 上传图片（仅对需要同步的角色）
   if (scope.chars) {
@@ -823,9 +950,12 @@ async function uploadToServer(onProgress, scope) {
     const needsImageUpload = charsToUpload.some(c =>
       (Array.isArray(c.images) && c.images.some(isLocalOnlyImageRef)) || isLocalOnlyImageRef(c.image_url));
     if (needsImageUpload) {
-      await convertDataUrlImagesToServerUrl(charsToUpload, url, onProgress, cacheIndex);
+      // 把本轮已核验出的失效名单传下去：不在名单里的直接信任缓存，
+      // 不再对同一张图重复核验一遍。
+      await convertDataUrlImagesToServerUrl(charsToUpload, url, onProgress, cacheIndex, staleDataUrls);
     }
   }
+  timer.lap('图片');
 
   // 5. 增量同步角色到服务器
   if (scope.chars && charChanges > 0) {
@@ -928,6 +1058,7 @@ async function uploadToServer(onProgress, scope) {
     }
   }
 
+  timer.lap('写数据');
   // 9. 文档增量同步（name + size 比较）
   let docDeleted = 0, toUpload = [];
   if (scope.docs) {
@@ -954,6 +1085,7 @@ async function uploadToServer(onProgress, scope) {
       if (!uploadRes.ok) throw new Error('文档上传失败: ' + docMeta.name);
     }
   }
+  timer.lap('文档');
 
   onProgress && onProgress('上传完成');
   return {
@@ -970,6 +1102,7 @@ async function uploadToServer(onProgress, scope) {
       worlds: scope.worlds ? 0 : worldChanges,
       rels: scope.rels ? 0 : relChanges,
     },
+    timings: timer.done(),
   };
 }
 

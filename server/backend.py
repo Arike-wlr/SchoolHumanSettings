@@ -23,7 +23,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
 from typing import Optional, List
 import uuid
@@ -286,6 +286,12 @@ class RelationResponse(BaseModel):
     description: str
     created_at: str
     updated_at: str
+
+
+class ImageExistRequest(BaseModel):
+    """批量图片存在性校验：手机端同步上传前用它一次问完全部图片，
+    避免逐张发 GET 把整张图（单张可达十几 MB）拉下来只为看状态码。"""
+    urls: List[str] = Field(default_factory=list)
 
 
 def get_db():
@@ -935,6 +941,53 @@ def serve_image(filename: str):
     if not os.path.exists(image_path) or not os.path.isfile(image_path):
         raise HTTPException(status_code=404, detail="图片不存在")
     return FileResponse(image_path)
+
+
+def _image_path_from_ref(ref: str) -> Optional[str]:
+    """把客户端传来的图片引用（/api/images/x.png 或完整 URL）解析成本地绝对路径。
+    解析不出来或越界返回 None。"""
+    raw = (ref or "").split("?", 1)[0].split("#", 1)[0]
+    name = os.path.basename(raw)
+    if not name or name in (".", ".."):
+        return None
+    return os.path.join(IMAGE_DIR, name)
+
+
+@app.head("/api/images/{filename}")
+def head_image(filename: str):
+    """只回状态码与长度，不传正文。
+    同步时的「这张图还在不在」只需要这一条信息，不该把整张图拉下来。"""
+    image_path = _image_path_from_ref(filename)
+    if not image_path or not os.path.isfile(image_path):
+        raise HTTPException(status_code=404, detail="图片不存在")
+    return Response(
+        status_code=200,
+        headers={"Content-Length": str(os.path.getsize(image_path))},
+    )
+
+
+@app.post("/api/images/exists")
+def images_exist(data: ImageExistRequest):
+    """批量检查图片是否仍存在。
+
+    手机端上传前需要确认"本地图片在服务器上是否还有对应文件"，原本是逐张发
+    GET 再丢弃正文 —— 43 张图（合计约 137 MB）就这么白跑一遍。改成一次请求
+    批量问，返回 missing / existing 两类，客户端按缓存里的候选地址比对即可。
+
+    传入的引用原样回传（不规范化），这样客户端能直接拿来与自己的缓存键比对。
+    """
+    missing, existing = [], []
+    for ref in data.urls:
+        image_path = _image_path_from_ref(ref)
+        if image_path and os.path.isfile(image_path):
+            existing.append(ref)
+        else:
+            missing.append(ref)
+    return {
+        "total": len(data.urls),
+        "existing": existing,
+        "missing": missing,
+    }
 
 
 @app.delete("/api/images/{filename}")
