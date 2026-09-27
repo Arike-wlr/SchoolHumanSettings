@@ -32,6 +32,10 @@ function themeVar(name, fallback) {
 }
 document.addEventListener('DOMContentLoaded', function () {
   applyTheme(document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light');
+  // Esc 关闭「导出全部」确认框（桌面习惯；手机端主要是点取消/遮罩）
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') closeExportAllConfirm();
+  });
 });
  function safeImageSrc(src) {
    // img:// 引用是本地图片仓库的内容指纹，这里换算成 WebView 能直接加载的 https 地址
@@ -78,6 +82,30 @@ function mapRelExport(r) {
 }
 
 // 全局导出：角色 + 世界观 + 关系 汇总到一个 JSON 文件（各分区内容与单独导出完全一致）
+// 点击「导出全部」先弹确认框，用户点「确定导出」才真正下载（与桌面端一致）
+function openExportAllConfirm() {
+  var ov = document.getElementById('exportAllOverlay');
+  if (ov) ov.classList.add('active');
+}
+function closeExportAllConfirm() {
+  var ov = document.getElementById('exportAllOverlay');
+  if (ov) ov.classList.remove('active');
+}
+function confirmExportAll() {
+  closeExportAllConfirm();
+  exportAllData();
+}
+window.openExportAllConfirm = openExportAllConfirm;
+window.closeExportAllConfirm = closeExportAllConfirm;
+window.confirmExportAll = confirmExportAll;
+
+// 点遮罩空白处 = 取消（Esc 由全局 keydown 处理）
+(function () {
+  var ov = document.getElementById('exportAllOverlay');
+  if (ov) ov.addEventListener('click', function (e) { if (e.target === ov) closeExportAllConfirm(); });
+})();
+
+// 兼容旧调用名：现在走确认框（index.html 的按钮 onclick 也已改为 openExportAllConfirm）
 function exportAllData() {
   Promise.all([
     fetch('/api/characters').then(function(r) { return r.json(); }),
@@ -288,6 +316,7 @@ VM.index = (function() {
   var detailCharId = null;
   var detailImages = [];
   var detailImageIdx = 0;
+  var editReturnToDetail = null;   // 从卡片详情进入编辑时记下 id，保存/取消后回到该卡片
   var loadGeneration = 0;
   var loadedRevision = -1;   // 已加载完成的数据版本（同版本返回不再查询/重绘）
   var loadingRevision = -1;  // 同版本请求在途标记，避免重复发起
@@ -666,6 +695,7 @@ VM.index = (function() {
   }
 
   function openCreateModal() {
+    editReturnToDetail = null;
     document.getElementById('indexModalTitle').textContent='添加新角色';
     document.getElementById('indexSubmitBtn').textContent='确认添加';
     document.getElementById('indexEditId').value='';
@@ -731,6 +761,12 @@ VM.index = (function() {
       _autoSaveInProgress = true;
       closeModal();resetImageUpload();markAppDataChanged();loadCharacters();
       showToast(editId?'已更新':'已创建','success');
+      // 从卡片详情进入的编辑：保存后回到卡片详情，而不是退到列表
+      if (editReturnToDetail) {
+        var backId = editReturnToDetail;
+        editReturnToDetail = null;
+        openDetailModal(backId);
+      }
       setTimeout(function(){ _autoSaveInProgress = false; }, 800);
     }).catch(function(){showToast('操作失败','error');});
   }
@@ -810,7 +846,11 @@ VM.index = (function() {
 
   function cancelEdit() {
     _autoSaveInProgress = false;
+    // 从卡片详情进入的编辑，取消后回到该卡片（与保存行为一致）
+    var backId = editReturnToDetail;
+    editReturnToDetail = null;
     document.getElementById('indexModalOverlay').classList.remove('active');
+    if (backId) openDetailModal(backId);
   }
   window.cancelEditIndex = cancelEdit;
   window.closeModalAutoSaveIndex = closeModalAutoSave;
@@ -844,7 +884,7 @@ VM.index = (function() {
 
   function detailSection(label,value){return '<div class="detail-section"><div class="detail-label">'+label+'</div><div class="detail-value">'+esc(value)+'</div></div>';}
   function closeDetailModal(){document.getElementById('indexDetailOverlay').classList.remove('active');detailCharId=null;}
-  function detailEdit(){if(detailCharId){var id=detailCharId;closeDetailModal();openEditModal(id);}}
+  function detailEdit(){if(detailCharId){var id=detailCharId;editReturnToDetail=id;closeDetailModal();openEditModal(id);}}
 
   // 导出
   function updateExportButtons(){
@@ -988,6 +1028,8 @@ VM.index = (function() {
     openCreateModal:openCreateModal, openEditModal:openEditModal, submitForm:submitForm,
     openDeleteModal:openDeleteModal, closeDeleteModal:closeDeleteModal, confirmDelete:confirmDelete,
     closeModal:closeModal, closeDetailModal:closeDetailModal, detailEdit:detailEdit,
+    // 供统计页榜单直接打开某角色详情（统计页 → 角色卡片）
+    openDetailModal:openDetailModal,
     handleImageUpload:handleImageUpload, removeImageItem:removeImageItem, detailImageGo:detailImageGo, detailImageStep:detailImageStep,
     cropImageFace:cropImageFace,
     handleCardClick:handleCardClick,
@@ -1006,6 +1048,11 @@ VM.worldview = (function() {
   var activeCategory = '全部';
   var deleteTargetId = null;
   var detailEntryId = null;
+  var editReturnToDetail = null;   // 从卡片详情进入编辑时记下 id，保存/取消后回到该卡片
+  // 从世界观详情的 [[文档]] 链接跳到文档页时，记下来源条目与文档名，
+  // 用户关掉文档查看器后据此切回「刚刚在看的那条设定」。
+  var docReturnTo = null;
+  var docReturnDocName = '';
   var selectedIds = new Set();
   var exportMode = false;
   var _autoSaveInProgress = false;
@@ -1181,6 +1228,7 @@ VM.worldview = (function() {
   }
 
   function openCreateModal() {
+    editReturnToDetail = null;
     document.getElementById('worldModalTitle').textContent = '添加新设定';
     document.getElementById('worldSubmitBtn').textContent = '确认添加';
     document.getElementById('worldEditId').value = '';
@@ -1223,6 +1271,12 @@ VM.worldview = (function() {
       markAppDataChanged();
       loadEntries();
       showToast(editId ? '已更新' : '已创建', 'success');
+      // 从卡片详情进入的编辑：保存后回到卡片详情，而不是退到列表
+      if (editReturnToDetail) {
+        var backId = editReturnToDetail;
+        editReturnToDetail = null;
+        openDetailModal(backId);
+      }
       setTimeout(function() { _autoSaveInProgress = false; }, 800);
     }).catch(function() { showToast('操作失败', 'error'); });
   }
@@ -1263,7 +1317,11 @@ VM.worldview = (function() {
 
   function cancelEdit() {
     _autoSaveInProgress = false;
+    // 从卡片详情进入的编辑，取消后回到该卡片（与保存行为一致）
+    var backId = editReturnToDetail;
+    editReturnToDetail = null;
     document.getElementById('worldModalOverlay').classList.remove('active');
+    if (backId) openDetailModal(backId);
   }
   window.cancelEditWorld = cancelEdit;
   window.closeModalAutoSaveWorld = closeModalAutoSave;
@@ -1281,7 +1339,7 @@ VM.worldview = (function() {
     }).catch(function() { showToast('获取详情失败', 'error'); });
   }
   function closeDetailModal() { document.getElementById('worldDetailOverlay').classList.remove('active'); detailEntryId = null; }
-  function detailEdit() { if (detailEntryId) { var id = detailEntryId; closeDetailModal(); openEditModal(id); } }
+  function detailEdit() { if (detailEntryId) { var id = detailEntryId; editReturnToDetail = id; closeDetailModal(); openEditModal(id); } }
 
   // ====== 文档链接功能 ======
   // 渲染详情内容时把 [[doc:文件名|显示文字]] 或 [[文件名|显示文字]] 转成可点击链接
@@ -1299,8 +1357,13 @@ VM.worldview = (function() {
     return safe;
   }
 
-  // 从链接跳转：切到文档页并打开对应文件
+  // 从链接跳转：切到文档页并打开对应文件。
+  // 同时登记「来源条目」，这样用户关掉文档后能回到刚刚那条世界观详情
+  // （Android 是单页应用，不走 URL，只能靠内存里传这个标记）。
   function openDocFromLink(fname) {
+    // 记下来源：当前正在看的这条设定 + 触发跳转的文档名
+    docReturnTo = detailEntryId;
+    docReturnDocName = fname;
     // 关闭所有世界观相关 modal
     document.getElementById('worldDetailOverlay').classList.remove('active');
     // 切到文档页
@@ -1311,6 +1374,28 @@ VM.worldview = (function() {
         VM.documents.openViewer(encodeURIComponent(fname));
       }
     }, 350);
+  }
+
+  // 文档查看器关闭时回调：若这次是「从世界观详情点进来的」，就切回去并重开那条详情。
+  // 用户自己又翻了别的文档 → 标记已被 abandonDocReturnTo 清掉，这里什么都不做（只关弹窗）。
+  function onDocViewerClosed(closedName) {
+    if (docReturnTo == null) return;
+    if (docReturnDocName && closedName && closedName !== docReturnDocName) {
+      abandonDocReturnTo();     // 看的不是当初那份，别把用户弹走
+      return;
+    }
+    var backId = docReturnTo;
+    abandonDocReturnTo();
+    if (typeof navigateTo === 'function') navigateTo('worldview');
+    setTimeout(function() {
+      if (VM.worldview && VM.worldview.openDetailModal) VM.worldview.openDetailModal(backId);
+    }, 350);
+  }
+
+  // 清掉「关掉文档就返回」的意图（用户自己翻了别的文档时调）。
+  function abandonDocReturnTo() {
+    docReturnTo = null;
+    docReturnDocName = '';
   }
 
   // 插入文档链接：弹出文档选择器
@@ -1504,7 +1589,13 @@ VM.worldview = (function() {
     openCreateModal: openCreateModal, openEditModal: openEditModal, submitForm: submitForm,
     openDeleteModal: openDeleteModal, closeDeleteModal: closeDeleteModal, confirmDelete: confirmDelete,
     closeModal: closeModal, closeDetailModal: closeDetailModal, detailEdit: detailEdit,
+    // 供统计页榜单直接打开某世界观条目详情（统计页 → 世界观卡片）。
+    // 需要先按 main_category 切好大类，否则详情弹窗背后的列表 tab 会对不上。
+    openDetailModal: openDetailModal, selectMainCategory: selectMainCategory,
+    getMainCategory: function () { return activeMainCategory; },
     insertDocLink: insertDocLink, closeDocLinkPicker: closeDocLinkPicker, pickDocLink: pickDocLink, openDocFromLink: openDocFromLink,
+    onDocViewerClosed: onDocViewerClosed,
+    abandonDocReturnTo: abandonDocReturnTo,
     handleCardClick: handleCardClick,
     enterExportMode: enterExportMode, cancelExport: cancelExport,
     toggleCardSelect: toggleCardSelect, toggleSelectAll: toggleSelectAll, confirmExport: confirmExport,
@@ -1584,6 +1675,9 @@ VM.documents = (function() {
   function openViewer(en) {
     var generation = ++viewerGeneration;
     var fn = decodeURIComponent(en);
+    // 用户自己点了别的文档：放弃「关掉就返回世界观详情」的语义，
+    // 免得他翻看完别的文档后被莫名其妙弹回去。
+    if (VM.worldview && VM.worldview.abandonDocReturnTo) VM.worldview.abandonDocReturnTo(fn);
     currentViewFile = en;
     var body = document.getElementById('docViewerBody');
     document.getElementById('docViewerTitle').textContent = fn;
@@ -1658,8 +1752,12 @@ VM.documents = (function() {
 
   function closeViewer() {
     document.getElementById('docViewerOverlay').classList.remove('active');
+    var closed = currentViewFile;
     currentViewFile = '';
     releaseViewerObjectUrl();   // 关闭时释放 Blob URL，避免长期占用内存
+    // 这次是「从世界观详情点 [[文档]] 进来的」→ 关掉文档就切回那条世界观详情。
+    // 回调内部会判断「用户是否又翻了别的文档」，该不返回时它自己会放弃。
+    if (VM.worldview && VM.worldview.onDocViewerClosed) VM.worldview.onDocViewerClosed(closed);
   }
 
   document.getElementById('docDeleteOverlay').addEventListener('click', function(ev) { if (ev.target === this) closeDeleteModal(); });
@@ -2617,6 +2715,38 @@ VM.relations = (function() {
   };
 })();
 
+// 从统计页榜单跳到对应详情（角色 / 世界观）。
+// Android 是单页应用，这里不新开页面，而是切视图 + 打开该条目的详情弹窗。
+//   openCharDetail(id) —— 切到角色视图并打开该角色详情
+//   openWorldDetail(id) —— 先查该条目的 main_category，切好大类 tab，再打开详情
+// 两个入口都做了「条目不存在」容错：详情模块内部 fetch 失败会 toast，不会弹空窗。
+function openCharDetailFromStats(id) {
+  if (id == null) return;
+  navigateTo('index');                       // 会触发 VM.index.init()（首次）或 refresh()
+  if (VM.index && VM.index.openDetailModal) VM.index.openDetailModal(id);
+}
+
+function openWorldDetailFromStats(id) {
+  if (id == null) return;
+  navigateTo('worldview');
+  if (!VM.worldview || !VM.worldview.openDetailModal) return;
+  // 世界观条目分两大类（意识体世界设定 / 人物背景故事），当前 tab 可能与目标不符。
+  // 先拉单条拿 main_category，必要时切大类，再开详情——这样关掉详情后背后的列表也对。
+  fetch('/api/world-buildings/' + id).then(function (r) {
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    return r.json();
+  }).then(function (e) {
+    if (!e || e.id == null) throw new Error('bad payload');
+    if (e.main_category && VM.worldview.getMainCategory &&
+        e.main_category !== VM.worldview.getMainCategory()) {
+      VM.worldview.selectMainCategory(e.main_category);
+    }
+    VM.worldview.openDetailModal(e.id);
+  }).catch(function () {
+    showToast('找不到该设定，可能已被删除', 'error');
+  });
+}
+
 // ======================== 总览统计 ========================
 // 数据来自 fetch('/api/stats')：Android 端由 api-shim.js 直接聚合 IndexedDB，
 // 口径与 server/backend.py 的 /api/stats 保持一致（改口径要三处同改）。
@@ -2753,19 +2883,23 @@ VM.stats = (function() {
     return html;
   }
 
-  // 角色之最列表
+  // 角色之最列表：每行可点，直达该角色的卡片详情（VM.index 的详情弹窗）
+  // items 每条都带 id（后端/离线版一致）；缺 id 时退化为不可点，避免生成坏链接
   function crownList(items, unit) {
     if (!items || !items.length) return '<div class="stats-note">暂无数据</div>';
     return '<div class="stats-crown-list">' + items.map(function(it, i) {
       var v = (typeof it.value === 'number') ? it.value.toLocaleString() : esc(it.value);
       var sub = [it.university, it.region].filter(Boolean).join(' · ');
-      return '<div class="stats-crown-row">' +
+      var clickable = (it.id != null);
+      var oc = clickable ? ' onclick="openCharDetailFromStats(' + it.id + ')"' : '';
+      return '<div class="stats-crown-row' + (clickable ? ' tappable' : '') + '"' + oc + '>' +
         '<span class="stats-crown-badge">' + (i === 0 ? '👑' : (i + 1)) + '</span>' +
         '<span class="stats-crown-body">' +
           '<span class="stats-crown-name">' + esc(it.name) + '</span>' +
           (sub ? '<span class="stats-crown-sub">' + esc(sub) + '</span>' : '') +
         '</span>' +
         '<span class="stats-crown-val">' + v + '<small>' + unit + '</small></span>' +
+        (clickable ? '<span class="stats-crown-go">›</span>' : '') +
       '</div>';
     }).join('') + '</div>';
   }
@@ -2816,10 +2950,13 @@ VM.stats = (function() {
       html += panel('🌍 最长的世界观条目',
         'Top ' + worldRank.length + ' · 榜首 ' + num(worldRank[0].chars).toLocaleString() + ' 字',
         '<div class="stats-rank-list">' + worldRank.map(function(w, i) {
-          return '<div class="stats-rank-row">' +
+          var clickable = (w.id != null);
+          var oc = clickable ? ' onclick="openWorldDetailFromStats(' + w.id + ')"' : '';
+          return '<div class="stats-rank-row' + (clickable ? ' tappable' : '') + '"' + oc + '>' +
             '<span class="stats-rank-no">' + (i + 1) + '</span>' +
             '<span class="stats-rank-name">' + esc(w.title) + '</span>' +
             '<span class="stats-rank-val">' + num(w.chars).toLocaleString() + '</span>' +
+            (clickable ? '<span class="stats-rank-go">›</span>' : '') +
           '</div>';
         }).join('') + '</div>');
     }
@@ -2845,10 +2982,13 @@ VM.stats = (function() {
     if ((R.top_degree || []).length) {
       html += panel('⭐ 关系度排行', '含同家族 · 两端计次',
         '<div class="stats-rank-list">' + R.top_degree.map(function(it, i) {
-          return '<div class="stats-rank-row">' +
+          var clickable = (it.id != null);
+          var oc = clickable ? ' onclick="openCharDetailFromStats(' + it.id + ')"' : '';
+          return '<div class="stats-rank-row' + (clickable ? ' tappable' : '') + '"' + oc + '>' +
             '<span class="stats-rank-no">' + (i + 1) + '</span>' +
             '<span class="stats-rank-name">' + esc(it.name) + '</span>' +
             '<span class="stats-rank-val">' + num(it.degree) + '</span>' +
+            (clickable ? '<span class="stats-rank-go">›</span>' : '') +
           '</div>';
         }).join('') + '</div>');
     }

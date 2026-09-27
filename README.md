@@ -91,7 +91,7 @@ Settings/
 │   └── main.go / go.mod        #   可选：Go 单文件服务器（:8080）
 ├── android-app/                # Android 离线版（WebView + SPA，IndexedDB 本地存储）
 │   └── app/src/main/
-│       ├── assets/web/         #   SPA 前端（index.html + JS/CSS）
+│       ├── assets/web/         #   SPA 前端（index.html + app.js/app.css + db.js/api-shim.js）
 │       └── java/.../           #   MainActivity.java（WebView 壳）
 ├── android-sdk/                # Android SDK（本地工具链，不上传）
 ├── apks/                       # 构建产物（APK 文件）
@@ -232,7 +232,9 @@ powershell -ExecutionPolicy Bypass -File server/check_sync.ps1 -Fix   # 诊断 +
 |----------|----------|
 | 在线版（后端） | `server/backend.py` → `get_stats()` |
 | 离线单文件版（Go / 浏览器 IndexedDB） | `desktop-offline/api-shim.js` → `computeStats()` |
-| Android App | 同上（复用 `api-shim.js`），由 `app.js` 的 `VM.stats` 渲染 |
+| Android App | `android-app/app/src/main/assets/web/api-shim.js` → `computeStats()`，由 `app.js` 的 `VM.stats` 渲染 |
+
+> ⚠️ 桌面版与安卓版的 `api-shim.js` / `db.js` 是**各自独立维护的两份文件**（安卓版更晚更完整：含 P06 轻量投影、mammoth 离线 docx 解析）。**三处口径要逐字一致，但不能整文件互相覆盖**——只能逐块移植差异。
 
 口径约定：
 

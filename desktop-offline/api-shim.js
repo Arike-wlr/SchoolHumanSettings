@@ -491,10 +491,11 @@ async function computeStats() {
     var n = statsCharCount(w.content);
     contentChars += n;
     var title = w.title || '';
-    worldRank.push({ title: title, chars: n });
+    // 带 id 才能让统计页榜单直达世界观详情页（worldview.html?wb=ID）
+    worldRank.push({ title: title, chars: n, id: w.id });
     if (!longestEntry || n > longestEntry.chars) longestEntry = { title: title, chars: n };
   });
-  // 按字数降序取前 N（同字数比标题，与后端 sort key 一致）
+  // 按字数降序取前 N（同字数比标题，与后端 sort key 一致；id 不参与排序）
   worldRank.sort(function(a, b) {
     if (b.chars !== a.chars) return b.chars - a.chars;
     return a.title < b.title ? -1 : a.title > b.title ? 1 : 0;

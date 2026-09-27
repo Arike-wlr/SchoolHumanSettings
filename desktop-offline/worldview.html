@@ -677,6 +677,7 @@ let deleteTargetId = null;
 let selectedIds = new Set();
 let visibleEntries = [];
 let exportMode = false;
+let editReturnToDetail = null;   // 从卡片详情进入编辑时记下 id，保存后回到该卡片
 
 // ====== 页面加载 ======
 document.addEventListener('DOMContentLoaded', () => { loadEntries(); });
@@ -851,6 +852,7 @@ function esc(s) {
 
 // ====== 创建 ======
 function openCreateModal() {
+  editReturnToDetail = null;
   document.getElementById('modalTitle').textContent = '添加新设定';
   document.getElementById('submitBtn').textContent = '确认添加';
   document.getElementById('editId').value = '';
@@ -907,6 +909,12 @@ async function submitForm(e) {
     closeModal();
     loadEntries();
     showToast(editId ? '设定已更新' : '设定已创建', 'success');
+    // 从卡片详情进入的编辑：保存后回到卡片详情，而不是退到列表
+    if (editReturnToDetail) {
+      const backId = editReturnToDetail;
+      editReturnToDetail = null;
+      openDetailModal(backId);
+    }
     setTimeout(function() { _autoSaveInProgress = false; }, 800);
   } catch (err) {
     showToast('操作失败，请重试', 'error');
@@ -956,7 +964,10 @@ function closeModal() {
 
 function cancelEdit() {
   _autoSaveInProgress = false;
+  var backId = editReturnToDetail;   // 从卡片详情进来的编辑，取消后回到卡片
+  editReturnToDetail = null;
   document.getElementById('modalOverlay').classList.remove('active');
+  if (backId) openDetailModal(backId);
 }
 
 document.getElementById('modalOverlay').addEventListener('click', function(e) {
@@ -969,10 +980,14 @@ document.getElementById('deleteOverlay').addEventListener('click', function(e) {
 // ====== 详情查看 ======
 let detailEntryId = null;
 
-async function openDetailModal(id) {
+async function openDetailModal(id, opts) {
+  const fromHistory = !!(opts && opts.fromHistory);
   try {
     const res = await fetch(`${API}/${id}`);
+    // 后端对不存在的 id 返回 404 + {detail:"世界设定不存在"}；只看 res.json() 会把它当条目用
+    if (!res.ok) throw new Error('HTTP ' + res.status);
     const e = await res.json();
+    if (!e || e.id == null) throw new Error('bad payload');
     detailEntryId = e.id;
 
     document.getElementById('detailTitle').textContent = e.title;
@@ -981,12 +996,24 @@ async function openDetailModal(id) {
     else { catEl.style.display = 'none'; }
 
     let body = '';
+    // 详情里的 [[文档]] 链接要能「关掉文档后跳回本条详情」，
+    // 故先把来源 id 设为这条（renderContentWithDocLinks 会读它）。
+    contentLinkSourceId = e.id;
     if (e.category && e.main_category !== '人物背景故事') body += detailSection('分类', e.category);
     body += detailSection('内容', e.content);
+    contentLinkSourceId = null;
     document.getElementById('detailBody').innerHTML = body;
     document.getElementById('detailOverlay').classList.add('active');
+
+    // 把「打开这条详情」写进浏览器历史，这样从详情里点 [[文档]] 跳到文档页后，
+    // 按浏览器「后退」也能回到本条详情（而不是一路退到别的页面）。
+    // - fromHistory（由 popstate 触发）：历史已经在那儿了，不能再压
+    // - 已经带的就跳过，避免反复打开同一条时堆积历史记录
+    if (!fromHistory && location.search !== '?wb=' + e.id) {
+      history.pushState({ wb: e.id }, '', '?wb=' + e.id);
+    }
   } catch (err) {
-    showToast('获取设定详情失败', 'error');
+    showToast('找不到该设定，可能已被删除', 'error');
   }
 }
 
@@ -995,17 +1022,30 @@ function detailSection(label, value) {
   return `<div class="detail-section"><div class="detail-label">${label}</div><div class="detail-value${cls}">${renderContentWithDocLinks(value || '（未填写）')}</div></div>`;
 }
 
-// 渲染内容：把 [[doc:文件名|显示文字]] 或 [[文件名|显示文字]] 转成可点击链接
+// 渲染内容：把 [[doc:文件名|显示文字]] 或 [[文件名|显示文字]] 转成可点击链接。
+// 链接带上 &return=wb:ID（本条设定的 id），文档页据此在「关掉文档」时自动跳回
+// 刚才那条世界观详情（见 documents.html 的 returnTo 处理）。
+// 注意：id 取的是「当前正在看/正在编辑的那条」，不是全局变量——
+// 编辑态下 detailEntryId 已被 closeDetailModal 清空，所以由调用方通过
+// contentLinkSourceId 传入（detailSection / openEditModal 各自设置）。
+let contentLinkSourceId = null;
+
+function docLinkHref(fname) {
+  const src = contentLinkSourceId;
+  const ret = (src != null) ? '&return=' + encodeURIComponent('wb:' + src) : '';
+  return `/documents?open=${encodeURIComponent(fname)}${ret}`;
+}
+
 function renderContentWithDocLinks(text) {
   if (!text) return '';
   let safe = esc(text);
   // [[doc:文件名|显示文字]] 或 [[文件名|显示文字]]
   safe = safe.replace(/\[\[(?:doc:)?([^|<>\]]+)\|([^\]]*)\]\]/g, (m, fname, label) => {
-    return `<a href="/documents?open=${encodeURIComponent(fname)}" style="color:var(--accent);text-decoration:underline;">${label || fname}</a>`;
+    return `<a href="${docLinkHref(fname)}" style="color:var(--accent);text-decoration:underline;">${label || fname}</a>`;
   });
   // [[doc:文件名]] 或 [[文件名]]
   safe = safe.replace(/\[\[(?:doc:)?([^<>\]]+)\]\]/g, (m, fname) => {
-    return `<a href="/documents?open=${encodeURIComponent(fname)}" style="color:var(--accent);text-decoration:underline;">${fname}</a>`;
+    return `<a href="${docLinkHref(fname)}" style="color:var(--accent);text-decoration:underline;">${fname}</a>`;
   });
   return safe;
 }
@@ -1063,6 +1103,7 @@ function closeDetailModal() {
 function detailEdit() {
   if (detailEntryId) {
     const id = detailEntryId;
+    editReturnToDetail = id;   // 记住是从卡片详情进入编辑，保存后回到卡片
     closeDetailModal();
     openEditModal(id);
   }
@@ -1206,7 +1247,7 @@ function showToast(msg, type) {
 }
 
 document.addEventListener('keydown', function(e) {
-  if (e.key === 'Escape') { closeModal(); closeDeleteModal(); closeDetailModal(); }
+  if (e.key === 'Escape') { cancelEdit(); closeDeleteModal(); closeDetailModal(); }
 });
 </script>
 
@@ -1216,11 +1257,45 @@ document.addEventListener('keydown', function(e) {
 <script>function toggleSidebar(){document.getElementById('sidebar').classList.toggle('collapsed');}
 // 初始化主题按钮状态
 applyTheme(document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light');
-// 全局搜索跳转定位：/worldview?wb=ID → 打开设定详情
+// 按 id 定位到某条设定（全局搜索 /worldview?wb=ID、统计页「最长的世界观条目」都用这个入口）
+// 做法：先查该条目属于哪个大类，切好 tab，再开详情弹窗——这样关掉详情后，背后的列表也是对的大类。
+async function openEntryById(id, opts) {
+  const fromHistory = !!(opts && opts.fromHistory);
+  try {
+    const res = await fetch(`${API}/${id}`);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const e = await res.json();
+    if (e.main_category && e.main_category !== activeMainCategory) {
+      selectMainCategory(e.main_category);
+    }
+    await openDetailModal(e.id, { fromHistory: fromHistory });
+  } catch (err) {
+    // 条目可能已被删除：只提示，不跳转，避免误开空弹窗
+    showToast('找不到该设定，可能已被删除', 'error');
+  }
+}
 (function () {
   const gsWb = new URLSearchParams(location.search).get('wb');
-  if (gsWb) setTimeout(() => openDetailModal(parseInt(gsWb, 10)), 350);
+  if (gsWb) {
+    // 带 ?wb= 进来时先把「本条详情」压进历史，这样用户从这进来的第一个动作
+    // 若是按「后退」，能直接回到进入前的状态（而不是退出去离开本页）。
+    history.replaceState({ wb: parseInt(gsWb, 10) }, '', '?wb=' + gsWb);
+    openEntryById(parseInt(gsWb, 10));
+  }
 })();
+
+// 浏览器「后退/前进」时同步详情弹窗：URL 有 ?wb= 就打开对应详情，
+// 没有就关掉。这样「世界观详情 → [[文档]] → 文档页 → 后退」能逐级回到详情。
+window.addEventListener('popstate', function (ev) {
+  const wb = new URLSearchParams(location.search).get('wb');
+  if (wb) {
+    // 直接用 URL 里的参数打开（openEntryById 会切好大类 tab），不再 pushState
+    // 以免和这次后退操作互相打架。
+    openEntryById(parseInt(wb, 10), { fromHistory: true });
+  } else {
+    closeDetailModal();
+  }
+});
 </script>
 <script src="search.js?v=2"></script>
 <script src="export-all.js?v=2"></script>

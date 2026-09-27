@@ -517,6 +517,7 @@ window.addEventListener('DOMContentLoaded', () => {
   });
 
   // 支持通过 ?open=文件名 参数自动打开文档（从世界观链接跳转）
+  initReturnTo();
   const params = new URLSearchParams(window.location.search);
   const openName = params.get('open');
   if (openName) {
@@ -659,7 +660,32 @@ function doDelete() {
 // ====== 文档查看 ======
 let currentViewFile = '';
 
+// ---- 来源返回（从世界观详情的 [[文档]] 链接跳进来）----
+// 链接形如 /documents?open=文件名&return=wb:123。
+// 语义：用户是「专门来看这一个文档」的，所以关掉这个文档 = 这次访问结束，
+// 直接把他送回刚才那条世界观详情（/worldview?wb=123 会自动切大类并开详情）。
+// 但如果他在文档页自己又打开了别的文档，就不该再自作主张把人家弹回去 ——
+// 那时清掉 returnTo，关闭只关弹窗。
+let returnTo = '';          // 来源 URL（空 = 不返回）
+let returnToDocName = '';   // 触发来源的那份文档名，用于判断「是否还是同一个」
+
+function initReturnTo() {
+  const params = new URLSearchParams(location.search);
+  const ret = params.get('return');
+  const openName = params.get('open');
+  // 只接受本项目的世界观详情来源；其它一律忽略，避免被外部链接当成开放重定向。
+  if (ret && /^wb:\d+$/.test(ret)) {
+    returnTo = '/worldview?wb=' + ret.slice(3);
+    returnToDocName = openName || '';
+  }
+}
+
 async function openViewer(fname) {
+  // 用户自己翻了别的文档：放弃「关掉就返回」的语义（见 closeViewer）。
+  if (returnTo && returnToDocName && fname !== returnToDocName) {
+    returnTo = '';
+    returnToDocName = '';
+  }
   currentViewFile = fname;
   const overlay = document.getElementById('viewerOverlay');
   const body = document.getElementById('viewerBody');
@@ -739,7 +765,17 @@ function renderViewerContent(data) {
 
 function closeViewer() {
   document.getElementById('viewerOverlay').classList.remove('active');
+  const closed = currentViewFile;
   currentViewFile = '';
+
+  // 从世界观详情跳进来看文档的：关掉文档就回到刚刚那条世界观详情。
+  // 只在「关的就是当初跳进来的那份文档」时返回，避免用户自己翻看了别的文档
+  // 后被莫名其妙弹走。
+  if (returnTo && (!returnToDocName || closed === returnToDocName)) {
+    const target = returnTo;
+    returnTo = '';           // 一次性语义：返回后就失效，避免反复触发
+    location.href = target;
+  }
 }
 
 // ====== Toast ======

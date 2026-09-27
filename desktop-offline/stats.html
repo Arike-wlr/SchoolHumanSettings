@@ -320,6 +320,7 @@
     transition: var(--transition);
   }
   a.rank-row:hover { background: var(--accent-pale); }
+  a.rank-row:active { transform: scale(.995); }
   .rank-no {
     width: 24px; height: 24px;
     flex-shrink: 0;
@@ -417,6 +418,14 @@
     transition: var(--transition);
   }
   a.crown-row:hover { background: var(--accent-pale); }
+  a.crown-row:active { transform: scale(.995); }
+  /* 行尾箭头：提示「这行能点进详情」，平时淡、hover 时亮起 */
+  .crown-go {
+    flex-shrink: 0; font-size: .8rem; color: var(--text-light);
+    opacity: .35; transition: var(--transition);
+  }
+  a.crown-row:hover .crown-go { opacity: 1; color: var(--accent); transform: translateX(2px); }
+  .rank-row .crown-go { font-size: .78rem; }
   .crown-badge {
     width: 26px; height: 26px; flex-shrink: 0;
     border-radius: 50%; display: flex; align-items: center; justify-content: center;
@@ -747,11 +756,12 @@ function render(d) {
       '<span class="panel-title">🌍 最长的世界观条目</span><span class="panel-note">' +
       'Top ' + worldRank.length + ' · 榜首 ' + (worldRank[0].chars || 0).toLocaleString() + ' 字</span></div>' +
       '<div class="rank-list">' + worldRank.map((w, i) =>
-        '<a class="rank-row" href="/worldview">' +
+        '<a class="rank-row" href="' + (w.id != null ? '/worldview?wb=' + encodeURIComponent(w.id) : '/worldview') + '">' +
           '<span class="rank-no">' + (i + 1) + '</span>' +
           '<span class="rank-name" title="' + esc(w.title) + '">' + esc(w.title) + '</span>' +
           '<span class="rank-val">' + (w.chars || 0).toLocaleString() +
             '<span style="font-size:.74rem;color:var(--text-light);font-weight:400"> 字</span></span>' +
+          '<span class="crown-go">›</span>' +
         '</a>').join('') + '</div></div>';
   }
 
@@ -766,10 +776,11 @@ function render(d) {
 
   html += panel('⭐ 关系度排行', '含同家族 · 两端计次', (R.top_degree || []).length
     ? '<div class="rank-list">' + R.top_degree.map((it, i) =>
-        '<a class="rank-row" href="/relations">' +
+        '<a class="rank-row" href="' + (it.id != null ? '/index?char=' + encodeURIComponent(it.id) : '/index') + '">' +
           '<span class="rank-no">' + (i + 1) + '</span>' +
           '<span class="rank-name">' + esc(it.name) + '</span>' +
           '<span class="rank-val">' + it.degree + '</span>' +
+          '<span class="crown-go">›</span>' +
         '</a>').join('') + '</div>'
     : '<div class="panel-note">还没有建立任何关系</div>');
 
@@ -896,11 +907,12 @@ function completenessView(comp) {
   return html;
 }
 
-// 角色之最列表
+// 角色之最列表：每行直达该角色的详情页（/index?char=ID，与全局搜索同一入口）
+// 后端/离线版的 highlights.items.* 每条都带 id；缺 id 时退回角色列表页，避免生成坏链接
 function crownList(items, unit) {
   if (!items || !items.length) return '<div class="panel-note">暂无数据</div>';
   return '<div class="crown-list">' + items.map((it, i) =>
-    '<a class="crown-row" href="/">' +
+    '<a class="crown-row" href="' + (it.id != null ? '/index?char=' + encodeURIComponent(it.id) : '/index') + '">' +
       '<span class="crown-badge">' + (i === 0 ? '👑' : (i + 1)) + '</span>' +
       '<span class="crown-body">' +
         '<span class="crown-name">' + esc(it.name) + '</span>' +
@@ -908,6 +920,7 @@ function crownList(items, unit) {
       '</span>' +
       '<span class="crown-val">' + (typeof it.value === 'number' ? it.value.toLocaleString() : esc(it.value)) +
         '<small>' + unit + '</small></span>' +
+      '<span class="crown-go">›</span>' +
     '</a>').join('') + '</div>';
 }
 

@@ -478,6 +478,16 @@ html[data-theme="dark"] #view-home .card { background: var(--card-bg); box-shado
 /* ---- 排行 ---- */
 .stats-rank-list { display: flex; flex-direction: column; gap: 2px; }
 .stats-rank-row { display: flex; align-items: center; gap: 10px; padding: 8px 6px; border-radius: var(--radius-sm); }
+/* 榜单里可点进详情的那几行（角色之最 / 世界观条目 / 关系度排行）。
+   给行尾加一个 › 箭头，提示「这行能点进去」；按下时给轻微反馈。 */
+.stats-rank-row.tappable, .stats-crown-row.tappable { cursor: pointer; }
+.stats-rank-row.tappable:active, .stats-crown-row.tappable:active { background: var(--accent-pale); }
+.stats-rank-go, .stats-crown-go {
+  flex-shrink: 0; font-size: .95rem; line-height: 1;
+  color: var(--text-light); opacity: .45;
+}
+.stats-rank-row.tappable:active .stats-rank-go,
+.stats-crown-row.tappable:active .stats-crown-go { opacity: 1; color: var(--accent); }
 .stats-rank-no {
   width: 22px; height: 22px; flex-shrink: 0; border-radius: 50%;
   display: flex; align-items: center; justify-content: center;

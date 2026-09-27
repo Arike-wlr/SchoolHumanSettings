@@ -1457,21 +1457,23 @@ def get_stats():
     main_counter = {}
     content_chars = 0
     longest_entry = None        # (字数, 标题) —— 兼容旧字段，保留最长一条
-    world_rank = []             # [(字数, 标题)]，用于「最长的世界观条目」榜单
+    # [(字数, 标题, id)]：带 id 才能让统计页榜单直达世界观详情页（worldview.html?wb=ID）
+    # 排序键保持 (-字数, 标题)，id 只作载荷不参与排序，避免两端顺序分叉
+    world_rank = []
     for w in worlds:
         mc = _norm_bucket(w.get("main_category"), "未分类")
         main_counter[mc] = main_counter.get(mc, 0) + 1
         n = _char_text_len(w.get("content"))
         content_chars += n
         title = w.get("title") or ""
-        world_rank.append((n, title))
+        world_rank.append((n, title, w.get("id")))
         if longest_entry is None or n > longest_entry[0]:
             longest_entry = (n, title)
 
     # 按字数降序取前 N（同字数比标题，保证两端顺序一致）
     world_rank.sort(key=lambda t: (-t[0], t[1]))
     world_longest_list = [
-        {"title": t, "chars": n} for n, t in world_rank[:STATS_WORLD_RANK_N]
+        {"title": t, "chars": n, "id": wid} for n, t, wid in world_rank[:STATS_WORLD_RANK_N]
     ]
 
     world_block = {
@@ -1839,6 +1841,14 @@ def sync_replace_all(payload: SyncPayload):
         "worldBuildings": len(payload.worldBuildings),
         "relations": len(payload.relations),
     }
+
+
+@app.get("/index")
+def serve_index_page():
+    # 与离线版 main.go 的 routeMap["/index"] 对齐。统计页「角色之最」「关系度排行」
+    # 生成的是 /index?char=ID；缺了这条路由在线版会 404（离线版因为 routeMap 里
+    # 有 "/index" 且不比对 query，所以一直正常）。
+    return FileResponse(os.path.join(DESKTOP_DIR, "index.html"))
 
 
 @app.get("/worldview")
