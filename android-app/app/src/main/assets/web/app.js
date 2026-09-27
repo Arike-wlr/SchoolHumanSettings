@@ -3004,6 +3004,54 @@ VM.stats = (function() {
       '</div>' + body + '</div>';
   }
 
+  function hexToRgb(hex) {
+    var h = (hex || '').replace('#', '');
+    if (h.length !== 6) return null;
+    return { r: parseInt(h.slice(0, 2), 16), g: parseInt(h.slice(2, 4), 16), b: parseInt(h.slice(4, 6), 16) };
+  }
+
+  // 地区关系矩阵：与桌面版 stats.html 的 buildMatrix 同口径。
+  // cross = [{from, to, count}]（含同地区自环与跨地区对），regions 用于限定表头地区范围。
+  function matrixHTML(cross, regions) {
+    if (!cross || !cross.length) return '<div class="stats-note">暂无跨地区关系数据</div>';
+    var freq = {};
+    cross.forEach(function(r) { freq[r.from] = (freq[r.from] || 0) + r.count; freq[r.to] = (freq[r.to] || 0) + r.count; });
+    var list = (regions && regions.length ? regions.map(function(r) { return r.name; }) : Object.keys(freq))
+      .filter(function(n) { return freq[n] != null; })
+      .sort(function(a, b) { return freq[b] - freq[a]; })
+      .slice(0, 14);
+    if (!list.length) return '<div class="stats-note">暂无跨地区关系数据</div>';
+    var idx = {};
+    list.forEach(function(n, i) { idx[n] = i; });
+    var m = list.map(function() { return list.map(function() { return 0; }); });
+    var max = 0;
+    cross.forEach(function(r) {
+      var a = idx[r.from], b = idx[r.to];
+      if (a == null || b == null) return;
+      m[a][b] += r.count;
+      if (a !== b) m[b][a] += r.count;
+      if (m[a][b] > max) max = m[a][b];
+    });
+    var base = (getComputedStyle(document.documentElement).getPropertyValue('--accent') || '').trim() || '#8b5e3c';
+    var rgb = hexToRgb(base) || { r: 139, g: 94, b: 60 };
+    var html = '<div class="matrix-wrap"><table class="matrix"><thead><tr><th></th>';
+    list.forEach(function(n) { html += '<th>' + esc(n) + '</th>'; });
+    html += '</tr></thead><tbody>';
+    m.forEach(function(row, i) {
+      html += '<tr><th>' + esc(list[i]) + '</th>';
+      row.forEach(function(v) {
+        if (!v) { html += '<td class="zero">·</td>'; return; }
+        var t = max ? v / max : 0;
+        var alpha = 0.18 + t * 0.82;
+        var cls = t > 0.55 ? ' class="hot"' : '';
+        html += '<td' + cls + ' style="background:rgba(' + rgb.r + ',' + rgb.g + ',' + rgb.b + ',' + alpha.toFixed(2) + ')">' + v + '</td>';
+      });
+      html += '</tr>';
+    });
+    html += '</tbody></table></div>';
+    return html;
+  }
+
   function heroCard(label, value, unit, sub) {
     var v = String(value);
     return '<div class="stats-hero-card">' +
@@ -3199,6 +3247,8 @@ VM.stats = (function() {
         ? barChart(REG.slice().sort(function(a, b) { return num(b.avg_setting) - num(a.avg_setting); })
             .map(function(r) { return { name: r.name, count: num(r.avg_setting) }; }), 0, 0, { pct: false, unit: '字' })
         : '<div class="stats-note">数据不足</div>');
+
+    html += panel('🕸 地区关系矩阵', '越深关系越多', matrixHTML(R.cross_region, regionTop));
 
     // ---------- 世界观与内容 ----------
     html += '<div class="stats-section-title">世界观与内容</div>';

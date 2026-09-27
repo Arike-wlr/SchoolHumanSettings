@@ -465,6 +465,22 @@ html[data-theme="dark"] #view-home .card { background: var(--card-bg); box-shado
 .stats-panel-note { font-size: .68rem; color: var(--text-light); flex-shrink: 0; }
 .stats-note { font-size: .78rem; color: var(--text-light); padding: 4px 0; }
 
+/* ---- 地区关系矩阵（与桌面 stats.html 同款） ---- */
+.matrix-wrap { overflow: auto; -webkit-overflow-scrolling: touch; max-height: 60vh; border-radius: var(--radius-sm, 8px); }
+table.matrix { border-collapse: collapse; font-size: .74rem; white-space: nowrap; }
+table.matrix th, table.matrix td { border: 1px solid var(--border); padding: 5px 9px; text-align: center; }
+table.matrix thead th {
+  position: sticky; top: 0; z-index: 2;
+  background: var(--card-bg); color: var(--text-light); font-weight: 500;
+}
+table.matrix tbody th {
+  position: sticky; left: 0; z-index: 1;
+  background: var(--card-bg); color: var(--text); font-weight: 500; text-align: right;
+}
+table.matrix thead th:first-child { z-index: 3; left: 0; }
+table.matrix td.zero { color: var(--text-light); opacity: .3; }
+table.matrix td.hot { color: #fff; font-weight: 600; }
+
 /* ---- 横向条形 ---- */
 .stats-bar-row { margin-bottom: 10px; }
 .stats-bar-row:last-child { margin-bottom: 0; }
