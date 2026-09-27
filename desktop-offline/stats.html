@@ -774,9 +774,11 @@ function render(d) {
     ' 位角色 · 人均 ' + avgRel.toFixed(2) + ' 条</span></h2>';
   html += '<div class="stat-grid">';
 
+  // 关系度排行点人名 → 进关系网并聚焦该角色（高亮 ta 的家族与关系圈），
+  // 而不是跳到角色详情卡：这里用户关心的是"ta 的关系"，不是 ta 的档案。
   html += panel('⭐ 关系度排行', '含同家族 · 两端计次', (R.top_degree || []).length
     ? '<div class="rank-list">' + R.top_degree.map((it, i) =>
-        '<a class="rank-row" href="' + (it.id != null ? '/index?char=' + encodeURIComponent(it.id) : '/index') + '">' +
+        '<a class="rank-row" href="' + (it.id != null ? '/relations?focus=' + encodeURIComponent(it.id) : '/relations') + '">' +
           '<span class="rank-no">' + (i + 1) + '</span>' +
           '<span class="rank-name">' + esc(it.name) + '</span>' +
           '<span class="rank-val">' + it.degree + '</span>' +

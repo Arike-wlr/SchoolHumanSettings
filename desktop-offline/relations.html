@@ -225,6 +225,23 @@
     border: 2px solid currentColor;
   }
 
+  /* 聚焦高亮时画布上方的一行说明（谁被高亮、圈进了多少人） */
+  .focus-banner {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    margin: 0 20px 10px; padding: 8px 14px;
+    background: var(--accent-pale); border: 1px solid var(--accent-light);
+    border-radius: var(--radius-sm);
+    font-size: .82rem; color: var(--text);
+  }
+  .focus-banner b { color: var(--accent); }
+  .focus-banner .focus-chip {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 2px 8px; border-radius: 10px;
+    background: var(--card-bg); border: 1px solid var(--border);
+    font-size: .76rem; color: var(--text-light); cursor: pointer;
+  }
+  .focus-banner .focus-chip:hover { border-color: var(--accent-light); color: var(--accent); }
+
   /* ====== 按钮 ====== */
   .btn {
     display: inline-flex; align-items: center; gap: 6px;
@@ -450,12 +467,14 @@
   <!-- 图形区域 -->
   <div class="graph-section">
     <div class="graph-header">
-      <span class="hint">💡 拖拽节点调整位置 · 双击查看角色 · 滚轮缩放</span>
+      <span class="hint">💡 单击节点高亮 ta 的家族与关系 · 拖拽调整位置 · 双击查看角色 · 滚轮缩放</span>
       <div style="display:flex;gap:8px;">
+        <button class="btn btn-outline btn-sm" id="focusClearBtn" onclick="clearFocus()" style="display:none;">✕ 取消高亮</button>
         <button class="btn btn-outline btn-sm" onclick="openFamilyModal()">🏛 管理家族</button>
 
       </div>
     </div>
+    <div class="focus-banner" id="focusBanner" style="display:none;"></div>
     <div class="graph-canvas-wrap" id="canvasWrap">
       <canvas id="graphCanvas"></canvas>
     </div>
@@ -682,6 +701,14 @@ document.addEventListener('DOMContentLoaded', () => {
         setTimeout(() => el.classList.remove('highlight'), 4000);
       }
     }
+    // 聚焦定位：/relations?focus=ID（统计页「关系度排行」等入口用）
+    // → 高亮该角色的家族与关系圈，并把画布滚进视野。
+    // 等布局跑完再设，否则节点还在飘、看不出高亮效果。
+    const gsFocus = new URLSearchParams(location.search).get('focus');
+    if (gsFocus) {
+      const fid = parseInt(gsFocus, 10);
+      setTimeout(() => setFocus(fid, { scrollToGraph: true }), 600);
+    }
   });
 });
 
@@ -815,6 +842,7 @@ function initCanvas() {
   canvas.addEventListener('mousemove', onMouseMove);
   canvas.addEventListener('mouseup', onMouseUp);
   canvas.addEventListener('wheel', onWheel, {passive: false});
+  canvas.addEventListener('click', onClick);
   canvas.addEventListener('dblclick', onDblClick);
 
   window.addEventListener('resize', () => {
@@ -1548,12 +1576,20 @@ function drawGraph() {
   // 画家族聚类圈
   drawFamilyClusters();
 
+  // 聚焦时先算好「有关」集合，供边与节点共用
+  const focusSet = focusCharId != null ? computeFocusSet(focusCharId) : null;
+
   // 画边
   const labelOffsets = computeLabelOffsets(edges);
   edges.forEach((edge, i) => {
     const from = nodes.find(n => n.id === edge.from);
     const to = nodes.find(n => n.id === edge.to);
     if (!from || !to) return;
+
+    // 聚焦时：不连着选中角色的边整条压暗，让关系走向一眼可见。
+    // 先设全局 alpha 再画，避免去改 drawEdge 的签名（那边还管着箭头填充）。
+    const edgeRelevant = !focusSet || focusSet.has(edge.from) || focusSet.has(edge.to);
+    if (!edgeRelevant) ctx.globalAlpha = FOCUS_DIM;
 
     const isBidirectional = ['CP', '参与组建', '朋友', '冤家', '亲属'].includes(edge.type);
     drawEdge(from.x, from.y, to.x, to.y, edge.type, isBidirectional);
@@ -1587,6 +1623,8 @@ function drawGraph() {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(label, lx, ly);
+
+    ctx.globalAlpha = 1;   // 每条边画完立刻复位，别把压暗漏给下一个绘制
   });
 
   // 节点头尺寸排序（小的先画）
@@ -1594,6 +1632,11 @@ function drawGraph() {
 
   // 画节点
   sortedNodes.forEach(node => {
+    // 聚焦时：与选中角色无关的节点整体压暗
+    const relevant = !focusSet || focusSet.has(node.id);
+    if (!relevant) ctx.globalAlpha = FOCUS_DIM;
+    const isFocusSelf = focusCharId != null && node.id === focusCharId;
+
     // 光晕
     const grad = ctx.createRadialGradient(node.x, node.y, node.r * 0.6, node.x, node.y, node.r + 6);
     if (node.gender === '男') {
@@ -1656,6 +1699,17 @@ function drawGraph() {
       ctx.stroke();
     }
 
+    // 聚焦态：选中的本人再加一圈醒目虚线环，与「相关的人」区分开
+    if (isFocusSelf) {
+      ctx.beginPath();
+      ctx.arc(node.x, node.y, node.r + 7, 0, Math.PI * 2);
+      ctx.strokeStyle = themeVar('--accent', '#8b5e3c');
+      ctx.lineWidth = 3;
+      ctx.setLineDash([6, 4]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
     // 名字位置：有头像 → 画在圆外下方（否则会和头像糊在一起）；
     //          无头像 → 恢复"原来那样"：白字画在圆内（bold 13px / y-2 / 白）。
     if (av) {
@@ -1691,6 +1745,8 @@ function drawGraph() {
         ctx.fillText(famLabel, node.x, node.y + 14);
       }
     }
+
+    ctx.globalAlpha = 1;   // 每个节点画完复位，避免压暗影响后续绘制
   });
 }
 
@@ -1701,6 +1757,119 @@ function findNodeAt(mx, my) {
     if (dx * dx + dy * dy <= n.r * n.r) return n;
   }
   return null;
+}
+
+// ====== 聚焦高亮（单击节点）======
+// 语义：选中某个角色后，把「和 ta 有关」的一组节点与连线拎出来、其余压暗，
+// 一眼就能看清 ta 的家族与关系圈。再点空白处取消。
+// 注意：这里**只影响绘制**，不改坐标、不改拖拽/平移逻辑（那些是另一套）。
+let focusCharId = null;
+
+// 与 ta 有关的节点集合：本人 + 同家族的人 + 有直接关系的人。
+// 同家族「算有关」是刻意的——家族在关系网里以聚类圈呈现，聚焦时应该一起亮起来
+// （注意：这与「同家族自动补一条关系」的统计口径是两回事，别混）。
+function computeFocusSet(charId) {
+  const set = new Set();
+  if (charId == null) return set;
+  set.add(charId);
+
+  // 有直接关系的人（无向：from/to 任一端是 ta 都算）
+  edges.forEach(e => {
+    if (e.from === charId) set.add(e.to);
+    else if (e.to === charId) set.add(e.from);
+  });
+
+  // 同家族的人（家族字段可含多个家族，且拆法要用页内既有的 splitFamilies）
+  const me = nodeMap[charId];
+  if (me) {
+    const myFams = new Set(splitFamilies(me.family || ''));
+    if (myFams.size > 0) {
+      nodes.forEach(n => {
+        if (set.has(n.id)) return;
+        const fams = splitFamilies(n.family || '');
+        if (fams.some(f => myFams.has(f))) set.add(n.id);
+      });
+    }
+  }
+  return set;
+}
+
+// 聚焦时给「无关元素」用的压暗透明度。0.16 足够让人看出层次，
+// 又不会让整体显得空掉（完全藏起来会失去「这是同一张图」的感觉）。
+const FOCUS_DIM = 0.16;
+
+function setFocus(charId, opts) {
+  focusCharId = (charId == null) ? null : charId;
+  renderFocusBanner();
+  drawGraph();
+  // 从别处跳进来时（?focus=ID）把画布滚进视野，免得用户看不到高亮效果；
+  // 画布内自己点选就不滚了——那会打断当前的浏览位置，很烦人。
+  if (opts && opts.scrollToGraph) {
+    const wrap = document.getElementById('canvasWrap');
+    if (wrap && wrap.scrollIntoView) wrap.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }
+}
+
+function clearFocus() {
+  if (focusCharId == null) return;
+  focusCharId = null;
+  renderFocusBanner();
+  drawGraph();
+}
+
+function toggleFocus(charId) {
+  if (focusCharId === charId) clearFocus();
+  else setFocus(charId);
+}
+
+// 画布上方那行「已高亮 XX，含 N 位家人 / M 位关系对象」的说明栏。
+// 同时负责显示/隐藏「取消高亮」按钮。
+function renderFocusBanner() {
+  const banner = document.getElementById('focusBanner');
+  const clearBtn = document.getElementById('focusClearBtn');
+  if (!banner) return;
+  if (focusCharId == null) {
+    banner.style.display = 'none';
+    banner.innerHTML = '';
+    if (clearBtn) clearBtn.style.display = 'none';
+    return;
+  }
+  const me = nodeMap[focusCharId];
+  const set = computeFocusSet(focusCharId);
+  const others = [...set].filter(id => id !== focusCharId);
+
+  // 拆成「家人」和「关系对象」两类，便于用户核对
+  const myFams = me ? new Set(splitFamilies(me.family || '')) : new Set();
+  const famMembers = [], relMembers = [];
+  others.forEach(id => {
+    const n = nodeMap[id];
+    if (!n) return;
+    const fams = splitFamilies(n.family || '');
+    const sameFam = myFams.size > 0 && fams.some(f => myFams.has(f));
+    (sameFam ? famMembers : relMembers).push(n);
+  });
+
+  const chip = (n) => '<span class="focus-chip" onclick="event.stopPropagation();setFocus(' + n.id + ')">' +
+    esc(n.name) + '</span>';
+
+  let html = '🎯 已高亮 <b>' + esc(me ? me.name : ('#' + focusCharId)) + '</b>';
+  if (myFams.size) html += ' · 家族 ' + esc([...myFams].join('、'));
+  html += '<span style="color:var(--text-light)">｜' +
+    '家人 ' + famMembers.length + ' · 关系对象 ' + relMembers.length + '</span>';
+
+  const shown = others.map(id => nodeMap[id]).filter(Boolean);
+  if (shown.length) {
+    html += '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-left:4px;">' +
+      shown.slice(0, 12).map(chip).join('') +
+      (shown.length > 12 ? '<span style="color:var(--text-light);font-size:.76rem;">…共 ' + shown.length + ' 位</span>' : '') +
+      '</div>';
+  } else {
+    html += ' <span style="color:var(--text-light)">（暂无家人或关系对象）</span>';
+  }
+
+  banner.innerHTML = html;
+  banner.style.display = 'flex';
+  if (clearBtn) clearBtn.style.display = '';
 }
 
 function onMouseDown(e) {
@@ -1771,6 +1940,17 @@ function onMouseUp(e) {
     dragNode = undefined; // reset
     canvas.style.cursor = 'default';
   }
+}
+
+// 单击节点 = 聚焦高亮；单击空白 = 取消聚焦。
+// 与「双击查看信息」共存：单击先聚焦，随后双击再叠加弹窗——
+// 两者互不干扰，符合常见网页习惯。（一个手势做一件事，但
+// 单击/双击本就是两个不同手势，不像历史上"双击兼职两件事"那种踩坑。）
+function onClick(e) {
+  const rect = canvas.getBoundingClientRect();
+  const node = findNodeAt(e.clientX - rect.left, e.clientY - rect.top);
+  if (node) toggleFocus(node.id);
+  else clearFocus();
 }
 
 function onWheel(e) {

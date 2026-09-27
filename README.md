@@ -76,19 +76,18 @@ Settings/
 │   ├── images/                 #   角色图片存储
 │   └── 文字设定/               #   文档上传目录
 │       └── .images_cache/      #   docx 中提取的图片缓存
-├── desktop-offline/            # 在线版前端页面（由后端托管）
+├── desktop-offline/            # 网页版前端页面（由后端托管）
 │   ├── index.html              #   角色管理
 │   ├── worldview.html          #   世界设定
 │   ├── relations.html          #   关系网（力导向画布）
 │   ├── documents.html          #   文档管理
 │   ├── stats.html              #   总览统计
-│   ├── db.js / api-shim.js     #   数据层与接口适配（离线版统计聚合也在这里）
 │   ├── face-crop.js            #   人脸圈选
 │   ├── search.js               #   全局搜索
 │   ├── export-all.js           #   一键导出（含确认弹窗）
 │   ├── copy-detail.js          #   详情复制
 │   ├── sync.js / sync-ui.js    #   局域网同步
-│   └── main.go / go.mod        #   可选：Go 单文件服务器（:8080）
+│   └── （页面源码，由 server/backend.py 托管）
 ├── android-app/                # Android 离线版（WebView + SPA，IndexedDB 本地存储）
 │   └── app/src/main/
 │       ├── assets/web/         #   SPA 前端（index.html + app.js/app.css + db.js/api-shim.js）
@@ -146,30 +145,22 @@ APK 使用 debug 签名，安装时可能需要允许"未知来源"。
 
 #### 常见问题
 
-| 问题 | 解决方法 |
-|------|---------|
-| `Unsupported class file major version 68` | JDK 版本过高，使用 JDK 21 |
-| `SDK location not found` | 检查 `android-app/local.properties` 的 `sdk.dir` 路径 |
-| 下载 Gradle 失败 | 多试几次，或手动下载 [gradle-8.11.1-bin.zip](https://services.gradle.org/distributions/gradle-8.11.1-bin.zip) 解压到 `%USERPROFILE%\.gradle\wrappers\dists\gradle-8.11.1-bin\` |
+| 问题                                        | 解决方法                                                                                                                                                                       |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `Unsupported class file major version 68` | JDK 版本过高，使用 JDK 21                                                                                                                                                      |
+| `SDK location not found`                  | 检查`android-app/local.properties` 的 `sdk.dir` 路径                                                                                                                       |
+| 下载 Gradle 失败                            | 多试几次，或手动下载[gradle-8.11.1-bin.zip](https://services.gradle.org/distributions/gradle-8.11.1-bin.zip) 解压到 `%USERPROFILE%\.gradle\wrappers\dists\gradle-8.11.1-bin\` |
 
-## 三种运行方式
+## 两种运行方式
 
-| 方式 | 入口 | 数据存哪 | 需要后端 |
-|------|------|----------|----------|
-| **在线版** | `server/backend.py` → `http://localhost:8000` | SQLite（`server/oc_characters.db`） | 是 |
-| **离线单文件** | `desktop-offline/main.go` → `http://localhost:8080` | 浏览器 IndexedDB | 否 |
-| **Android App** | `apks/app-release.apk` | 应用内 IndexedDB | 否 |
+| 方式                        | 入口                                               | 数据存哪                              | 需要后端 |
+| --------------------------- | -------------------------------------------------- | ------------------------------------- | -------- |
+| **网页版（电脑）**    | `server/backend.py` → `http://localhost:8000` | SQLite（`server/oc_characters.db`） | 是       |
+| **手机版（Android）** | `apks/app-release.apk`                           | 应用内 IndexedDB                      | 否       |
 
-### 离线单文件版（Go）
-
-`desktop-offline/main.go` 用 `go:embed` 把 HTML/JS **打进单个可执行文件**，启动后自动开浏览器，数据存在浏览器本地，不依赖 Python 后端：
-
-```bash
-cd desktop-offline
-go run main.go          # 或 go build -o oc-desktop.exe main.go
-```
-
-访问 `http://localhost:8080`。适合把页面整个拷给别人独立使用。
+> 网页版的页面源码在 `desktop-offline/`，由 `server/backend.py` 托管，数据存 SQLite。
+> 手机版是**独立的一套 SPA**（`android-app/app/src/main/assets/web/`），数据存应用内 IndexedDB，
+> 完全离线运行、不依赖后端。
 
 ## 手机 ↔ 电脑同步（局域网）
 
@@ -187,25 +178,28 @@ go run main.go          # 或 go build -o oc-desktop.exe main.go
 
 ### 常见问题
 
-| 现象 | 原因 | 解决 |
-|------|------|------|
-| 手机浏览器打不开 `http://电脑IP:8000`，但电脑本地 `http://127.0.0.1:8000` 正常 | Windows 防火墙将热点/WiFi 识别为"公用网络"，默认拦截入站连接 | 放行 8000 端口（见下方） |
-| 之前能连，换网络后连不上 | 电脑 IP 变了（换 WiFi / 换热点网段都会变） | 重新查 IP，更新同步设置里的地址 |
-| 手机端填 `localhost` / `127.0.0.1` | 手机上这些地址指向手机自己 | 填电脑的局域网 IP |
-| 手机热点仍连不上 | 手机热点开启了"AP 隔离 / 禁止设备互访" | 在手机热点设置中关闭 |
+| 现象                                                                              | 原因                                                         | 解决                            |
+| --------------------------------------------------------------------------------- | ------------------------------------------------------------ | ------------------------------- |
+| 手机浏览器打不开`http://电脑IP:8000`，但电脑本地 `http://127.0.0.1:8000` 正常 | Windows 防火墙将热点/WiFi 识别为"公用网络"，默认拦截入站连接 | 放行 8000 端口（见下方）        |
+| 之前能连，换网络后连不上                                                          | 电脑 IP 变了（换 WiFi / 换热点网段都会变）                   | 重新查 IP，更新同步设置里的地址 |
+| 手机端填`localhost` / `127.0.0.1`                                             | 手机上这些地址指向手机自己                                   | 填电脑的局域网 IP               |
+| 手机热点仍连不上                                                                  | 手机热点开启了"AP 隔离 / 禁止设备互访"                       | 在手机热点设置中关闭            |
 
 ### 放行防火墙 8000 端口
 
 方式一（图形界面）：
+
 1. Windows 安全中心 → 防火墙和网络保护 → 高级设置
 2. 入站规则 → 新建规则 → 端口 → TCP → 本地端口 `8000` → 允许连接 → 配置文件全选 → 命名保存
 
 方式二（管理员 PowerShell）：
+
 ```powershell
 netsh advfirewall firewall add rule name="OC Backend 8000" dir=in action=allow protocol=TCP localport=8000
 ```
 
 方式三（一键排查脚本，位于 `server/check_sync.ps1`）：
+
 ```powershell
 powershell -ExecutionPolicy Bypass -File server/check_sync.ps1        # 只诊断
 powershell -ExecutionPolicy Bypass -File server/check_sync.ps1 -Fix   # 诊断 + 自动放行（需管理员）
@@ -213,12 +207,12 @@ powershell -ExecutionPolicy Bypass -File server/check_sync.ps1 -Fix   # 诊断 +
 
 ## 数据存储
 
-| 数据 | 存储位置 |
-|------|----------|
+| 数据                   | 存储位置                              |
+| ---------------------- | ------------------------------------- |
 | 角色、世界设定、关系网 | `server/oc_characters.db`（SQLite） |
-| 角色图片 | `server/images/` |
-| 上传的文档 | `server/文字设定/` 文件夹 |
-| docx 中提取的图片缓存 | `server/文字设定/.images_cache/` |
+| 角色图片               | `server/images/`                    |
+| 上传的文档             | `server/文字设定/` 文件夹           |
+| docx 中提取的图片缓存  | `server/文字设定/.images_cache/`    |
 
 备份整个项目文件夹即可保留所有数据。
 
@@ -226,15 +220,14 @@ powershell -ExecutionPolicy Bypass -File server/check_sync.ps1 -Fix   # 诊断 +
 
 ## 总览统计的口径
 
-统计页（`/stats`）的数据全部来自 `GET /api/stats`。**同一套口径在三处各实现了一份，改动时必须同步修改，否则在线版与离线版数字会对不上：**
+统计页（`/stats`）的数据全部来自 `GET /api/stats`。**同一套口径在两处各实现了一份，改动时必须同步修改，否则网页版与手机版数字会对不上：**
 
-| 运行形态 | 实现位置 |
-|----------|----------|
-| 在线版（后端） | `server/backend.py` → `get_stats()` |
-| 离线单文件版（Go / 浏览器 IndexedDB） | `desktop-offline/api-shim.js` → `computeStats()` |
-| Android App | `android-app/app/src/main/assets/web/api-shim.js` → `computeStats()`，由 `app.js` 的 `VM.stats` 渲染 |
+| 运行形态          | 实现位置                                                                                                      |
+| ----------------- | ------------------------------------------------------------------------------------------------------------- |
+| 网页版（后端）    | `server/backend.py` → `get_stats()`                                                                      |
+| 手机版（Android） | `android-app/app/src/main/assets/web/api-shim.js` → `computeStats()`，由 `app.js` 的 `VM.stats` 渲染 |
 
-> ⚠️ 桌面版与安卓版的 `api-shim.js` / `db.js` 是**各自独立维护的两份文件**（安卓版更晚更完整：含 P06 轻量投影、mammoth 离线 docx 解析）。**三处口径要逐字一致，但不能整文件互相覆盖**——只能逐块移植差异。
+> ⚠️ 手机版的 `computeStats()` 是从后端 `get_stats()` **逐字对齐**的实现，改任何一处都要同改另一处。
 
 口径约定：
 
@@ -249,16 +242,16 @@ powershell -ExecutionPolicy Bypass -File server/check_sync.ps1 -Fix   # 诊断 +
 
 统计页的区块与口径：
 
-| 区块 | 内容 | 口径要点 |
-|------|------|----------|
-| 概览卡 | 角色数 / 世界观条目 / 关系数 / 文档与图片 | — |
-| 角色分布 | 地区、性别、状态分布 + 家族规模卡 | 家族规模卡列出每个家族的成员数（非条形图） |
-| 设定完整度体检 | 15 个字段的分字段填写率 + 整体均值 + 待补充清单 | 字段清单见 `STATS_COMPLETENESS_FIELDS`；待补充清单只列缺失 ≥3 人的字段，每人最多 10 个名字 |
-| 角色之最 | 设定最厚 / 关系最多 / 关系类型最丰富 / 图片最多 / 家族羁绊最多（各 Top 10）+ 设定篇幅分布 + **最长的世界观条目 Top 10** | 角色榜 `STATS_RANK_N=10`；世界观条目榜 `STATS_WORLD_RANK_N=10`（字段 `highlights.world_longest_list`，按内容字数降序，同字数比标题） |
-| 关系网络 | 关系明细（手写关系、去重对数、同家族关系、孤立、双向互惠、重复、未标类型、自环、人均）+ 关系度排行 + 孤立角色 | **同家族自动关系**见下节；`total` 只数手写关系，`unique_pairs` 含家族 |
-| 地区圈子 | 地区凝聚力 + 设定厚度 + 地区关系矩阵 | 凝聚力＝同地区内部关系 ÷ 该地区涉及的全部关系（**已含同家族自动关系**）；仅统计关系 ≥ `STATS_MIN_REGION`(3) 的地区。**设定厚度**＝该地区人均 `setting` 字数 |
-| 世界观与内容 | 大类分布 + 内容体量 | 只统计大类；**已移除小类分布**（世界观页面已有） |
-| 素材与文档 | 图片数、无图角色、取脸数、文档数与占用 | 离线/Android 端无磁盘概念，`size_display` 为空 |
+| 区块           | 内容                                                                                                                         | 口径要点                                                                                                                                                                      |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 概览卡         | 角色数 / 世界观条目 / 关系数 / 文档与图片                                                                                    | —                                                                                                                                                                            |
+| 角色分布       | 地区、性别、状态分布 + 家族规模卡                                                                                            | 家族规模卡列出每个家族的成员数（非条形图）                                                                                                                                    |
+| 设定完整度体检 | 15 个字段的分字段填写率 + 整体均值 + 待补充清单                                                                              | 字段清单见`STATS_COMPLETENESS_FIELDS`；待补充清单只列缺失 ≥3 人的字段，每人最多 10 个名字                                                                                  |
+| 角色之最       | 设定最厚 / 关系最多 / 关系类型最丰富 / 图片最多 / 家族羁绊最多（各 Top 10）+ 设定篇幅分布 +**最长的世界观条目 Top 10** | 角色榜`STATS_RANK_N=10`；世界观条目榜 `STATS_WORLD_RANK_N=10`（字段 `highlights.world_longest_list`，按内容字数降序，同字数比标题）                                     |
+| 关系网络       | 关系明细（手写关系、去重对数、同家族关系、孤立、双向互惠、重复、未标类型、自环、人均）+ 关系度排行 + 孤立角色                | **同家族自动关系**见下节；`total` 只数手写关系，`unique_pairs` 含家族                                                                                               |
+| 地区圈子       | 地区凝聚力 + 设定厚度 + 地区关系矩阵                                                                                         | 凝聚力＝同地区内部关系 ÷ 该地区涉及的全部关系（**已含同家族自动关系**）；仅统计关系 ≥ `STATS_MIN_REGION`(3) 的地区。**设定厚度**＝该地区人均 `setting` 字数 |
+| 世界观与内容   | 大类分布 + 内容体量                                                                                                          | 只统计大类；**已移除小类分布**（世界观页面已有）                                                                                                                        |
+| 素材与文档     | 图片数、无图角色、取脸数、文档数与占用                                                                                       | 离线/Android 端无磁盘概念，`size_display` 为空                                                                                                                              |
 
 > **已删除的冗余面板**：关系类型分布、世界观小类分布——这两项在关系网 / 世界观页面上已有，不再在统计页重复。
 
@@ -272,14 +265,14 @@ powershell -ExecutionPolicy Bypass -File server/check_sync.ps1 -Fix   # 诊断 +
 
 相关字段（`relations` 块）：
 
-| 字段 | 含义 |
-|------|------|
-| `total` | 手写关系条数（用户实际录入的 from→to 行数） |
-| `explicit_total` | 同上，为语义清晰而保留的别名 |
-| `explicit_pairs` | 手写关系的去重无向对数 |
-| `family_pairs` | 同家族两两配对总数（含与手写关系重叠的部分） |
+| 字段                 | 含义                                                         |
+| -------------------- | ------------------------------------------------------------ |
+| `total`            | 手写关系条数（用户实际录入的 from→to 行数）                 |
+| `explicit_total`   | 同上，为语义清晰而保留的别名                                 |
+| `explicit_pairs`   | 手写关系的去重无向对数                                       |
+| `family_pairs`     | 同家族两两配对总数（含与手写关系重叠的部分）                 |
 | `family_new_pairs` | 同家族配对中**不与任何手写关系重叠**、从而净新增的对数 |
-| `unique_pairs` | 合并去重后的总对数＝手写 ∪ 同家族（统计页展示的就是它） |
+| `unique_pairs`     | 合并去重后的总对数＝手写 ∪ 同家族（统计页展示的就是它）     |
 
 统计页「关系网络」区块的文案为「手写 N 条 + 同家族自动 M 条 · 去重 X 对 · 涉及 Y 位角色 · 人均 Z 条」，其中 N=`total`、M=`family_new_pairs`、X=`unique_pairs`。
 

@@ -1817,6 +1817,14 @@ VM.relations = (function() {
   var gLastTapTime = 0, gLastTapNodeId = null;
   var gTouchStartX = 0, gTouchStartY = 0, gTouchMoved = false;
   var G_DBL_TAP_DELAY = 300, G_DBL_TAP_MOVE_TOL = 10;
+  // 鼠标路径（平板接鼠标/桌面模式）判断"这算点击还是拖动"用的基准
+  var gMouseDownNodeX = 0, gMouseDownNodeY = 0, gMousePanMoved = false;
+  // 聚焦高亮：单击/点按某个节点后，把 ta 的家族成员与关系对象拎出来、
+  // 其余节点和连线压暗；再点空白处取消。与桌面版 relations.html 同语义。
+  // 注意：只影响绘制，不动坐标，也不影响拖拽/平移。
+  var gFocusId = null;
+  // 聚焦时「无关元素」的压暗透明度（与桌面版一致）
+  var G_FOCUS_DIM = 0.16;
   var loadGeneration = 0;
   var loadedRevision = -1;    // 已加载完成的数据版本（同版本返回不再查询/重绘）
   var loadingRevision = -1;
@@ -1830,6 +1838,101 @@ VM.relations = (function() {
   var gAvatarSig = new Map();       // id → 当前缓存的 key（ref+crop 签名）
 
   function splitFamilies(s) { return (s || '').split(/[、,，]/).map(function(x) { return x.trim(); }).filter(Boolean); }
+
+  // ---- 聚焦高亮 ----
+  // 与 ta 有关的节点集合：本人 + 同家族的人 + 有直接关系的人。
+  // 同家族「算有关」是刻意的——家族在图里以聚类圈呈现，聚焦时应一起亮起来。
+  function computeGFocusSet(charId) {
+    var set = new Set();
+    if (charId == null) return set;
+    set.add(charId);
+    gEdges.forEach(function(e) {
+      if (e.from === charId) set.add(e.to);
+      else if (e.to === charId) set.add(e.from);
+    });
+    var me = gNodeIndex.get(charId);
+    if (me) {
+      var myFams = new Set(splitFamilies(me.family || ''));
+      if (myFams.size > 0) {
+        gNodes.forEach(function(n) {
+          if (set.has(n.id)) return;
+          var fams = splitFamilies(n.family || '');
+          for (var i = 0; i < fams.length; i++) {
+            if (myFams.has(fams[i])) { set.add(n.id); return; }
+          }
+        });
+      }
+    }
+    return set;
+  }
+
+  function setGFocus(charId, opts) {
+    gFocusId = (charId == null) ? null : charId;
+    renderGFocusBanner();
+    graphDraw();
+    // 从别处（统计页榜单）跳进来时把画布滚进视野，免得看不到高亮
+    if (opts && opts.scrollToGraph) {
+      var wrap = document.getElementById('canvasWrap');
+      if (wrap && wrap.scrollIntoView) wrap.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }
+  }
+
+  function clearGFocus() {
+    if (gFocusId == null) return;
+    gFocusId = null;
+    renderGFocusBanner();
+    graphDraw();
+  }
+
+  function toggleGFocus(charId) {
+    if (gFocusId === charId) clearGFocus();
+    else setGFocus(charId);
+  }
+
+  // 画布上方那行「已高亮 XX · 家族 … | 家人 N · 关系对象 M」+ 可点的人物 chip。
+  function renderGFocusBanner() {
+    var banner = document.getElementById('gFocusBanner');
+    var btn = document.getElementById('gFocusClearBtn');
+    if (!banner) return;
+    if (gFocusId == null) {
+      banner.style.display = 'none'; banner.innerHTML = '';
+      if (btn) btn.style.display = 'none';
+      return;
+    }
+    var me = gNodeIndex.get(gFocusId);
+    var set = computeGFocusSet(gFocusId);
+    var myFams = me ? new Set(splitFamilies(me.family || '')) : new Set();
+    var famMembers = [], relMembers = [];
+    set.forEach(function(id) {
+      if (id === gFocusId) return;
+      var n = gNodeIndex.get(id);
+      if (!n) return;
+      var fams = splitFamilies(n.family || '');
+      var sameFam = myFams.size > 0 && fams.some(function(f) { return myFams.has(f); });
+      (sameFam ? famMembers : relMembers).push(n);
+    });
+
+    var html = '🎯 已高亮 <b>' + esc(me ? me.name : ('#' + gFocusId)) + '</b>';
+    if (myFams.size) html += ' · 家族 ' + esc(Array.from(myFams).join('、'));
+    html += '<span class="g-focus-stat">｜家人 ' + famMembers.length + ' · 关系对象 ' + relMembers.length + '</span>';
+
+    var others = famMembers.concat(relMembers);
+    if (others.length) {
+      html += '<div class="g-focus-chips">' +
+        others.slice(0, 12).map(function(n) {
+          return '<span class="g-focus-chip" onclick="VM.relations.setGFocus(' + n.id + ')">' + esc(n.name) + '</span>';
+        }).join('') +
+        (others.length > 12 ? '<span class="g-focus-more">…共 ' + others.length + ' 位</span>' : '') +
+        '</div>';
+    } else {
+      html += ' <span class="g-focus-stat">（暂无家人或关系对象）</span>';
+    }
+
+    banner.innerHTML = html;
+    banner.style.display = 'flex';
+    if (btn) btn.style.display = '';
+  }
+
   function buildFamilyColors() {
     gFamilyColorMap = {}; var idx = 0;
     allCharacters.forEach(function(c) {
@@ -2449,19 +2552,24 @@ VM.relations = (function() {
     gCtx.clearRect(0, 0, gW, gH);
     gCtx.save(); gCtx.translate(gOffsetX, gOffsetY); gCtx.scale(gScale, gScale);
     drawFamilyClusters();
+    // 聚焦集合：边和节点共用一份，避免重复计算
+    var gFocusSet = gFocusId != null ? computeGFocusSet(gFocusId) : null;
     var lo = computeLabelOffsets(gEdges);
     gEdges.forEach(function(e, i) {
       var a = gNodeIndex.get(e.from), b = gNodeIndex.get(e.to);
       if (!a || !b) return;
+      // 聚焦时：不连着选中角色的边压暗，让关系走向一眼可见
+      var edgeRelevant = !gFocusSet || gFocusSet.has(e.from) || gFocusSet.has(e.to);
+      var edgeAlpha = edgeRelevant ? 1 : G_FOCUS_DIM;
       var isB = ['CP', '朋友', '冤家', '亲属'].indexOf(e.type) !== -1, isT = e.type === '师生';
       var color = isB ? '#c2185b' : isT ? '#1565c0' : '#8b5e3c';
       var dx = b.x - a.x, dy = b.y - a.y, len = Math.sqrt(dx * dx + dy * dy) || 1;
       var ux = dx / len, uy = dy / len, nr = gNodeR(), as_ = 7;
       var sx = a.x + ux * nr, sy = a.y + uy * nr, ex = b.x - ux * nr, ey = b.y - uy * nr;
-      gCtx.strokeStyle = color; gCtx.globalAlpha = 0.7; gCtx.lineWidth = isB ? 2.5 : 1.8;
+      gCtx.strokeStyle = color; gCtx.globalAlpha = 0.7 * edgeAlpha; gCtx.lineWidth = isB ? 2.5 : 1.8;
       if (isT) gCtx.setLineDash([6, 4]);
       gCtx.beginPath(); gCtx.moveTo(sx, sy); gCtx.lineTo(ex, ey); gCtx.stroke(); gCtx.setLineDash([]);
-      gCtx.globalAlpha = 0.9; gCtx.fillStyle = color;
+      gCtx.globalAlpha = 0.9 * edgeAlpha; gCtx.fillStyle = color;
       gCtx.beginPath(); gCtx.moveTo(ex, ey);
       gCtx.lineTo(ex - ux * as_ - uy * as_ * 0.6, ey - uy * as_ + ux * as_ * 0.6);
       gCtx.lineTo(ex - ux * as_ + uy * as_ * 0.6, ey - uy * as_ - ux * as_ * 0.6);
@@ -2470,7 +2578,7 @@ VM.relations = (function() {
       if (e.type) {
         var mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2, px_ = -uy, py_ = ux;
         var off = (lo[i] || 0) * 12, lx = mx + px_ * off, ly = my + py_ * off;
-        gCtx.globalAlpha = 0.9; gCtx.font = '10px "PingFang SC","Microsoft YaHei",sans-serif';
+        gCtx.globalAlpha = 0.9 * edgeAlpha; gCtx.font = '10px "PingFang SC","Microsoft YaHei",sans-serif';
         var tw = gCtx.measureText(e.type).width;
         gCtx.fillStyle = themeVar('--canvas-label-bg','#fffef9'); gCtx.fillRect(lx - tw / 2 - 3, ly - 7, tw + 6, 14);
         gCtx.fillStyle = color; gCtx.textAlign = 'center'; gCtx.textBaseline = 'middle'; gCtx.fillText(e.type, lx, ly);
@@ -2481,6 +2589,9 @@ VM.relations = (function() {
       var fc = nodeFamilyColor(n);
       var av = gAvatarCache.get(n.id);
       var r = gNodeR();
+      // 聚焦时：与选中角色无关的节点整体压暗
+      var relevant = !gFocusSet || gFocusSet.has(n.id);
+      gCtx.globalAlpha = relevant ? 1 : G_FOCUS_DIM;
       // 底圆：无头像时是家族色圆；有头像时也先铺一层，防止图片未就绪时透出画布。
       gCtx.beginPath(); gCtx.arc(n.x, n.y, r, 0, Math.PI * 2);
       gCtx.fillStyle = n === gDragNode ? '#c49a6c' : fc; gCtx.fill();
@@ -2494,11 +2605,18 @@ VM.relations = (function() {
       // 家族色描边（有头像时也保留，用于区分家族）
       gCtx.beginPath(); gCtx.arc(n.x, n.y, r, 0, Math.PI * 2);
       gCtx.strokeStyle = themeVar('--stroke-ring','#fffef9'); gCtx.lineWidth = 2; gCtx.stroke();
+      // 聚焦态：选中的本人再加一圈醒目虚线环，和「相关的人」区分开
+      if (gFocusId != null && n.id === gFocusId) {
+        gCtx.beginPath(); gCtx.arc(n.x, n.y, r + 6, 0, Math.PI * 2);
+        gCtx.strokeStyle = themeVar('--accent', '#8b5e3c'); gCtx.lineWidth = 2.5;
+        gCtx.setLineDash([5, 3]); gCtx.stroke(); gCtx.setLineDash([]);
+      }
       // 节点名称画在彩色圆外，取主题正文色：浅色主题深字、深色主题浅字，避免与画布同色看不见
       // 字号与偏移随节点半径缩放，否则大屏上标签会贴着大圆、显得过小
       gCtx.fillStyle = themeVar('--text','#3d2b1f'); gCtx.font = Math.round(r * 0.69) + 'px "PingFang SC","Microsoft YaHei",sans-serif'; gCtx.textAlign = 'center'; gCtx.textBaseline = 'top';
       var label = n.name || ('#' + n.id); if (label.length > 5) label = label.slice(0, 4) + '…';
       gCtx.fillText(label, n.x, n.y + r + 4);
+      gCtx.globalAlpha = 1;   // 每个节点画完复位
     });
     gCtx.restore();
   }
@@ -2539,8 +2657,23 @@ VM.relations = (function() {
     if (e.touches.length === 0) {
       if (!gTouchMoved) {
         var p = screenToCanvas(gTouchStartX, gTouchStartY), node = nodeAt(p.x, p.y);
-        if (node) { var now = Date.now(); if (gLastTapNodeId === node.id && (now - gLastTapTime) < G_DBL_TAP_DELAY) { showCharInfo(node.id); gLastTapTime = 0; gLastTapNodeId = null; } else { gLastTapTime = now; gLastTapNodeId = node.id; } }
-        else { gLastTapTime = 0; gLastTapNodeId = null; }
+        if (node) {
+          var now = Date.now();
+          if (gLastTapNodeId === node.id && (now - gLastTapTime) < G_DBL_TAP_DELAY) {
+            // 双击 = 查看角色信息（恒定行为，不加别的分叉）+ 顺手聚焦
+            showCharInfo(node.id);
+            setGFocus(node.id);
+            gLastTapTime = 0; gLastTapNodeId = null;
+          } else {
+            // 单击 = 聚焦高亮（与桌面版语义一致）
+            toggleGFocus(node.id);
+            gLastTapTime = now; gLastTapNodeId = node.id;
+          }
+        } else {
+          // 点空白 = 取消聚焦
+          clearGFocus();
+          gLastTapTime = 0; gLastTapNodeId = null;
+        }
       }
       if (gDragNode) { gDragNode.fixed = false; gDragNode = null; }
       gPanning = false; gLastTouchDist = 0;
@@ -2549,16 +2682,33 @@ VM.relations = (function() {
   function onMouseDown(e) {
     var rect = gCanvas.getBoundingClientRect(), x = e.clientX - rect.left, y = e.clientY - rect.top;
     var p = screenToCanvas(x, y), node = nodeAt(p.x, p.y);
-    if (node) { gDragNode = node; node.fixed = true; gDragging = true; }
-    else { gPanning = true; gLastX = x; gLastY = y; }
+    gMousePanMoved = false;
+    if (node) {
+      gDragNode = node; node.fixed = true; gDragging = true;
+      gMouseDownNodeX = node.x; gMouseDownNodeY = node.y;   // 判断是否算"拖动"的基准
+    } else { gPanning = true; gLastX = x; gLastY = y; }
   }
   function onMouseMove(e) {
     if (!gDragging && !gPanning) return;
     var rect = gCanvas.getBoundingClientRect(), x = e.clientX - rect.left, y = e.clientY - rect.top;
     if (gDragNode) { var p = screenToCanvas(x, y); gDragNode.x = p.x; gDragNode.y = p.y; graphDraw(); }
-    else if (gPanning) { gOffsetX += x - gLastX; gOffsetY += y - gLastY; gLastX = x; gLastY = y; graphDraw(); }
+    else if (gPanning) {
+      if (Math.abs(x - gLastX) > 3 || Math.abs(y - gLastY) > 3) gMousePanMoved = true;
+      gOffsetX += x - gLastX; gOffsetY += y - gLastY; gLastX = x; gLastY = y; graphDraw();
+    }
   }
-  function onMouseUp() { if (gDragNode) { gDragNode.fixed = false; gDragNode = null; } gDragging = false; gPanning = false; }
+  function onMouseUp() {
+    if (gDragNode) {
+      // 拖动过半个身位才算"拖"，否则按点击处理（避免想点却因手抖变成拖动、
+      // 结果既没聚焦又挪了位置）。
+      var moved = Math.abs(gDragNode.x - gMouseDownNodeX) > 3 || Math.abs(gDragNode.y - gMouseDownNodeY) > 3;
+      if (!moved) toggleGFocus(gDragNode.id);
+      gDragNode.fixed = false; gDragNode = null;
+    } else if (gPanning && !gMousePanMoved) {
+      clearGFocus();   // 点空白取消聚焦
+    }
+    gDragging = false; gPanning = false; gMousePanMoved = false;
+  }
   function onWheel(e) { e.preventDefault(); gScale = Math.max(0.3, Math.min(3, gScale * (e.deltaY < 0 ? 1.1 : 0.9))); graphDraw(); }
 
   // ---- 节点头像：把 face_crop.img 指定的那张图按 face_crop 裁成圆形画布并缓存 ----
@@ -2711,7 +2861,8 @@ VM.relations = (function() {
     moveRelUp: moveRelUp, moveRelDown: moveRelDown,
     focusRelation: focusRelation,
     graphZoom: graphZoom, graphReset: graphReset,
-    graphRedraw: graphDraw
+    graphRedraw: graphDraw,
+    setGFocus: setGFocus, clearGFocus: clearGFocus
   };
 })();
 
@@ -2724,6 +2875,16 @@ function openCharDetailFromStats(id) {
   if (id == null) return;
   navigateTo('index');                       // 会触发 VM.index.init()（首次）或 refresh()
   if (VM.index && VM.index.openDetailModal) VM.index.openDetailModal(id);
+}
+
+// 统计页「关系度排行」点人名：切到关系网视图并聚焦该角色（高亮 ta 的家族 + 有关系的人）。
+// 与上方 openCharDetailFromStats 区分：这里走关系网，不打开角色详情弹窗。
+function openRelationFocusFromStats(id) {
+  if (id == null) return;
+  navigateTo('relations');                   // 触发 VM.relations.init()（首次）
+  if (VM.relations && VM.relations.setGFocus) {
+    VM.relations.setGFocus(id, { scrollToGraph: true });
+  }
 }
 
 function openWorldDetailFromStats(id) {
@@ -2983,7 +3144,7 @@ VM.stats = (function() {
       html += panel('⭐ 关系度排行', '含同家族 · 两端计次',
         '<div class="stats-rank-list">' + R.top_degree.map(function(it, i) {
           var clickable = (it.id != null);
-          var oc = clickable ? ' onclick="openCharDetailFromStats(' + it.id + ')"' : '';
+          var oc = clickable ? ' onclick="openRelationFocusFromStats(' + it.id + ')"' : '';
           return '<div class="stats-rank-row' + (clickable ? ' tappable' : '') + '"' + oc + '>' +
             '<span class="stats-rank-no">' + (i + 1) + '</span>' +
             '<span class="stats-rank-name">' + esc(it.name) + '</span>' +

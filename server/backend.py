@@ -1288,7 +1288,7 @@ def global_search(q: str = ""):
 # 总览统计 API
 # ============================================================
 #
-# 口径说明（三端必须保持一致，改这里要同步改 desktop-offline/api-shim.js）：
+# 口径说明（手机版必须保持一致，改这里要同步改 android-app 的 api-shim.js computeStats）：
 #   - 空字段（空串 / 只有空白）一律归入「未填写」。
 #   - 性别正常化为 男 / 女 / 其他 / 未填写；写了别的文字归「其他」。
 #   - 存在状态除空值归「存在」外，其余按原值分桶（"已消逝" / "普通人" 等）。
@@ -1375,7 +1375,7 @@ def _round1(value) -> float:
     """保留 1 位小数，**远离零** 舍入。
     不能用内置 round()：它是银行家舍入（四舍六入五成双），恰好落在 .x5 的值会与
     JS 的 Math.round 差 1 个末位（实测 cohesion 31.25 → Py round 31.2 / JS 31.3）。
-    前端 api-shim.js 的 statsRound1() 做同样处理，两边必须一致。
+    手机版 api-shim.js 的 statsRound1() 做同样处理，两边必须一致。
     实现与 JS 的 (v<0 ? -Math.round(-v*10) : Math.round(v*10))/10 完全对应。"""
     v = float(value or 0) * 10
     scaled = math.floor(v + 0.5) if v >= 0 else math.ceil(v - 0.5)
@@ -1823,7 +1823,7 @@ def sync_replace_all(payload: SyncPayload):
         values = [w[col] for col in cols]
         cursor.execute(f"INSERT INTO world_buildings ({col_names}) VALUES ({placeholders})", values)
 
-    # 替换关系（过滤掉 api-shim 添加的 from_name / to_name）
+    # 替换关系（过滤掉前端附带的展示字段 from_name / to_name，它们不是数据库列）
     cursor.execute("DELETE FROM relations")
     for r in payload.relations:
         r = {k: v for k, v in r.items() if k not in ("from_name", "to_name")}
@@ -1845,9 +1845,7 @@ def sync_replace_all(payload: SyncPayload):
 
 @app.get("/index")
 def serve_index_page():
-    # 与离线版 main.go 的 routeMap["/index"] 对齐。统计页「角色之最」「关系度排行」
-    # 生成的是 /index?char=ID；缺了这条路由在线版会 404（离线版因为 routeMap 里
-    # 有 "/index" 且不比对 query，所以一直正常）。
+    # 统计页「角色之最」「关系度排行」生成的是 /index?char=ID；缺了这条路由会 404。
     return FileResponse(os.path.join(DESKTOP_DIR, "index.html"))
 
 
