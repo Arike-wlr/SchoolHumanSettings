@@ -1401,7 +1401,11 @@ VM.worldview = (function() {
   // 用户自己又翻了别的文档 → 标记已被 abandonDocReturnTo 清掉，这里什么都不做（只关弹窗）。
   function onDocViewerClosed(closedName) {
     if (docReturnTo == null) return;
-    if (docReturnDocName && closedName && closedName !== docReturnDocName) {
+    // closedName 来自 currentViewFile，是编码态（openViewer 收到的是 encodeURIComponent 后的名字）；
+    // docReturnDocName 存的是原始文件名 —— 比之前先解码，否则永远判成「不是同一份」。
+    var closedRaw = closedName || '';
+    try { closedRaw = decodeURIComponent(closedRaw); } catch (e) {}
+    if (docReturnDocName && closedRaw && closedRaw !== docReturnDocName) {
       abandonDocReturnTo();     // 看的不是当初那份，别把用户弹走
       return;
     }
@@ -1416,7 +1420,11 @@ VM.worldview = (function() {
   }
 
   // 清掉「关掉文档就返回」的意图（用户自己翻了别的文档时调）。
-  function abandonDocReturnTo() {
+  // 带 docName 时只在「打开的不是当初登记的那份」才清；
+  // 不带参数则无条件清（用于其它明确的放弃场景）。
+  function abandonDocReturnTo(docName) {
+    if (docReturnTo == null) return;
+    if (docName != null && docReturnDocName && docName === docReturnDocName) return;
     docReturnTo = null;
     docReturnDocName = '';
   }
