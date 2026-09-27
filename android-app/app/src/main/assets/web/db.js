@@ -110,6 +110,12 @@ function openDB() {
       }
     };
   });
+  // 首次调用（_db 与 _dbOpen 皆为空）走的正是这条路径，必须把在途的打开请求 return，
+  // 否则调用方 await 到 undefined，紧接着 db.transaction 抛
+  //   TypeError: Cannot read properties of undefined (reading 'transaction')
+  // 表现为「冷启动后第一个访问 IndexedDB 的请求失败、第二个才成功」。
+  // 上面两条 return 走不到这里，所以这个 return 不能省。
+  return _dbOpen;
 }
 
 // 通用：事务包装
