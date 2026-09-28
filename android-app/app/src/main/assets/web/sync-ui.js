@@ -245,13 +245,17 @@
   }
 
   function openSyncModal() {
+    if (!AppNavigation.isInternal()) return AppNavigation.enter('syncOverlay', openSyncModal);
     document.getElementById('syncOverlay').classList.add('active');
     loadLocalStats();
   }
   function closeSyncModal() {
+    if (!AppNavigation.isInternal()) return AppNavigation.close('syncOverlay');
     document.getElementById('syncOverlay').classList.remove('active');
   }
   window.closeSyncModal = closeSyncModal;
+  AppNavigation.register('syncOverlay', { dispose: closeSyncModal });
+  AppNavigation.register('syncConfirmOverlay', { dispose: cancelSyncConfirm });
 
   async function loadLocalStats() {
     try {
@@ -616,6 +620,8 @@
   }
 
   async function showSyncConfirm(direction) {
+    if (!AppNavigation.isInternal()) return AppNavigation.enter('syncConfirmOverlay', function () { return showSyncConfirm(direction); });
+    const navigationToken = AppNavigation.token();
     const status = document.getElementById('syncStatus');
     status.textContent = '正在计算差异...';
     status.className = 'sync-status';
@@ -687,6 +693,7 @@
       </div>
     `;
 
+    if (!AppNavigation.isCurrent(navigationToken)) return;
     let overlay = document.getElementById('syncConfirmOverlay');
     if (!overlay) {
       overlay = document.createElement('div');
@@ -705,6 +712,7 @@
   }
 
   function cancelSyncConfirm() {
+    if (!AppNavigation.isInternal()) return AppNavigation.close('syncConfirmOverlay');
     const overlay = document.getElementById('syncConfirmOverlay');
     if (overlay) overlay.classList.remove('active');
     pendingSyncAction = null;
@@ -719,7 +727,7 @@
     if (blockKey && blockKey !== 'all') {
       scope = scopeFromKeys([blockKey]);
     }
-    cancelSyncConfirm();
+    await cancelSyncConfirm();
     if (direction === 'download') await doDownloadExecute(scope, blockKey);
     else if (direction === 'upload') await doUploadExecute(scope, blockKey);
   }

@@ -872,7 +872,21 @@ function stripDerivedThumbs(list) {
 
 // 把备份交给原生落盘。
 // 优先走分片接口（新版原生）：JS 一侧不再持有整份字符串，原生一侧也不再有等大的副本。
+let _nativeBackupInFlight = null;
 function writeBackupToNative() {
+  // Native backup uses a single temporary file. Serialize visibility, scheduled
+  // and explicit exit backups so one writer cannot abort another writer.
+  const previous = _nativeBackupInFlight || Promise.resolve();
+  const next = previous.catch(function () {}).then(writeBackupToNativeNow);
+  _nativeBackupInFlight = next;
+  next.finally(function () { if (_nativeBackupInFlight === next) _nativeBackupInFlight = null; }).catch(function () {});
+  return next;
+}
+function flushBackupForExit() {
+  if (_backupTimer) { clearTimeout(_backupTimer); _backupTimer = null; }
+  return writeBackupToNative();
+}
+function writeBackupToNativeNow() {
   const A = window.Android;
   if (!A) return Promise.resolve();
   if (A.beginBackup && A.appendBackup && A.endBackup) {
@@ -903,7 +917,7 @@ function scheduleBackup() {
 
 // 页面切后台时立即备份，确保退出前数据已落盘
 document.addEventListener('visibilitychange', function () {
-  if (document.visibilityState === 'hidden' && window.Android) {
+  if (document.visibilityState === 'hidden' && window.Android && !window.navigationExitReady) {
     if (_backupTimer) { clearTimeout(_backupTimer); _backupTimer = null; }
     writeBackupToNative().catch(function () { });
   }

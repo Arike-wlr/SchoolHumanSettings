@@ -32,10 +32,7 @@ function themeVar(name, fallback) {
 }
 document.addEventListener('DOMContentLoaded', function () {
   applyTheme(document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light');
-  // Esc 关闭「导出全部」确认框（桌面习惯；手机端主要是点取消/遮罩）
-  document.addEventListener('keydown', function (e) {
-    if (e.key === 'Escape') closeExportAllConfirm();
-  });
+
 });
  function safeImageSrc(src) {
    // img:// 引用是本地图片仓库的内容指纹，这里换算成 WebView 能直接加载的 https 地址
@@ -84,10 +81,12 @@ function mapRelExport(r) {
 // 全局导出：角色 + 世界观 + 关系 汇总到一个 JSON 文件（各分区内容与单独导出完全一致）
 // 点击「导出全部」先弹确认框，用户点「确定导出」才真正下载（与桌面端一致）
 function openExportAllConfirm() {
+  if (!AppNavigation.isInternal()) return AppNavigation.enter('exportAllOverlay', openExportAllConfirm);
   var ov = document.getElementById('exportAllOverlay');
   if (ov) ov.classList.add('active');
 }
 function closeExportAllConfirm() {
+  if (!AppNavigation.isInternal()) return AppNavigation.close('exportAllOverlay');
   var ov = document.getElementById('exportAllOverlay');
   if (ov) ov.classList.remove('active');
 }
@@ -95,6 +94,7 @@ function confirmExportAll() {
   closeExportAllConfirm();
   exportAllData();
 }
+AppNavigation.register('exportAllOverlay', { dispose: closeExportAllConfirm });
 window.openExportAllConfirm = openExportAllConfirm;
 window.closeExportAllConfirm = closeExportAllConfirm;
 window.confirmExportAll = confirmExportAll;
@@ -264,7 +264,15 @@ var currentView = 'home';
 var viewInited = { home: true, index: false, worldview: false, relations: false, documents: false, stats: false };
 
 function navigateTo(name) {
-  if (currentView === name) return;
+  if (currentView === name) return Promise.resolve();
+  return AppNavigation.enter('view:' + name, function () {
+    AppNavigation.suspendLayers();
+    var ready = renderView(name);
+    window.scrollTo(0, 0);
+    return ready;
+  });
+}
+function renderView(name, refresh) {
   document.getElementById('view-' + currentView).style.display = 'none';
   document.getElementById('view-' + name).style.display = '';
   currentView = name;
@@ -283,11 +291,12 @@ function navigateTo(name) {
 
   // home 是静态视图，没有对应的 VM 模块，这里必须容错：
   // 否则每次返回首页都会抛 "Cannot read properties of undefined (reading 'refresh')"。
+  if (refresh === false) return;
   if (!viewInited[name]) {
     viewInited[name] = true;
-    if (VM[name] && VM[name].init) VM[name].init();
+    if (VM[name] && VM[name].init) return VM[name].init();
   } else if (VM[name] && VM[name].refresh) {
-    VM[name].refresh();
+    return VM[name].refresh();
   }
 }
 
@@ -295,6 +304,12 @@ function navigateTo(name) {
    视图模块 VM
    ============================================================ */
 var VM = {};
+function formNavigationSignature(id, extra) {
+  var form = document.getElementById(id);
+  return JSON.stringify([Array.prototype.map.call(form.elements, function (el) {
+    return el.type === 'file' ? '' : el.value;
+  }), extra || null]);
+}
 
 // 同步完成后只刷新当前视图；进入其它视图时仍沿用其既有 refresh 入口。
 function refreshCurrentView() {
@@ -316,10 +331,7 @@ VM.index = (function() {
   var detailCharId = null;
   var detailImages = [];
   var detailImageIdx = 0;
-  var editReturnToDetail = null;   // 从卡片详情进入编辑时记下 id，保存/取消后回到该卡片
-  // 从统计页榜单点进来的：记下来源视图名，关掉详情弹窗后切回该视图
-  // （Android 是单页应用，不走 URL，只能靠内存里传这个标记，与 [[文档]] 链接的返回语义一致）。
-  var detailReturnView = null;
+  var editBaseline = "";
   var loadGeneration = 0;
   var loadedRevision = -1;   // 已加载完成的数据版本（同版本返回不再查询/重绘）
   var loadingRevision = -1;  // 同版本请求在途标记，避免重复发起
@@ -668,6 +680,7 @@ VM.index = (function() {
     });
   }
 
+  var navigationLoad = null;
   function loadCharacters(force) {
     var revision = window.appDataRevision || 0;
     // 未变更返回：同版本数据已经加载过，直接沿用内存数据与现有 DOM。
@@ -675,11 +688,11 @@ VM.index = (function() {
       document.getElementById('indexLoadingState').style.display = 'none';
       return;
     }
-    if (!force && loadingRevision === revision) return;   // 同版本请求已在途
+    if (!force && loadingRevision === revision) return navigationLoad;   // 同版本请求已在途
     loadingRevision = revision;
     var generation = ++loadGeneration;
     // P06：列表只需要"列表字段 + 首图缩略图 + 图数"，显式请求轻量投影。
-    fetch(API + '?projection=list').then(function(r){return r.json();}).then(function(data){
+    return navigationLoad = fetch(API + '?projection=list').then(function(r){return r.json();}).then(function(data){
       if (generation !== loadGeneration || revision !== (window.appDataRevision || 0)) return;
       loadingRevision = -1;
       allCharacters = data;
@@ -698,17 +711,21 @@ VM.index = (function() {
   }
 
   function openCreateModal() {
-    editReturnToDetail = null;
+    if (!AppNavigation.isInternal()) return AppNavigation.enter('indexModalOverlay', function () { return openCreateModal(); });
     document.getElementById('indexModalTitle').textContent='添加新角色';
     document.getElementById('indexSubmitBtn').textContent='确认添加';
     document.getElementById('indexEditId').value='';
     document.getElementById('indexCharForm').reset();
     resetImageUpload();
     document.getElementById('indexModalOverlay').classList.add('active');
+    editBaseline = editSignature();
   }
 
   function openEditModal(id) {
-    fetch(API+'/'+id).then(function(r){return r.json();}).then(function(c){
+    if (!AppNavigation.isInternal()) return AppNavigation.enter('indexModalOverlay', function () { return openEditModal(id); });
+    var navigationToken = AppNavigation.token();
+    return fetch(API+'/'+id).then(function(r){if (!r.ok) throw new Error("内容不存在"); return r.json();}).then(function(c){
+      if (!AppNavigation.isCurrent(navigationToken)) return;
       document.getElementById('indexModalTitle').textContent='编辑角色';
       document.getElementById('indexSubmitBtn').textContent='保存修改';
       document.getElementById('indexEditId').value=c.id;
@@ -731,10 +748,11 @@ VM.index = (function() {
       currentFaceCrop=c.face_crop||'';
       renderImagePreview();
       document.getElementById('indexModalOverlay').classList.add('active');
-    }).catch(function(){showToast('获取数据失败','error');});
+    editBaseline = editSignature();
+    });
   }
 
-  var _autoSaveInProgress = false;
+
   function doSubmitFinal(editId, data) {
     // currentImageUrls 已含新图上传后的完整顺序？—— 否：新图 URL 在 data.newUrls，
     // 这里把它拼到 currentImageUrls 之后，与 renderImagePreview 的下标口径一致。
@@ -759,25 +777,19 @@ VM.index = (function() {
     }
     var url=editId?API+'/'+editId:API;
     var method=editId?'PUT':'POST';
-    fetch(url,{method:method,headers:{'Content-Type':'application/json'},body:JSON.stringify(data)}).then(function(r){
+    return fetch(url,{method:method,headers:{'Content-Type':'application/json'},body:JSON.stringify(data)}).then(function(r){
       if(!r.ok)throw new Error();
-      _autoSaveInProgress = true;
-      closeModal();resetImageUpload();markAppDataChanged();loadCharacters();
+      markAppDataChanged();
       showToast(editId?'已更新':'已创建','success');
-      // 从卡片详情进入的编辑：保存后回到卡片详情，而不是退到列表
-      if (editReturnToDetail) {
-        var backId = editReturnToDetail;
-        editReturnToDetail = null;
-        openDetailModal(backId);
-      }
-      setTimeout(function(){ _autoSaveInProgress = false; }, 800);
-    }).catch(function(){showToast('操作失败','error');});
+      return closeModal();
+    });
   }
 
   function submitForm(e) {
     e.preventDefault();
+    return AppNavigation.save(async function () {
     var form=document.getElementById('indexCharForm');
-    if(!form.checkValidity()){form.reportValidity();return;}
+    if(!form.checkValidity()){form.reportValidity();showToast('请填写完整后再返回，或点取消放弃修改','error');return false;}
     var editId=document.getElementById('indexEditId').value;
     var data={
       name:document.getElementById('indexName').value.trim(),
@@ -795,72 +807,57 @@ VM.index = (function() {
       status:document.getElementById('indexStatus').value,
       setting:document.getElementById('indexSetting').value.trim(),
     };
-    if(currentImageFiles.length===0){doSubmitFinal(editId,data);return;}
-    // nu 按下标填充而非 push：上传完成顺序不定，push 会让 newUrls 顺序与
-    // currentImageFiles 不一致，取脸参数里的下标就会错位到别的图。
-    var nu=new Array(currentImageFiles.length),pending=currentImageFiles.length,hasErr=false;
-    currentImageFiles.forEach(function(item,idx){
-      var fd=new FormData();fd.append('file',item.file);
-      fetch('/api/images/upload',{method:'POST',body:fd}).then(function(r){if(r.ok)return r.json();throw new Error();}).then(function(r){nu[idx]=r.image_url;}).catch(function(){hasErr=true;}).finally(function(){
-        pending--;
-        if(pending===0){
-          if(hasErr){showToast('图片上传失败，请重试','error');return;}
-          data.newUrls=nu;
-          doSubmitFinal(editId,data);
-        }
-      });
+    if(currentImageFiles.length===0)return doSubmitFinal(editId,data);
+    data.newUrls = await Promise.all(currentImageFiles.map(async function (item) {
+      var fd = new FormData(); fd.append('file', item.file);
+      var response = await fetch('/api/images/upload', { method: 'POST', body: fd });
+      if (!response.ok) throw new Error('图片上传失败，请重试');
+      return (await response.json()).image_url;
+    }));
+    return doSubmitFinal(editId, data);
     });
   }
 
   function openDeleteModal(id,name) {
+    if (!AppNavigation.isInternal()) return AppNavigation.enter('indexDeleteOverlay', function () { return openDeleteModal(id,name); });
     deleteTargetId=id;
     document.getElementById('indexDeleteName').textContent=name;
     document.getElementById('indexDeleteOverlay').classList.add('active');
   }
-  function closeDeleteModal(){document.getElementById('indexDeleteOverlay').classList.remove('active');deleteTargetId=null;}
+  function closeDeleteModal(){
+    if (!AppNavigation.isInternal()) return AppNavigation.close('indexDeleteOverlay');document.getElementById('indexDeleteOverlay').classList.remove('active');deleteTargetId=null;}
   function confirmDelete(){
     if(!deleteTargetId)return;
     fetch(API+'/'+deleteTargetId,{method:'DELETE'}).then(function(){
       closeDeleteModal();markAppDataChanged();loadCharacters();showToast('已删除','success');
     }).catch(function(){showToast('删除失败','error');});
   }
-  function closeModal(){
-    // 默认行为：直接关闭不保存
+  function closeModal() {
+    if (!AppNavigation.isInternal()) return AppNavigation.close('indexModalOverlay');
     document.getElementById('indexModalOverlay').classList.remove('active');
+    resetImageUpload();
   }
 
-  function closeModalAutoSave(){
-    // ✕ 按钮和点击遮罩时调用：表单有效则自动保存
-    if (_autoSaveInProgress) {
-      _autoSaveInProgress = false;
-      document.getElementById('indexModalOverlay').classList.remove('active');
-      return;
-    }
-    var form=document.getElementById('indexCharForm');
-    if (form.checkValidity()) {
-      submitForm({preventDefault:function(){}});
-      setTimeout(function(){
-        document.getElementById('indexModalOverlay').classList.remove('active');
-      }, 500);
-      return;
-    }
-    document.getElementById('indexModalOverlay').classList.remove('active');
+  function editSignature() {
+    return formNavigationSignature('indexCharForm', [currentImageUrls.map(imageRefSig), currentImageFiles.map(function (item) { return [item.file.name, item.file.size]; }), currentFaceCrop]);
+  }
+  function closeModalAutoSave() {
+    if (AppNavigation.isBusy()) return;
+    if (editSignature() === editBaseline) return closeModal();
+    return submitForm({ preventDefault: function () {} });
   }
 
   function cancelEdit() {
-    _autoSaveInProgress = false;
-    // 从卡片详情进入的编辑，取消后回到该卡片（与保存行为一致）
-    var backId = editReturnToDetail;
-    editReturnToDetail = null;
-    document.getElementById('indexModalOverlay').classList.remove('active');
-    if (backId) openDetailModal(backId);
+    if (!AppNavigation.isBusy()) return closeModal();
   }
   window.cancelEditIndex = cancelEdit;
   window.closeModalAutoSaveIndex = closeModalAutoSave;
 
   function openDetailModal(id, returnView){
-    detailReturnView = returnView || null;   // 传 'stats' 表示「从统计页跳来」，关掉详情要回去
-    fetch(API+'/'+id).then(function(r){return r.json();}).then(function(c){
+    if (!AppNavigation.isInternal()) return AppNavigation.enter('indexDetailOverlay', function () { return openDetailModal(id); });
+    var navigationToken = AppNavigation.token();
+    return fetch(API+'/'+id).then(function(r){if (!r.ok) throw new Error("内容不存在"); return r.json();}).then(function(c){
+      if (!AppNavigation.isCurrent(navigationToken)) return;
       detailCharId=c.id;
       document.getElementById('indexDetailName').textContent=c.name;
       detailImages=normalizeImages(c);detailImageIdx=0;renderDetailImage();
@@ -883,19 +880,23 @@ VM.index = (function() {
       if(c.setting)body+=detailSection('设定',c.setting);
       document.getElementById('indexDetailBody').innerHTML=body;
       document.getElementById('indexDetailOverlay').classList.add('active');
-    }).catch(function(){showToast('获取详情失败','error');});
+    });
   }
 
   function detailSection(label,value){return '<div class="detail-section"><div class="detail-label">'+label+'</div><div class="detail-value">'+esc(value)+'</div></div>';}
-  function closeDetailModal(){
+  function closeDetailModal() {
+    if (!AppNavigation.isInternal()) return AppNavigation.close('indexDetailOverlay');
     document.getElementById('indexDetailOverlay').classList.remove('active');
-    detailCharId=null;
-    // 从统计页点进来的：关掉详情 = 这次跳转结束，切回统计页（像 [[文档]] 链接那样关掉就跳回去）
-    var rv=detailReturnView;detailReturnView=null;
-    if(rv)navigateTo(rv);
+    detailCharId = null; detailImages = []; _detailView = null;
+    document.getElementById('indexDetailImage').innerHTML = '';
   }
-  // 注意：切去编辑框不算「关闭详情」，先清掉返回意图，别把用户弹回统计页
-  function detailEdit(){if(detailCharId){var id=detailCharId;editReturnToDetail=id;detailReturnView=null;closeDetailModal();openEditModal(id);}}
+  function detailEdit() {
+    var id = detailCharId;
+    if (id) return AppNavigation.enter('indexModalOverlay', function () {
+      document.getElementById('indexDetailOverlay').classList.remove('active');
+      return openEditModal(id);
+    });
+  }
 
   // 导出
   function updateExportButtons(){
@@ -904,8 +905,8 @@ VM.index = (function() {
     btn.disabled=selectedIds.size===0;
     btn.textContent=selectedIds.size>0?'确认导出 ('+selectedIds.size+')':'确认导出';
   }
-  function enterExportMode(){exportMode=true;selectedIds.clear();document.body.classList.add('export-mode');applyFilter();}
-  function cancelExport(){exportMode=false;selectedIds.clear();document.body.classList.remove('export-mode');applyFilter();}
+  function enterExportMode(){if (!AppNavigation.isInternal()) return AppNavigation.enter('indexExportMode', enterExportMode);exportMode=true;selectedIds.clear();document.body.classList.add('export-mode');applyFilter();}
+  function cancelExport(){if (!AppNavigation.isInternal()) return AppNavigation.close('indexExportMode');exportMode=false;selectedIds.clear();document.body.classList.remove('export-mode');applyFilter();}
   function handleCardClick(id){
     if(exportMode){
       var cb=document.querySelector('#charGrid .card[data-drag-id="'+id+'"] .card-check');
@@ -1031,9 +1032,22 @@ VM.index = (function() {
   document.getElementById('indexDeleteOverlay').addEventListener('click',function(e){if(e.target===this)closeDeleteModal();});
   document.getElementById('indexDetailOverlay').addEventListener('click',function(e){if(e.target===this)closeDetailModal();});
 
-  function init(){initTouchDrag();loadCharacters();}
+  function init(){initTouchDrag();return loadCharacters();}
 
+  AppNavigation.register('indexDetailOverlay', {
+    capture: function () { return { id: detailCharId, image: detailImageIdx }; },
+    restore: function (state) { return openDetailModal(state.id).then(function () { detailImageGo(state.image); }); }, dispose: closeDetailModal
+  });
+  AppNavigation.register('indexModalOverlay', { dispose: closeModal, back: closeModalAutoSave });
+  AppNavigation.register('indexDeleteOverlay', { dispose: closeDeleteModal });
+  AppNavigation.register('indexExportMode', { isOpen: function () { return currentView === 'index' && exportMode; }, dispose: cancelExport });
+  function captureNavigation() { return { region: activeRegion, search: document.getElementById('indexSearchInput').value, exporting: exportMode, selected: Array.from(selectedIds) }; }
+  function restoreNavigation(state) {
+    if (state) { activeRegion = state.region; document.getElementById('indexSearchInput').value = state.search; exportMode = state.exporting; selectedIds = new Set(state.selected); }
+    return Promise.resolve(loadCharacters()).then(function () { selectRegion(activeRegion); onSearch(); document.body.classList.toggle('export-mode', exportMode); });
+  }
   return {
+    captureNavigation: captureNavigation, restoreNavigation: restoreNavigation,
     init:init, refresh:loadCharacters,
     onSearch:onSearch, clearSearch:clearSearch, selectRegion:selectRegion,
     openCreateModal:openCreateModal, openEditModal:openEditModal, submitForm:submitForm,
@@ -1059,16 +1073,10 @@ VM.worldview = (function() {
   var activeCategory = '全部';
   var deleteTargetId = null;
   var detailEntryId = null;
-  var editReturnToDetail = null;   // 从卡片详情进入编辑时记下 id，保存/取消后回到该卡片
-  // 从统计页榜单点进来的：关掉详情弹窗后切回该视图（与 VM.index 同款返回语义）
-  var detailReturnView = null;
-  // 从世界观详情的 [[文档]] 链接跳到文档页时，记下来源条目与文档名，
-  // 用户关掉文档查看器后据此切回「刚刚在看的那条设定」。
-  var docReturnTo = null;
-  var docReturnDocName = '';
+  var editBaseline = "";
   var selectedIds = new Set();
   var exportMode = false;
-  var _autoSaveInProgress = false;
+
   var loadGeneration = 0;
   var loadedKey = null;    // "大类@数据版本"：同一版本同一大类返回时不重新查询/重绘
   var loadingKey = null;
@@ -1077,6 +1085,7 @@ VM.worldview = (function() {
   var _tdEnabled = false, _tdEl = null, _tdGhost = null, _tdIdx = -1;
   var _tdStartY = 0, _tdStartX = 0, _tdCurY = 0, _tdTimer = null, _tdListEl = null;
 
+  var navigationLoad = null;
   function loadEntries(force) {
     var revision = window.appDataRevision || 0;
     var key = activeMainCategory + '@' + revision;
@@ -1084,11 +1093,11 @@ VM.worldview = (function() {
       document.getElementById('worldLoadingState').style.display = 'none';
       return;
     }
-    if (!force && loadingKey === key) return;
+    if (!force && loadingKey === key) return navigationLoad;
     loadingKey = key;
     var generation = ++loadGeneration;
     var q = activeMainCategory ? '?main_category=' + encodeURIComponent(activeMainCategory) : '';
-    fetch(API + q).then(function(r) { return r.json(); }).then(function(data) {
+    return navigationLoad = fetch(API + q).then(function(r) { return r.json(); }).then(function(data) {
       if (generation !== loadGeneration || revision !== (window.appDataRevision || 0)) return;
       loadingKey = null;
       allEntries = data;
@@ -1241,7 +1250,7 @@ VM.worldview = (function() {
   }
 
   function openCreateModal() {
-    editReturnToDetail = null;
+    if (!AppNavigation.isInternal()) return AppNavigation.enter('worldModalOverlay', function () { return openCreateModal(); });
     document.getElementById('worldModalTitle').textContent = '添加新设定';
     document.getElementById('worldSubmitBtn').textContent = '确认添加';
     document.getElementById('worldEditId').value = '';
@@ -1249,10 +1258,14 @@ VM.worldview = (function() {
     document.getElementById('worldEntryForm').reset();
     document.getElementById('worldCategoryGroup').style.display = (activeMainCategory === '人物背景故事') ? 'none' : '';
     document.getElementById('worldModalOverlay').classList.add('active');
+    editBaseline = formNavigationSignature('worldEntryForm');
   }
 
   function openEditModal(id) {
-    fetch(API + '/' + id).then(function(r) { return r.json(); }).then(function(e) {
+    if (!AppNavigation.isInternal()) return AppNavigation.enter('worldModalOverlay', function () { return openEditModal(id); });
+    var navigationToken = AppNavigation.token();
+    return fetch(API + '/' + id).then(function(r) { if (!r.ok) throw new Error("内容不存在"); return r.json(); }).then(function(e) {
+      if (!AppNavigation.isCurrent(navigationToken)) return;
       document.getElementById('worldModalTitle').textContent = '编辑设定';
       document.getElementById('worldSubmitBtn').textContent = '保存修改';
       document.getElementById('worldEditId').value = e.id;
@@ -1262,11 +1275,13 @@ VM.worldview = (function() {
       document.getElementById('worldContent').value = e.content || '';
       document.getElementById('worldCategoryGroup').style.display = (e.main_category === '人物背景故事') ? 'none' : '';
       document.getElementById('worldModalOverlay').classList.add('active');
-    }).catch(function() { showToast('获取数据失败', 'error'); });
+    editBaseline = formNavigationSignature('worldEntryForm');
+    });
   }
 
   function submitForm(e) {
     e.preventDefault();
+    return AppNavigation.save(function () {
     var editId = document.getElementById('worldEditId').value;
     var data = {
       main_category: document.getElementById('worldMainCategoryInput').value,
@@ -1277,29 +1292,23 @@ VM.worldview = (function() {
     if (!data.title) { showToast('标题不能为空', 'error'); return; }
     var url = editId ? API + '/' + editId : API;
     var method = editId ? 'PUT' : 'POST';
-    fetch(url, { method: method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }).then(function(r) {
+    return fetch(url, { method: method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }).then(function(r) {
       if (!r.ok) throw new Error();
-      _autoSaveInProgress = true;
-      closeModal();
       markAppDataChanged();
-      loadEntries();
       showToast(editId ? '已更新' : '已创建', 'success');
-      // 从卡片详情进入的编辑：保存后回到卡片详情，而不是退到列表
-      if (editReturnToDetail) {
-        var backId = editReturnToDetail;
-        editReturnToDetail = null;
-        openDetailModal(backId);
-      }
-      setTimeout(function() { _autoSaveInProgress = false; }, 800);
-    }).catch(function() { showToast('操作失败', 'error'); });
+      return closeModal();
+    });
+    });
   }
 
   function openDeleteModal(id, name) {
+    if (!AppNavigation.isInternal()) return AppNavigation.enter('worldDeleteOverlay', function () { return openDeleteModal(id, name); });
     deleteTargetId = id;
     document.getElementById('worldDeleteName').textContent = name;
     document.getElementById('worldDeleteOverlay').classList.add('active');
   }
-  function closeDeleteModal() { document.getElementById('worldDeleteOverlay').classList.remove('active'); deleteTargetId = null; }
+  function closeDeleteModal() {
+    if (!AppNavigation.isInternal()) return AppNavigation.close('worldDeleteOverlay'); document.getElementById('worldDeleteOverlay').classList.remove('active'); deleteTargetId = null; }
   function confirmDelete() {
     if (!deleteTargetId) return;
     fetch(API + '/' + deleteTargetId, { method: 'DELETE' }).then(function() {
@@ -1307,41 +1316,26 @@ VM.worldview = (function() {
     }).catch(function() { showToast('删除失败', 'error'); });
   }
   function closeModal() {
+    if (!AppNavigation.isInternal()) return AppNavigation.close('worldModalOverlay');
     document.getElementById('worldModalOverlay').classList.remove('active');
   }
 
   function closeModalAutoSave() {
-    if (_autoSaveInProgress) {
-      _autoSaveInProgress = false;
-      document.getElementById('worldModalOverlay').classList.remove('active');
-      return;
-    }
-    var title = document.getElementById('worldTitle').value.trim();
-    var content = document.getElementById('worldContent').value.trim();
-    if (title || content) {
-      submitForm({ preventDefault: function() {} });
-      setTimeout(function() {
-        document.getElementById('worldModalOverlay').classList.remove('active');
-      }, 500);
-      return;
-    }
-    document.getElementById('worldModalOverlay').classList.remove('active');
+    if (AppNavigation.isBusy()) return;
+    if (formNavigationSignature('worldEntryForm') === editBaseline) return closeModal();
+    return submitForm({ preventDefault: function () {} });
   }
 
-  function cancelEdit() {
-    _autoSaveInProgress = false;
-    // 从卡片详情进入的编辑，取消后回到该卡片（与保存行为一致）
-    var backId = editReturnToDetail;
-    editReturnToDetail = null;
-    document.getElementById('worldModalOverlay').classList.remove('active');
-    if (backId) openDetailModal(backId);
+  function cancelEdit() { if (!AppNavigation.isBusy()) return closeModal();
   }
   window.cancelEditWorld = cancelEdit;
   window.closeModalAutoSaveWorld = closeModalAutoSave;
 
   function openDetailModal(id, returnView) {
-    detailReturnView = returnView || null;   // 传 'stats' 表示「从统计页跳来」，关掉详情要回去
-    fetch(API + '/' + id).then(function(r) { return r.json(); }).then(function(e) {
+    if (!AppNavigation.isInternal()) return AppNavigation.enter('worldDetailOverlay', function () { return openDetailModal(id); });
+    var navigationToken = AppNavigation.token();
+    return fetch(API + '/' + id).then(function(r) { if (!r.ok) throw new Error("内容不存在"); return r.json(); }).then(function(e) {
+      if (!AppNavigation.isCurrent(navigationToken)) return;
       detailEntryId = e.id;
       document.getElementById('worldDetailTitle').textContent = e.title;
       var body = '';
@@ -1350,17 +1344,20 @@ VM.worldview = (function() {
       if (e.content) body += '<div class="detail-section"><div class="detail-label">内容</div><div class="detail-value">' + renderContentWithDocLinks(e.content) + '</div></div>';
       document.getElementById('worldDetailBody').innerHTML = body || '<p style="color:var(--text-light);text-align:center;padding:20px;">暂无内容</p>';
       document.getElementById('worldDetailOverlay').classList.add('active');
-    }).catch(function() { showToast('获取详情失败', 'error'); });
+    });
   }
   function closeDetailModal() {
+    if (!AppNavigation.isInternal()) return AppNavigation.close('worldDetailOverlay');
     document.getElementById('worldDetailOverlay').classList.remove('active');
     detailEntryId = null;
-    // 从统计页点进来的：关掉详情 = 这次跳转结束，切回统计页（像 [[文档]] 链接那样关掉就跳回去）
-    var rv = detailReturnView; detailReturnView = null;
-    if (rv) navigateTo(rv);
   }
-  // 注意：切去编辑框不算「关闭详情」，先清掉返回意图，别把用户弹回统计页
-  function detailEdit() { if (detailEntryId) { var id = detailEntryId; editReturnToDetail = id; detailReturnView = null; closeDetailModal(); openEditModal(id); } }
+  function detailEdit() {
+    var id = detailEntryId;
+    if (id) return AppNavigation.enter('worldModalOverlay', function () {
+      document.getElementById('worldDetailOverlay').classList.remove('active');
+      return openEditModal(id);
+    });
+  }
 
   // ====== 文档链接功能 ======
   // 渲染详情内容时把 [[doc:文件名|显示文字]] 或 [[文件名|显示文字]] 转成可点击链接
@@ -1382,55 +1379,15 @@ VM.worldview = (function() {
   // 同时登记「来源条目」，这样用户关掉文档后能回到刚刚那条世界观详情
   // （Android 是单页应用，不走 URL，只能靠内存里传这个标记）。
   function openDocFromLink(fname) {
-    // 记下来源：当前正在看的这条设定 + 触发跳转的文档名
-    docReturnTo = detailEntryId;
-    docReturnDocName = fname;
-    // 关闭所有世界观相关 modal
-    document.getElementById('worldDetailOverlay').classList.remove('active');
-    // 切到文档页
-    if (typeof navigateTo === 'function') navigateTo('documents');
-    // 给文档页一个短延时来初始化，然后打开查看器
-    setTimeout(function() {
-      if (VM.documents && VM.documents.openViewer) {
-        VM.documents.openViewer(encodeURIComponent(fname));
-      }
-    }, 350);
-  }
-
-  // 文档查看器关闭时回调：若这次是「从世界观详情点进来的」，就切回去并重开那条详情。
-  // 用户自己又翻了别的文档 → 标记已被 abandonDocReturnTo 清掉，这里什么都不做（只关弹窗）。
-  function onDocViewerClosed(closedName) {
-    if (docReturnTo == null) return;
-    // closedName 来自 currentViewFile，是编码态（openViewer 收到的是 encodeURIComponent 后的名字）；
-    // docReturnDocName 存的是原始文件名 —— 比之前先解码，否则永远判成「不是同一份」。
-    var closedRaw = closedName || '';
-    try { closedRaw = decodeURIComponent(closedRaw); } catch (e) {}
-    if (docReturnDocName && closedRaw && closedRaw !== docReturnDocName) {
-      abandonDocReturnTo();     // 看的不是当初那份，别把用户弹走
-      return;
-    }
-    var backId = docReturnTo;
-    // 文档往返只是中间过程：保留「从统计页跳来」的返回意图，回来后关掉详情仍应回统计页
-    var rv = detailReturnView;
-    abandonDocReturnTo();
-    if (typeof navigateTo === 'function') navigateTo('worldview');
-    setTimeout(function() {
-      if (VM.worldview && VM.worldview.openDetailModal) VM.worldview.openDetailModal(backId, rv);
-    }, 350);
-  }
-
-  // 清掉「关掉文档就返回」的意图（用户自己翻了别的文档时调）。
-  // 带 docName 时只在「打开的不是当初登记的那份」才清；
-  // 不带参数则无条件清（用于其它明确的放弃场景）。
-  function abandonDocReturnTo(docName) {
-    if (docReturnTo == null) return;
-    if (docName != null && docReturnDocName && docName === docReturnDocName) return;
-    docReturnTo = null;
-    docReturnDocName = '';
+    return AppNavigation.enter('docViewerOverlay', function () {
+      navigateTo('documents');
+      return VM.documents.openViewer(encodeURIComponent(fname));
+    });
   }
 
   // 插入文档链接：弹出文档选择器
   function insertDocLink() {
+    if (!AppNavigation.isInternal()) return AppNavigation.enter('worldDocLinkOverlay', function () { return insertDocLink(); });
     var body = document.getElementById('worldDocLinkBody');
     body.innerHTML = '<p style="padding:16px;text-align:center;color:var(--text-light);">加载中…</p>';
     document.getElementById('worldDocLinkOverlay').classList.add('active');
@@ -1466,7 +1423,8 @@ VM.worldview = (function() {
     });
   }
 
-  function closeDocLinkPicker() { document.getElementById('worldDocLinkOverlay').classList.remove('active'); }
+  function closeDocLinkPicker() {
+    if (!AppNavigation.isInternal()) return AppNavigation.close('worldDocLinkOverlay'); document.getElementById('worldDocLinkOverlay').classList.remove('active'); }
 
   function pickDocLink(fname) {
     closeDocLinkPicker();
@@ -1486,8 +1444,8 @@ VM.worldview = (function() {
     }
   }
 
-  function enterExportMode() { exportMode = true; selectedIds.clear(); document.body.classList.add('export-mode'); applyFilter(); }
-  function cancelExport() { exportMode = false; selectedIds.clear(); document.body.classList.remove('export-mode'); applyFilter(); }
+  function enterExportMode() { if (!AppNavigation.isInternal()) return AppNavigation.enter('worldExportMode', enterExportMode); exportMode = true; selectedIds.clear(); document.body.classList.add('export-mode'); applyFilter(); }
+  function cancelExport() { if (!AppNavigation.isInternal()) return AppNavigation.close('worldExportMode'); exportMode = false; selectedIds.clear(); document.body.classList.remove('export-mode'); applyFilter(); }
   function handleCardClick(id) {
     if (exportMode) {
       var cb = document.querySelector('#entryGrid .card[data-drag-id="' + id + '"] .card-check');
@@ -1612,9 +1570,22 @@ VM.worldview = (function() {
   document.getElementById('worldDeleteOverlay').addEventListener('click', function(ev) { if (ev.target === this) closeDeleteModal(); });
   document.getElementById('worldDetailOverlay').addEventListener('click', function(ev) { if (ev.target === this) closeDetailModal(); });
 
-  function init() { initTouchDrag(); loadEntries(); }
+  function init() { initTouchDrag(); return loadEntries(); }
 
+  AppNavigation.register('worldDetailOverlay', { capture: function () { return detailEntryId; }, restore: openDetailModal, dispose: closeDetailModal });
+  AppNavigation.register('worldModalOverlay', { dispose: closeModal, back: closeModalAutoSave });
+  AppNavigation.register('worldDeleteOverlay', { dispose: closeDeleteModal });
+  AppNavigation.register('worldDocLinkOverlay', { dispose: closeDocLinkPicker });
+  AppNavigation.register('worldExportMode', { isOpen: function () { return currentView === 'worldview' && exportMode; }, dispose: cancelExport });
+  function captureNavigation() { return { main: activeMainCategory, category: activeCategory, search: document.getElementById('worldSearchInput').value, exporting: exportMode, selected: Array.from(selectedIds) }; }
+  function restoreNavigation(state) {
+    if (state) { activeMainCategory = state.main; activeCategory = state.category; document.getElementById('worldSearchInput').value = state.search; exportMode = state.exporting; selectedIds = new Set(state.selected); }
+    document.querySelectorAll('#view-worldview .main-cat-tab').forEach(function (el) { el.classList.toggle('active', el.dataset.main === activeMainCategory); });
+    document.getElementById('catTabs').style.display = activeMainCategory === '人物背景故事' ? 'none' : '';
+    return Promise.resolve(loadEntries()).then(function () { selectCategory(activeCategory); onSearch(); document.body.classList.toggle('export-mode', exportMode); });
+  }
   return {
+    captureNavigation: captureNavigation, restoreNavigation: restoreNavigation,
     init: init, refresh: loadEntries,
     onSearch: onSearch, clearSearch: clearSearch, selectMainCategory: selectMainCategory, selectCategory: selectCategory,
     openCreateModal: openCreateModal, openEditModal: openEditModal, submitForm: submitForm,
@@ -1625,8 +1596,6 @@ VM.worldview = (function() {
     openDetailModal: openDetailModal, selectMainCategory: selectMainCategory,
     getMainCategory: function () { return activeMainCategory; },
     insertDocLink: insertDocLink, closeDocLinkPicker: closeDocLinkPicker, pickDocLink: pickDocLink, openDocFromLink: openDocFromLink,
-    onDocViewerClosed: onDocViewerClosed,
-    abandonDocReturnTo: abandonDocReturnTo,
     handleCardClick: handleCardClick,
     enterExportMode: enterExportMode, cancelExport: cancelExport,
     toggleCardSelect: toggleCardSelect, toggleSelectAll: toggleSelectAll, confirmExport: confirmExport,
@@ -1658,7 +1627,7 @@ VM.documents = (function() {
   function loadFiles() {
     var generation = ++loadGeneration;
     var revision = window.appDataRevision || 0;
-    fetch(API).then(function(r) { return r.json(); }).then(function(files) {
+    return fetch(API).then(function(r) { return r.json(); }).then(function(files) {
       if (generation !== loadGeneration || revision !== (window.appDataRevision || 0)) return;
       renderFiles(files);
     }).catch(function() { showToast('加载失败', 'error'); });
@@ -1690,11 +1659,13 @@ VM.documents = (function() {
   }
 
   function openDeleteModal(en) {
+    if (!AppNavigation.isInternal()) return AppNavigation.enter('docDeleteOverlay', function () { return openDeleteModal(en); });
     deleteTarget = en;
     document.getElementById('docDeleteName').textContent = decodeURIComponent(en);
     document.getElementById('docDeleteOverlay').classList.add('active');
   }
-  function closeDeleteModal() { document.getElementById('docDeleteOverlay').classList.remove('active'); deleteTarget = null; }
+  function closeDeleteModal() {
+    if (!AppNavigation.isInternal()) return AppNavigation.close('docDeleteOverlay'); document.getElementById('docDeleteOverlay').classList.remove('active'); deleteTarget = null; }
   function confirmDelete() {
     if (!deleteTarget) return;
     fetch(API + '/' + deleteTarget, { method: 'DELETE' }).then(function() {
@@ -1704,11 +1675,9 @@ VM.documents = (function() {
   }
 
   function openViewer(en) {
+    if (!AppNavigation.isInternal()) return AppNavigation.enter('docViewerOverlay', function () { return openViewer(en); });
     var generation = ++viewerGeneration;
     var fn = decodeURIComponent(en);
-    // 用户自己点了别的文档：放弃「关掉就返回世界观详情」的语义，
-    // 免得他翻看完别的文档后被莫名其妙弹回去。
-    if (VM.worldview && VM.worldview.abandonDocReturnTo) VM.worldview.abandonDocReturnTo(fn);
     currentViewFile = en;
     var body = document.getElementById('docViewerBody');
     document.getElementById('docViewerTitle').textContent = fn;
@@ -1728,7 +1697,7 @@ VM.documents = (function() {
     }
     body.innerHTML = '<div class="viewer-loading"><div class="spinner"></div><div>加载中…</div></div>';
     document.getElementById('docViewerOverlay').classList.add('active');
-    fetch(API + '/' + en + '/view').then(function(r) {
+    return fetch(API + '/' + en + '/view').then(function(r) {
       if (!r.ok) return r.json().then(function(e) { throw new Error(e.detail || '加载失败'); });
       return r.json();
     }).then(function(data) {
@@ -1782,20 +1751,21 @@ VM.documents = (function() {
   }
 
   function closeViewer() {
+    if (!AppNavigation.isInternal()) return AppNavigation.close('docViewerOverlay');
+    ++viewerGeneration;
     document.getElementById('docViewerOverlay').classList.remove('active');
-    var closed = currentViewFile;
+    document.getElementById('docViewerBody').innerHTML = '';
     currentViewFile = '';
-    releaseViewerObjectUrl();   // 关闭时释放 Blob URL，避免长期占用内存
-    // 这次是「从世界观详情点 [[文档]] 进来的」→ 关掉文档就切回那条世界观详情。
-    // 回调内部会判断「用户是否又翻了别的文档」，该不返回时它自己会放弃。
-    if (VM.worldview && VM.worldview.onDocViewerClosed) VM.worldview.onDocViewerClosed(closed);
+    releaseViewerObjectUrl();
   }
 
   document.getElementById('docDeleteOverlay').addEventListener('click', function(ev) { if (ev.target === this) closeDeleteModal(); });
   document.getElementById('docViewerOverlay').addEventListener('click', function(ev) { if (ev.target === this) closeViewer(); });
 
-  function init() { loadFiles(); }
+  function init() { return loadFiles(); }
 
+  AppNavigation.register('docViewerOverlay', { capture: function () { return currentViewFile; }, restore: openViewer, dispose: closeViewer });
+  AppNavigation.register('docDeleteOverlay', { dispose: closeDeleteModal });
   return {
     init: init, refresh: loadFiles,
     onFileSelect: onFileSelect,
@@ -1816,7 +1786,8 @@ VM.relations = (function() {
   var activeType = '全部';
   var exportMode = false;
   var selectedIds = new Set();
-  var _autoSaveInProgress = false;
+  var editBaseline = "";
+  var navigationLoad = null;
   var REL_TYPES = ['CP', '单箭头', '继承记忆', '参与组建', '师生', '朋友', '冤家', '亲属'];
   // 全局搜索跳转：待定位的关系 id。数据异步加载完毕后由 renderRelList 消费。
   var _pendingFocusRelId = null;
@@ -1986,14 +1957,14 @@ VM.relations = (function() {
       resumeLayout();
       return;
     }
-    if (!force && loadingRevision === revision) return;
+    if (!force && loadingRevision === revision) return navigationLoad;
     loadingRevision = revision;
     var generation = ++loadGeneration;
     // 角色数据优先复用其它视图（如角色页）已加载的内存快照，不重复查询。
     // P06：关系名补全只需要 id/name/学校/家族 —— 请求 names 投影（list 投影同样满足）。
     var sharedChars = _getSharedCharacters(revision, 'names');
     var charsPromise = sharedChars ? Promise.resolve(sharedChars.slice()) : fetch(API_CHAR + '?projection=names').then(function(r) { return r.json(); });
-    Promise.all([fetch(API_REL).then(function(r) { return r.json(); }), charsPromise]).then(function(arr) {
+    return navigationLoad = Promise.all([fetch(API_REL).then(function(r) { return r.json(); }), charsPromise]).then(function(arr) {
       if (generation !== loadGeneration || revision !== (window.appDataRevision || 0)) return;
       loadingRevision = -1;
       allRelations = arr[0]; allCharacters = arr[1];
@@ -2106,6 +2077,7 @@ VM.relations = (function() {
   }
 
   function openCreateModal() {
+    if (!AppNavigation.isInternal()) return AppNavigation.enter('relModalOverlay', function () { return openCreateModal(); });
     populateCharSelects();
     document.getElementById('relModalTitle').textContent = '添加关系';
     document.getElementById('relSubmitBtn').textContent = '确认添加';
@@ -2113,9 +2085,11 @@ VM.relations = (function() {
     document.getElementById('relForm').reset();
     if (selectedFromCharId) { document.getElementById('relFromChar').value = selectedFromCharId; selectedFromCharId = null; }
     document.getElementById('relModalOverlay').classList.add('active');
+    editBaseline = formNavigationSignature('relForm');
   }
 
   function openEditModal(id) {
+    if (!AppNavigation.isInternal()) return AppNavigation.enter('relModalOverlay', function () { return openEditModal(id); });
     var r = allRelations.find(function(rel) { return rel.id === id; });
     if (!r) { showToast('未找到关系数据', 'error'); return; }
     populateCharSelects();
@@ -2127,10 +2101,12 @@ VM.relations = (function() {
     document.getElementById('relType').value = r.relation_type || '';
     document.getElementById('relDesc').value = r.description || '';
     document.getElementById('relModalOverlay').classList.add('active');
+    editBaseline = formNavigationSignature('relForm');
   }
 
   function submitForm(e) {
     e.preventDefault();
+    return AppNavigation.save(function () {
     var form = document.getElementById('relForm');
     if (!form.checkValidity()) { form.reportValidity(); return; }
     var editId = document.getElementById('relEditId').value;
@@ -2144,20 +2120,22 @@ VM.relations = (function() {
     };
     var url = editId ? API_REL + '/' + editId : API_REL;
     var method = editId ? 'PUT' : 'POST';
-    fetch(url, { method: method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }).then(function(r) {
+    return fetch(url, { method: method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }).then(function(r) {
       if (!r.ok) return r.json().then(function(e) { throw new Error(e.detail || '操作失败'); });
-      _autoSaveInProgress = true;
-      closeModal(); markAppDataChanged(); loadData(); showToast(editId ? '已更新' : '已创建', 'success');
-      setTimeout(function() { _autoSaveInProgress = false; }, 800);
-    }).catch(function(e) { showToast(e.message || '操作失败', 'error'); });
+      markAppDataChanged(); showToast(editId ? '已更新' : '已创建', 'success');
+      return closeModal();
+    });
+    });
   }
 
   function openDeleteModal(id, info) {
+    if (!AppNavigation.isInternal()) return AppNavigation.enter('relDeleteOverlay', function () { return openDeleteModal(id, info); });
     deleteTargetId = id;
     document.getElementById('relDeleteInfo').textContent = info;
     document.getElementById('relDeleteOverlay').classList.add('active');
   }
-  function closeDeleteModal() { document.getElementById('relDeleteOverlay').classList.remove('active'); deleteTargetId = null; }
+  function closeDeleteModal() {
+    if (!AppNavigation.isInternal()) return AppNavigation.close('relDeleteOverlay'); document.getElementById('relDeleteOverlay').classList.remove('active'); deleteTargetId = null; }
   function confirmDelete() {
     if (!deleteTargetId) return;
     fetch(API_REL + '/' + deleteTargetId, { method: 'DELETE' }).then(function() {
@@ -2165,30 +2143,17 @@ VM.relations = (function() {
     }).catch(function() { showToast('删除失败', 'error'); });
   }
   function closeModal() {
+    if (!AppNavigation.isInternal()) return AppNavigation.close('relModalOverlay');
     document.getElementById('relModalOverlay').classList.remove('active');
   }
 
   function closeModalAutoSave() {
-    if (_autoSaveInProgress) {
-      _autoSaveInProgress = false;
-      document.getElementById('relModalOverlay').classList.remove('active');
-      return;
-    }
-    var fromId = document.getElementById('relFromChar').value;
-    var toId = document.getElementById('relToChar').value;
-    if (fromId && toId) {
-      submitForm({ preventDefault: function() {} });
-      setTimeout(function() {
-        document.getElementById('relModalOverlay').classList.remove('active');
-      }, 500);
-      return;
-    }
-    document.getElementById('relModalOverlay').classList.remove('active');
+    if (AppNavigation.isBusy()) return;
+    if (formNavigationSignature('relForm') === editBaseline) return closeModal();
+    return submitForm({ preventDefault: function () {} });
   }
 
-  function cancelEdit() {
-    _autoSaveInProgress = false;
-    document.getElementById('relModalOverlay').classList.remove('active');
+  function cancelEdit() { if (!AppNavigation.isBusy()) return closeModal();
   }
   window.cancelEditRel = cancelEdit;
   window.closeModalAutoSaveRel = closeModalAutoSave;
@@ -2198,8 +2163,11 @@ VM.relations = (function() {
     return '<div class="oc-kv" style="display:flex;padding:7px 0;border-bottom:1px solid var(--border);gap:8px;"><span style="flex:0 0 84px;color:var(--text-light);font-size:.82rem;">' + esc(l) + '</span><span style="flex:1;font-size:.88rem;white-space:pre-wrap;line-height:1.5;word-break:break-word;">' + v + '</span></div>';
   }
   function showCharInfo(charId) {
+    if (!AppNavigation.isInternal()) return AppNavigation.enter('relInfoOverlay', function () { return showCharInfo(charId); });
     infoCharId = charId;
-    fetch(API_CHAR + '/' + charId).then(function(r) { return r.json(); }).then(function(c) {
+    var token = AppNavigation.token();
+    return fetch(API_CHAR + '/' + charId).then(function(r) { if (!r.ok) throw new Error("角色不存在"); return r.json(); }).then(function(c) {
+      if (!AppNavigation.isCurrent(token)) return;
       document.getElementById('relInfoName').textContent = c.name;
       var body = '<div style="padding:4px 0;">';
       body += infoRow('代表高校', esc(c.university));
@@ -2224,14 +2192,21 @@ VM.relations = (function() {
       body += '</div>';
       document.getElementById('relInfoBody').innerHTML = body || '<p style="color:var(--text-light);text-align:center;">暂无详细信息</p>';
       document.getElementById('relInfoOverlay').classList.add('active');
-    }).catch(function() { showToast('获取角色信息失败', 'error'); });
+    });
   }
   function startRelationFromInfo() {
-    if (infoCharId) { selectedFromCharId = infoCharId; closeInfoModal(); openCreateModal(); }
+    var id = infoCharId;
+    if (id) return AppNavigation.enter('relModalOverlay', function () {
+      selectedFromCharId = id;
+      document.getElementById('relInfoOverlay').classList.remove('active');
+      return openCreateModal();
+    });
   }
-  function closeInfoModal() { document.getElementById('relInfoOverlay').classList.remove('active'); infoCharId = null; }
+  function closeInfoModal() {
+    if (!AppNavigation.isInternal()) return AppNavigation.close('relInfoOverlay'); document.getElementById('relInfoOverlay').classList.remove('active'); infoCharId = null; }
 
   function openFamilyModal() {
+    if (!AppNavigation.isInternal()) return AppNavigation.enter('relFamilyOverlay', function () { return openFamilyModal(); });
     familyEditMap = {};
     allCharacters.forEach(function(c) { familyEditMap[c.id] = c.family || ''; });
     var af = new Set();
@@ -2252,7 +2227,8 @@ VM.relations = (function() {
     }
     document.getElementById('relFamilyOverlay').classList.add('active');
   }
-  function closeFamilyModal() { document.getElementById('relFamilyOverlay').classList.remove('active'); }
+  function closeFamilyModal() {
+    if (!AppNavigation.isInternal()) return AppNavigation.close('relFamilyOverlay'); document.getElementById('relFamilyOverlay').classList.remove('active'); }
   function saveFamilies() {
     var success = 0, fail = 0, pending = 0;
     for (var cid in familyEditMap) {
@@ -2299,8 +2275,8 @@ VM.relations = (function() {
     renderRelList();
   }
 
-  function enterExportMode() { exportMode = true; selectedIds.clear(); document.body.classList.add('export-mode'); renderRelList(); }
-  function cancelExport() { exportMode = false; selectedIds.clear(); document.body.classList.remove('export-mode'); renderRelList(); }
+  function enterExportMode() { if (!AppNavigation.isInternal()) return AppNavigation.enter('relExportMode', enterExportMode); exportMode = true; selectedIds.clear(); document.body.classList.add('export-mode'); renderRelList(); }
+  function cancelExport() { if (!AppNavigation.isInternal()) return AppNavigation.close('relExportMode'); exportMode = false; selectedIds.clear(); document.body.classList.remove('export-mode'); renderRelList(); }
   function toggleCardClick(id) {
     var cb = document.querySelector('.rel-card[data-rel-id="' + id + '"] .rel-check');
     if (cb) { cb.checked = !cb.checked; toggleCardSelect(id, cb.checked); }
@@ -2877,9 +2853,26 @@ VM.relations = (function() {
   document.getElementById('relInfoOverlay').addEventListener('click', function(ev) { if (ev.target === this) closeInfoModal(); });
   document.getElementById('relDeleteOverlay').addEventListener('click', function(ev) { if (ev.target === this) closeDeleteModal(); });
 
-  function init() { initTouchDrag(); loadData(); }
+  function init() { initTouchDrag(); return loadData(); }
 
+  AppNavigation.register('relModalOverlay', { dispose: closeModal, back: closeModalAutoSave });
+  AppNavigation.register('relDeleteOverlay', { dispose: closeDeleteModal });
+  AppNavigation.register('relInfoOverlay', { capture: function () { return infoCharId; }, restore: showCharInfo, dispose: closeInfoModal });
+  AppNavigation.register('relFamilyOverlay', { dispose: closeFamilyModal });
+  AppNavigation.register('relExportMode', { isOpen: function () { return currentView === 'relations' && exportMode; }, dispose: cancelExport });
+  function captureNavigation() {
+    return { type: activeType, search: document.getElementById('relSearchInput').value, exporting: exportMode, selected: Array.from(selectedIds), scale: gScale, x: gOffsetX, y: gOffsetY, focus: gFocusId };
+  }
+  function restoreNavigation(state) {
+    if (state) { activeType = state.type; document.getElementById('relSearchInput').value = state.search; exportMode = state.exporting; selectedIds = new Set(state.selected); }
+    return Promise.resolve(loadData()).then(function () {
+      if (state) { gScale = state.scale; gOffsetX = state.x; gOffsetY = state.y; setGFocus(state.focus); }
+      selectType(activeType); onSearch(); graphDraw();
+      document.body.classList.toggle('export-mode', exportMode);
+    });
+  }
   return {
+    captureNavigation: captureNavigation, restoreNavigation: restoreNavigation,
     init: init, refresh: loadData,
     onSearch: onSearch, clearSearch: clearSearch,
     openCreateModal: openCreateModal, openEditModal: openEditModal, submitForm: submitForm,
@@ -2897,46 +2890,24 @@ VM.relations = (function() {
   };
 })();
 
-// 从统计页榜单跳到对应详情（角色 / 世界观）。
-// Android 是单页应用，这里不新开页面，而是切视图 + 打开该条目的详情弹窗；
-// 并登记「来源 = 统计页」，用户关掉详情弹窗时切回统计页（像 [[文档]] 链接那样关掉就跳回去）。
-//   openCharDetail(id) —— 切到角色视图并打开该角色详情
-//   openWorldDetail(id) —— 先查该条目的 main_category，切好大类 tab，再打开详情
-// 两个入口都做了「条目不存在」容错：详情模块内部 fetch 失败会 toast，不会弹空窗。
+// Each shortcut is one logical destination, with the originating screen in history.
 function openCharDetailFromStats(id) {
-  if (id == null) return;
-  navigateTo('index');                       // 会触发 VM.index.init()（首次）或 refresh()
-  if (VM.index && VM.index.openDetailModal) VM.index.openDetailModal(id, 'stats');
+  return AppNavigation.enter('indexDetailOverlay', function () {
+    navigateTo('index');
+    return VM.index.openDetailModal(id);
+  });
 }
-
-// 统计页「关系度排行」点人名：切到关系网视图并聚焦该角色（高亮 ta 的家族 + 有关系的人）。
-// 与上方 openCharDetailFromStats 区分：这里走关系网，不打开角色详情弹窗。
 function openRelationFocusFromStats(id) {
-  if (id == null) return;
-  navigateTo('relations');                   // 触发 VM.relations.init()（首次）
-  if (VM.relations && VM.relations.setGFocus) {
+  return AppNavigation.enter('view:relations', function () {
+    var ready = navigateTo('relations');
     VM.relations.setGFocus(id, { scrollToGraph: true });
-  }
+    return ready;
+  });
 }
-
 function openWorldDetailFromStats(id) {
-  if (id == null) return;
-  navigateTo('worldview');
-  if (!VM.worldview || !VM.worldview.openDetailModal) return;
-  // 世界观条目分两大类（意识体世界设定 / 人物背景故事），当前 tab 可能与目标不符。
-  // 先拉单条拿 main_category，必要时切大类，再开详情——这样关掉详情后背后的列表也对。
-  fetch('/api/world-buildings/' + id).then(function (r) {
-    if (!r.ok) throw new Error('HTTP ' + r.status);
-    return r.json();
-  }).then(function (e) {
-    if (!e || e.id == null) throw new Error('bad payload');
-    if (e.main_category && VM.worldview.getMainCategory &&
-        e.main_category !== VM.worldview.getMainCategory()) {
-      VM.worldview.selectMainCategory(e.main_category);
-    }
-    VM.worldview.openDetailModal(e.id, 'stats');
-  }).catch(function () {
-    showToast('找不到该设定，可能已被删除', 'error');
+  return AppNavigation.enter('worldDetailOverlay', function () {
+    navigateTo('worldview');
+    return VM.worldview.openDetailModal(id);
   });
 }
 
@@ -3288,18 +3259,19 @@ VM.stats = (function() {
     document.getElementById('statsErrorState').style.display = 'none';
   }
 
+  var navigationLoad = null;
   function load(force) {
     var revision = window.appDataRevision || 0;
     if (!force && loadedRevision === revision) {
       document.getElementById('statsLoadingState').style.display = 'none';
       return;
     }
-    if (loading) return;
+    if (loading) return navigationLoad;
     loading = true;
     document.getElementById('statsErrorState').style.display = 'none';
     if (loadedRevision < 0) document.getElementById('statsLoadingState').style.display = '';
 
-    fetch(API).then(function(r) {
+    return navigationLoad = fetch(API).then(function(r) {
       if (!r.ok) throw new Error('HTTP ' + r.status);
       return r.json();
     }).then(function(d) {
@@ -3314,8 +3286,8 @@ VM.stats = (function() {
     });
   }
 
-  function init() { load(true); }
+  function init() { return load(true); }
 
-  return { init: init, refresh: function() { load(true); } };
+  return { init: init, refresh: function() { return load(); } };
 })();
 

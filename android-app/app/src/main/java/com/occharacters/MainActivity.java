@@ -6,8 +6,8 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.SystemClock;
 import android.util.Base64;
-import android.view.KeyEvent;
 import android.view.View;
 import android.webkit.JavascriptInterface;
 import android.webkit.RenderProcessGoneDetail;
@@ -22,10 +22,14 @@ import android.webkit.WebViewClient;
 import android.widget.Toast;
 
 import androidx.activity.result.ActivityResult;
+import androidx.activity.OnBackPressedCallback;
 import androidx.activity.result.ActivityResultCallback;
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowInsetsCompat;
+import androidx.core.view.WindowInsetsControllerCompat;
 import androidx.webkit.WebViewAssetLoader;
 
 import java.io.File;
@@ -40,6 +44,11 @@ public class MainActivity extends AppCompatActivity {
     private ValueCallback<Uri[]> filePathCallback;
     private JsBridge jsBridge;                     // 持有引用，onDestroy 时好收尾未完成的备份
     private static final int FILE_CHOOSER_REQUEST = 100;
+    private long exitWarningAt = 0L;
+    private long backRequest = 0L;
+    private long pendingExitRequest = 0L;
+    private boolean backEvaluationPending = false;
+    private Toast exitToast;
 
     // ==================== 流式备份 ====================
     // 整份备份 JSON 一次性从 JS 过桥时，App 进程要在 384MB 的 Java 堆里再复制一份等大的
@@ -208,6 +217,57 @@ public class MainActivity extends AppCompatActivity {
         // 直接加载本地离线页面
         webView.setVisibility(View.VISIBLE);
         webView.loadUrl("file:///android_asset/web/index.html");
+
+        getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
+            @Override
+            public void handleOnBackPressed() { handleAppBack(); }
+        });
+    }
+
+    private void resetExitWarning() {
+        exitWarningAt = 0L;
+        if (exitToast != null) { exitToast.cancel(); exitToast = null; }
+    }
+
+    private void handleAppBack() {
+        if (webView == null || backEvaluationPending || pendingExitRequest != 0L) return;
+        WindowInsetsCompat insets = ViewCompat.getRootWindowInsets(webView);
+        if (insets != null && insets.isVisible(WindowInsetsCompat.Type.ime())) {
+            new WindowInsetsControllerCompat(getWindow(), webView).hide(WindowInsetsCompat.Type.ime());
+            resetExitWarning();
+            return;
+        }
+        backEvaluationPending = true;
+        final long request = ++backRequest;
+        webView.evaluateJavascript("window.AppNavigation ? AppNavigation.back() : 'loading'", result -> {
+            if (request != backRequest || webView == null || isFinishing()) return;
+            backEvaluationPending = false;
+            if ("\"root\"".equals(result)) {
+                long now = SystemClock.elapsedRealtime();
+                if (exitWarningAt != 0L && now - exitWarningAt <= 2000L) {
+                    resetExitWarning();
+                    pendingExitRequest = request;
+                    webView.evaluateJavascript("AppNavigation.prepareExit(" + request + ")", null);
+                } else {
+                    exitWarningAt = now;
+                    exitToast = Toast.makeText(this, "再次回退将退出软件", Toast.LENGTH_SHORT);
+                    exitToast.show();
+                }
+            } else {
+                resetExitWarning();
+                if ("\"loading\"".equals(result)) {
+                    Toast.makeText(this, "页面正在加载，请稍候", Toast.LENGTH_SHORT).show();
+                }
+            }
+        });
+        // A failed renderer must never turn a missing JS reply into permission
+        // to exit. Release only the request lock, allowing the user to retry.
+        webView.postDelayed(() -> {
+            if (request == backRequest && backEvaluationPending) {
+                backEvaluationPending = false;
+                ++backRequest;
+            }
+        }, 3000L);
     }
 
     /**
@@ -232,6 +292,10 @@ public class MainActivity extends AppCompatActivity {
 
     @Override
     protected void onPause() {
+        resetExitWarning();
+        ++backRequest;
+        backEvaluationPending = false;
+        pendingExitRequest = 0L;
         if (webView != null) {
             webView.onPause();
         }
@@ -288,6 +352,20 @@ public class MainActivity extends AppCompatActivity {
 
     /** JS 可调用的原生方法：弹出保存对话框并写入文件 */
     public class JsBridge {
+        @JavascriptInterface
+        public void resetBackExit() {
+            runOnUiThread(() -> resetExitWarning());
+        }
+
+        @JavascriptInterface
+        public void finishNavigationExit(long request, boolean ready) {
+            runOnUiThread(() -> {
+                if (request != pendingExitRequest || request != backRequest || isFinishing()) return;
+                pendingExitRequest = 0L;
+                if (ready) finish();
+            });
+        }
+
         @JavascriptInterface
         public void saveFile(String base64Data, String fileName) {
             runOnUiThread(() -> doSaveFile(base64Data, fileName));
@@ -606,15 +684,6 @@ public class MainActivity extends AppCompatActivity {
                 filePathCallback = null;
             }
         }
-    }
-
-    @Override
-    public boolean onKeyDown(int keyCode, KeyEvent event) {
-        if (keyCode == KeyEvent.KEYCODE_BACK && webView.canGoBack()) {
-            webView.goBack();
-            return true;
-        }
-        return super.onKeyDown(keyCode, event);
     }
 
     /**

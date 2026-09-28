@@ -144,6 +144,7 @@
   }
 
   function open(opts) {
+    if (window.AppNavigation && !AppNavigation.isInternal()) return AppNavigation.enter('faceCropOverlay', function () { return open(opts); });
     opts = opts || {};
     ensureStyles();
     var overlay = document.getElementById(OVERLAY_ID);
@@ -294,14 +295,16 @@
     stage.addEventListener('touchend', function (e) { if (e.touches.length < 2) pinch = null; }, { passive: true });
 
     // ---- 按钮 ----
-    panel.querySelector('#faceCropCancel').onclick = function () { close(); if (st.onCancel) st.onCancel(); };
+    panel.querySelector('#faceCropCancel').onclick = function () { close(); };
     panel.querySelector('#faceCropOk').onclick = function () {
       var out = { img: st.imgIndex, cx: st.cx, cy: st.cy, r: st.r };
+      st.onCancel = null;
       close();
       if (st.onConfirm) st.onConfirm(out);
     };
 
     function close() {
+      if (window.AppNavigation && !AppNavigation.isInternal()) return AppNavigation.close('faceCropOverlay');
       overlay.classList.remove('active');
       window.removeEventListener('resize', relayout);
       document.removeEventListener('pointermove', onPointerMove);
@@ -311,6 +314,9 @@
     st.close = close;
   }
 
+  if (typeof window !== 'undefined' && window.AppNavigation) AppNavigation.register('faceCropOverlay', {
+    dispose: function () { if (_state) { var state = _state; state.close(); if (state.onCancel) state.onCancel(); } }
+  });
   var api = { open: open, parse: parse, stringify: stringify, cropToCanvas: cropToCanvas };
   if (typeof window !== 'undefined') window.FaceCrop = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
