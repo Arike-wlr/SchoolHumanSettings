@@ -76,18 +76,20 @@
       else if (e.key === 'ArrowUp') { e.preventDefault(); setActive(gsActive - 1); }
       else if (e.key === 'Enter') { e.preventDefault(); if (gsItems.length) gsItems[(gsActive >= 0 ? gsActive : 0)].go(); }
     });
-    document.addEventListener('keydown', function (e) {
-      if (e.key === 'Escape' && overlay.classList.contains('active')) closeGlobalSearch();
-    });
   }
 
   function openGlobalSearch() {
+    if (!AppNavigation.isInternal()) return AppNavigation.enter('gsOverlay', openGlobalSearch);
     build();
     overlay.classList.add('active');
-    setTimeout(function () { try { input.focus(); } catch (e) {} }, 50);
+    var token = AppNavigation.token();
+    setTimeout(function () { if (AppNavigation.isCurrent(token)) input.focus(); }, 50);
   }
   function closeGlobalSearch() {
+    if (!AppNavigation.isInternal()) return AppNavigation.close('gsOverlay');
     if (!overlay) return;
+    clearTimeout(gsDebounce);
+    ++gsSeq;
     overlay.classList.remove('active');
     input.value = '';
     bodyEl.innerHTML = '<div class="gs-empty">输入关键词，搜索全部设定</div>';
@@ -95,6 +97,16 @@
   }
   window.openGlobalSearch = openGlobalSearch;
   window.closeGlobalSearch = closeGlobalSearch;
+  AppNavigation.register('gsOverlay', {
+    capture: function () { return { query: input.value, active: gsActive }; },
+    restore: function (state) {
+      build(); overlay.classList.add('active'); input.value = state.query;
+      if (state.query.trim()) return doSearch(state.query.trim()).then(function () {
+        if (state.active >= 0) setActive(state.active);
+      });
+    },
+    dispose: closeGlobalSearch
+  });
 
   function setActive(idx) {
     if (!gsItems.length) return;
@@ -107,7 +119,7 @@
   // ---------- 搜索 ----------
   function doSearch(q) {
     var seq = ++gsSeq;
-    fetch('/api/search?q=' + encodeURIComponent(q))
+    return fetch('/api/search?q=' + encodeURIComponent(q))
       .then(function (r) { return r.json(); })
       .then(function (data) { if (seq !== gsSeq) return; render(data, q); })
       .catch(function () { if (seq !== gsSeq) return; bodyEl.innerHTML = '<div class="gs-empty">搜索失败，请重试</div>'; });
@@ -115,13 +127,14 @@
 
   // ---------- 跳转 ----------
   function jump(kind, payload) {
-    closeGlobalSearch();
-    try {
-      if (kind === 'char') { navigateTo('index'); VM.index.handleCardClick(payload.id); }
-      else if (kind === 'wb') { navigateTo('worldview'); VM.worldview.handleCardClick(payload.id); }
-      else if (kind === 'rel') { navigateTo('relations'); VM.relations.focusRelation(payload.id); }
-      else if (kind === 'doc') { navigateTo('documents'); VM.documents.openViewer(encodeURIComponent(payload.name)); }
-    } catch (e) { console.warn('[search] 跳转失败', e); }
+    var keys = { char: 'indexDetailOverlay', wb: 'worldDetailOverlay', rel: 'view:relations', doc: 'docViewerOverlay' };
+    return AppNavigation.enter(keys[kind], function () {
+      closeGlobalSearch();
+      if (kind === 'char') { navigateTo('index'); return VM.index.openDetailModal(payload.id); }
+      if (kind === 'wb') { navigateTo('worldview'); return VM.worldview.openDetailModal(payload.id); }
+      if (kind === 'rel') { var ready = navigateTo('relations'); VM.relations.focusRelation(payload.id); return ready; }
+      if (kind === 'doc') { navigateTo('documents'); return VM.documents.openViewer(encodeURIComponent(payload.name)); }
+    });
   }
 
   // ---------- 渲染 ----------

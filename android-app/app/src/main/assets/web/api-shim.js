@@ -15,7 +15,14 @@ window.fetch = async function (input, init) {
     return _originalFetch(input, init);
   }
 
-  return handleApiRequest(url, init);
+  const response = handleApiRequest(url, init);
+  const method = ((init && init.method) || 'GET').toUpperCase();
+  // Uploads/deletes may continue after their panel closes. Keep the exit path
+  // aware of outstanding writes, without changing the offline API behavior.
+  if (method !== 'GET' && method !== 'HEAD' && window.AppNavigation) {
+    return AppNavigation.trackWrite(response);
+  }
+  return response;
 };
 
 // ============================================================
