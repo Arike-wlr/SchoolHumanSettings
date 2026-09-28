@@ -1130,7 +1130,7 @@ VM.worldview = (function() {
     document.getElementById('worldSearchInput').value = '';
     document.getElementById('worldSearchWrap').classList.remove('has-value');
     document.getElementById('catTabs').style.display = (mainCat === '人物背景故事') ? 'none' : '';
-    loadEntries();
+    return loadEntries();
   }
 
   function buildCatTabs() {
@@ -1254,8 +1254,8 @@ VM.worldview = (function() {
     document.getElementById('worldModalTitle').textContent = '添加新设定';
     document.getElementById('worldSubmitBtn').textContent = '确认添加';
     document.getElementById('worldEditId').value = '';
-    document.getElementById('worldMainCategoryInput').value = activeMainCategory;
     document.getElementById('worldEntryForm').reset();
+    document.getElementById('worldMainCategoryInput').value = activeMainCategory;
     document.getElementById('worldCategoryGroup').style.display = (activeMainCategory === '人物背景故事') ? 'none' : '';
     document.getElementById('worldModalOverlay').classList.add('active');
     editBaseline = formNavigationSignature('worldEntryForm');
@@ -1334,7 +1334,9 @@ VM.worldview = (function() {
   function openDetailModal(id, returnView) {
     if (!AppNavigation.isInternal()) return AppNavigation.enter('worldDetailOverlay', function () { return openDetailModal(id); });
     var navigationToken = AppNavigation.token();
-    return fetch(API + '/' + id).then(function(r) { if (!r.ok) throw new Error("内容不存在"); return r.json(); }).then(function(e) {
+    return fetch(API + '/' + id).then(function(r) { if (!r.ok) throw new Error("内容不存在"); return r.json(); }).then(async function(e) {
+      if (!AppNavigation.isCurrent(navigationToken)) return;
+      if (e.main_category && e.main_category !== activeMainCategory) await selectMainCategory(e.main_category);
       if (!AppNavigation.isCurrent(navigationToken)) return;
       detailEntryId = e.id;
       document.getElementById('worldDetailTitle').textContent = e.title;
@@ -2227,32 +2229,32 @@ VM.relations = (function() {
     }
     document.getElementById('relFamilyOverlay').classList.add('active');
   }
-  function closeFamilyModal() {
-    if (!AppNavigation.isInternal()) return AppNavigation.close('relFamilyOverlay'); document.getElementById('relFamilyOverlay').classList.remove('active'); }
-  function saveFamilies() {
-    var success = 0, fail = 0, pending = 0;
-    for (var cid in familyEditMap) {
-      var nf = familyEditMap[cid].trim();
-      var ch = allCharacters.find(function(c) { return c.id === parseInt(cid); });
-      if (!ch || (ch.family || '').trim() === nf) continue;
-      pending++;
-      (function(charId, newFamily, char) {
-        fetch(API_CHAR + '/' + charId, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ family: newFamily }) }).then(function(r) {
-          if (r.ok) { char.family = newFamily; success++; } else fail++;
-        }).catch(function() { fail++; }).finally(function() {
-          pending--;
-          if (pending === 0) finishFamilySave(success, fail);
-        });
-      })(parseInt(cid), nf, ch);
+  function closeFamilyModal(discard) {
+    if (!AppNavigation.isInternal()) {
+      if (AppNavigation.isBusy()) return;
+      return discard ? AppNavigation.close('relFamilyOverlay') : saveFamilies();
     }
-    if (pending === 0) { closeFamilyModal(); showToast('没有变更', 'success'); }
+    document.getElementById('relFamilyOverlay').classList.remove('active');
   }
-  function finishFamilySave(success, fail) {
-    closeFamilyModal();
-    buildFamilyColors();
-    markAppDataChanged();   // 家族已改：其它视图下次进入时重新取数据
-    graphInit(); renderRelList();
-    showToast('家族更新：' + success + ' 成功' + (fail ? '，' + fail + ' 失败' : ''), fail ? 'error' : 'success');
+  function saveFamilies() {
+    return AppNavigation.save(async function () {
+      var changes = Object.keys(familyEditMap).map(function (cid) {
+        var character = allCharacters.find(function (item) { return item.id === Number(cid); });
+        return { character: character, family: familyEditMap[cid].trim() };
+      }).filter(function (item) { return item.character && (item.character.family || '').trim() !== item.family; });
+      var results = await Promise.all(changes.map(async function (item) {
+        try {
+          var response = await fetch(API_CHAR + '/' + item.character.id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ family: item.family }) });
+          if (!response.ok) return false;
+          item.character.family = item.family;
+          return true;
+        } catch (error) { return false; }
+      }));
+      if (results.some(Boolean)) markAppDataChanged();
+      if (results.some(function (ok) { return !ok; })) throw new Error('部分家族保存失败，输入已保留，请重试');
+      if (changes.length) showToast('家族已保存', 'success');
+      return AppNavigation.close('relFamilyOverlay');
+    });
   }
 
   function buildTypeTabs() {
@@ -2858,7 +2860,7 @@ VM.relations = (function() {
   AppNavigation.register('relModalOverlay', { dispose: closeModal, back: closeModalAutoSave });
   AppNavigation.register('relDeleteOverlay', { dispose: closeDeleteModal });
   AppNavigation.register('relInfoOverlay', { capture: function () { return infoCharId; }, restore: showCharInfo, dispose: closeInfoModal });
-  AppNavigation.register('relFamilyOverlay', { dispose: closeFamilyModal });
+  AppNavigation.register('relFamilyOverlay', { dispose: closeFamilyModal, back: closeFamilyModal });
   AppNavigation.register('relExportMode', { isOpen: function () { return currentView === 'relations' && exportMode; }, dispose: cancelExport });
   function captureNavigation() {
     return { type: activeType, search: document.getElementById('relSearchInput').value, exporting: exportMode, selected: Array.from(selectedIds), scale: gScale, x: gOffsetX, y: gOffsetY, focus: gFocusId };

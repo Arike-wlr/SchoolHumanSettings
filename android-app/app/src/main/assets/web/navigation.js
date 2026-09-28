@@ -162,7 +162,7 @@
     if (!history.length) return 'root';
     resetExit();
     var layer = layers[key];
-    if (layer && layer.back) layer.back();
+    if (layer && layer.back && openLayers().indexOf(key) !== -1) layer.back();
     else restorePrevious();
     return 'handled';
   }
@@ -170,9 +170,25 @@
     if (busy()) return false;
     saving = true;
     resetExit();
-    try { return await operation(); }
+    var controls = [];
+    try {
+      // Read and validate inputs synchronously, then freeze them while the
+      // write is pending so later keystrokes cannot be silently discarded.
+      var pending = operation();
+      openLayers().forEach(function (id) {
+        var el = document.getElementById(id);
+        if (el) el.querySelectorAll('input,select,textarea,button').forEach(function (control) {
+          controls.push({ element: control, disabled: control.disabled });
+          control.disabled = true;
+        });
+      });
+      return await pending;
+    }
     catch (error) { showToast(error.message || '保存失败，请重试', 'error'); return false; }
-    finally { saving = false; }
+    finally {
+      controls.forEach(function (item) { item.element.disabled = item.disabled; });
+      saving = false;
+    }
   }
   async function prepareExit(request) {
     var ok = false;
@@ -181,12 +197,14 @@
         showToast('同步正在进行，请完成后再退出');
       } else {
         exiting = true;
+        window.navigationExitReady = false;
+        var hint = setTimeout(function () { showToast('正在保存，请稍候…'); }, 300);
         try {
           if (typeof flushBackupForExit === 'function') await flushBackupForExit();
           ok = document.visibilityState !== 'hidden';
           window.navigationExitReady = ok;
         } catch (error) { showToast('退出前备份失败，请重试', 'error'); }
-        finally { exiting = false; }
+        finally { clearTimeout(hint); exiting = false; }
       }
     }
     if (window.Android && Android.finishNavigationExit) Android.finishNavigationExit(request, ok);

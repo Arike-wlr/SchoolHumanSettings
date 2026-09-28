@@ -138,3 +138,137 @@ test('rapid back during restoration does not skip the source', async () => {
   const results = await page.evaluate(() => [AppNavigation.back(), AppNavigation.back(), AppNavigation.back()]);
   assert.deepEqual(results, ['handled', 'busy', 'busy']); await ready(); assert.equal(await view(), 'index');
 });
+test('back while an editor loads returns without submitting stale form fields', async () => {
+  await page.evaluate(async () => {
+    await navigateTo('index'); const original = window.fetch; window.putCount = 0;
+    window.fetch = async (input, options) => {
+      if (options && options.method === 'PUT') window.putCount++;
+      if (input === '/api/characters/1') await new Promise(r => setTimeout(r, 180));
+      return original(input, options);
+    };
+    VM.index.openEditModal(1);
+  });
+  await back(); await page.waitForTimeout(250);
+  assert.equal(await active('indexModalOverlay'), false);
+  assert.equal(await page.evaluate(() => putCount), 0);
+  assert.equal(await view(), 'index');
+});
+test('unchanged new form closes without creating a record', async () => {
+  await page.evaluate(async () => { await navigateTo('worldview'); await VM.worldview.openCreateModal(); });
+  await back();
+  assert.equal(await active('worldModalOverlay'), false);
+  assert.equal(await page.evaluate(async () => (await worldDB.list()).length), 2);
+});
+test('returning from a document skips a deleted world detail', async () => {
+  await page.evaluate(async () => {
+    await navigateTo('stats'); await openWorldDetailFromStats(1); await VM.worldview.openDocFromLink('测试文档.txt');
+    await worldDB.delete(1); markAppDataChanged();
+  });
+  await back(); assert.equal(await view(), 'stats'); assert.equal(await active('worldDetailOverlay'), false);
+  await back(); assert.equal(await view(), 'home');
+});
+test('face crop cancels one layer and preserves the editor draft', async () => {
+  await page.evaluate(async () => {
+    await navigateTo('index'); await VM.index.openEditModal(1);
+    document.getElementById('indexName').value = '仍在编辑';
+    const canvas = document.createElement('canvas'); canvas.width = canvas.height = 80;
+    await FaceCrop.open({ src: canvas.toDataURL(), onCancel: () => { window.cropCancelled = (window.cropCancelled || 0) + 1; } });
+  });
+  assert.equal(await active('faceCropOverlay'), true);
+  await back(); assert.equal(await active('faceCropOverlay'), false); assert.equal(await active('indexModalOverlay'), true);
+  assert.equal(await page.inputValue('#indexName'), '仍在编辑'); assert.equal(await page.evaluate(() => cropCancelled), 1);
+});
+test('saving in progress consumes repeated back events without duplicate writes', async () => {
+  await page.evaluate(async () => {
+    await navigateTo('relations'); await VM.relations.openEditModal(1);
+    document.getElementById('relDesc').value = '保存中的关系';
+    const original = window.fetch; window.putCount = 0;
+    window.fetch = async (input, options) => {
+      if (options && options.method === 'PUT') { window.putCount++; await new Promise(r => setTimeout(r, 200)); }
+      return original(input, options);
+    };
+  });
+  const result = await page.evaluate(() => [AppNavigation.back(), AppNavigation.back(), AppNavigation.back()]);
+  assert.deepEqual(result, ['handled', 'busy', 'busy']); await ready();
+  assert.equal(await page.evaluate(() => putCount), 1); assert.equal(await active('relModalOverlay'), false);
+});
+test('exit waits for backup completion and reports a backup failure', async () => {
+  const result = await page.evaluate(async () => {
+    window.exitReplies = [];
+    window.Android = { resetBackExit() {}, finishNavigationExit: (id, ready) => exitReplies.push([id, ready]) };
+    window.flushBackupForExit = () => new Promise(resolve => { window.finishTestBackup = resolve; });
+    const pending = AppNavigation.prepareExit(1);
+    const whileSaving = [AppNavigation.back(), exitReplies.length];
+    finishTestBackup(); await pending;
+    window.flushBackupForExit = () => Promise.reject(new Error('disk failure'));
+    await AppNavigation.prepareExit(2);
+    return { whileSaving, replies: exitReplies };
+  });
+  assert.deepEqual(result, { whileSaving: ['busy', 0], replies: [[1, true], [2, false]] });
+});
+test('pending sync blocks exit and backup writers are serialized', async () => {
+  const result = await page.evaluate(async () => {
+    window.exitReplies = []; window.backupOrder = [];
+    window.Android = { resetBackExit() {}, finishNavigationExit: (id, ready) => exitReplies.push([id, ready]) };
+    const sync = runSyncOnce(() => new Promise(resolve => { window.finishTestSync = resolve; }));
+    await Promise.resolve(); await AppNavigation.prepareExit(1); finishTestSync(); await sync;
+    let writing = 0;
+    window.writeBackupToNativeNow = async () => {
+      backupOrder.push(++writing); await new Promise(resolve => setTimeout(resolve, 30)); writing--;
+    };
+    await Promise.all([writeBackupToNative(), writeBackupToNative(), flushBackupForExit()]);
+    return { replies: exitReplies, order: backupOrder };
+  });
+  assert.deepEqual(result, { replies: [[1, false]], order: [1, 1, 1] });
+});
+test('the same page keeps distinct filter states at different points in history', async () => {
+  await page.evaluate(async () => {
+    await navigateTo('index'); VM.index.selectRegion('甲区');
+    await navigateTo('worldview'); await navigateTo('index'); VM.index.selectRegion('乙区'); await navigateTo('documents');
+  });
+  await back(); assert.equal(await page.evaluate(() => VM.index.captureNavigation().region), '乙区');
+  await back(); assert.equal(await view(), 'worldview');
+  await back(); assert.equal(await page.evaluate(() => VM.index.captureNavigation().region), '甲区');
+});
+test('world story details and new forms use the correct category', async () => {
+  await page.evaluate(async () => { await navigateTo('stats'); await openWorldDetailFromStats(2); });
+  assert.equal(await page.evaluate(() => VM.worldview.getMainCategory()), '人物背景故事');
+  await back(); assert.equal(await view(), 'stats');
+  await page.evaluate(async () => { await navigateTo('worldview'); await VM.worldview.selectMainCategory('人物背景故事'); await VM.worldview.openCreateModal(); });
+  assert.equal(await page.inputValue('#worldMainCategoryInput'), '人物背景故事');
+});
+test('family changes save on back, while explicit cancel discards them', async () => {
+  await page.evaluate(async () => { await navigateTo('relations'); await VM.relations.openFamilyModal(); });
+  await page.locator('.fam-row-input').first().fill('新家族');
+  await back();
+  assert.equal(await active('relFamilyOverlay'), false);
+  assert.equal(await page.evaluate(async () => (await charDB.get(1)).family), '新家族');
+  await page.evaluate(() => VM.relations.openFamilyModal());
+  await page.locator('.fam-row-input').first().fill('不保存');
+  await page.evaluate(() => VM.relations.closeFamilyModal(true)); await ready();
+  assert.equal(await page.evaluate(async () => (await charDB.get(1)).family), '新家族');
+});
+test('sync confirmation and its parent close separately', async () => {
+  await page.click('.sync-fab');
+  await page.evaluate(() => {
+    const empty = () => ({ added: [], deleted: [], modified: [] });
+    window.getSyncDiff = async () => ({ local: {}, server: {}, chars: empty(), worlds: empty(), relations: empty(), docs: empty() });
+  });
+  await page.fill('#syncServerInput', '127.0.0.1:1');
+  await page.evaluate(() => doDownload());
+  assert.equal(await active('syncConfirmOverlay'), true);
+  await back(); assert.equal(await active('syncOverlay'), true); assert.equal(await active('syncConfirmOverlay'), false);
+  await back(); assert.equal(await active('syncOverlay'), false); assert.equal(await back(), 'root');
+});
+test('cancelled sync preview does not reappear when its request finishes', async () => {
+  await page.click('.sync-fab'); await page.fill('#syncServerInput', '127.0.0.1:1');
+  await page.evaluate(() => {
+    const empty = () => ({ added: [], deleted: [], modified: [] });
+    window.getSyncDiff = async () => { await new Promise(r => setTimeout(r, 180)); return { local: {}, server: {}, chars: empty(), worlds: empty(), relations: empty(), docs: empty() }; };
+    doDownload();
+  });
+  await back(); await page.waitForTimeout(250);
+  assert.equal(await active('syncOverlay'), true);
+  assert.equal(await page.locator('#syncConfirmOverlay.active').count(), 0);
+  await back(); assert.equal(await back(), 'root');
+});

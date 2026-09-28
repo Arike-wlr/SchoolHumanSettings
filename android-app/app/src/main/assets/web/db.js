@@ -894,7 +894,7 @@ function writeBackupToNativeNow() {
     return forEachBackupChunk(function (chunk) {
       emitChunked(function (piece) { A.appendBackup(piece); }, chunk);
     }).then(function () {
-      A.endBackup();
+      if (A.endBackup() === false) throw new Error('备份文件写入失败');
     }).catch(function (e) {
       if (A.abortBackup) A.abortBackup();   // 作废本次，保留上一份完整备份
       throw e;

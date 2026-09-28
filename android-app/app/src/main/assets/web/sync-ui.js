@@ -630,11 +630,13 @@
     try {
       diff = await getSyncDiff(direction);
     } catch (e) {
+      if (!AppNavigation.isCurrent(navigationToken)) return;
       status.textContent = '获取差异失败: ' + e.message;
       status.className = 'sync-status error';
-      return;
+      throw e;
     }
 
+    if (!AppNavigation.isCurrent(navigationToken)) return;
     pendingSyncAction = direction;
     _currentSyncDiff = diff;
     _currentSyncDiff.direction = direction;

@@ -44,7 +44,7 @@ public class MainActivity extends AppCompatActivity {
     private ValueCallback<Uri[]> filePathCallback;
     private JsBridge jsBridge;                     // 持有引用，onDestroy 时好收尾未完成的备份
     private static final int FILE_CHOOSER_REQUEST = 100;
-    private long exitWarningAt = 0L;
+    private final BackExitGate backExitGate = new BackExitGate();
     private long backRequest = 0L;
     private long pendingExitRequest = 0L;
     private boolean backEvaluationPending = false;
@@ -225,7 +225,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void resetExitWarning() {
-        exitWarningAt = 0L;
+        backExitGate.reset();
         if (exitToast != null) { exitToast.cancel(); exitToast = null; }
     }
 
@@ -244,12 +244,11 @@ public class MainActivity extends AppCompatActivity {
             backEvaluationPending = false;
             if ("\"root\"".equals(result)) {
                 long now = SystemClock.elapsedRealtime();
-                if (exitWarningAt != 0L && now - exitWarningAt <= 2000L) {
+                if (backExitGate.press(now)) {
                     resetExitWarning();
                     pendingExitRequest = request;
                     webView.evaluateJavascript("AppNavigation.prepareExit(" + request + ")", null);
                 } else {
-                    exitWarningAt = now;
                     exitToast = Toast.makeText(this, "再次回退将退出软件", Toast.LENGTH_SHORT);
                     exitToast.show();
                 }
@@ -514,33 +513,23 @@ public class MainActivity extends AppCompatActivity {
 
         /** 结束备份：落盘后原子替换。中途被杀只会留下 .tmp，正式文件永远是一份完整 JSON */
         @JavascriptInterface
-        public synchronized void endBackup() {
-            if (backupOut == null) return;
+        public synchronized boolean endBackup() {
+            if (backupOut == null || backupTmp == null) return false;
             try {
                 backupOut.flush();
                 backupOut.getFD().sync();     // 备份的意义就是扛住异常退出，先落盘再改名
-            } catch (Exception ignore) {
-            }
-            try {
                 backupOut.close();
-            } catch (Exception ignore) {
-            }
-            backupOut = null;
-            if (backupTmp == null) return;
-            try {
+                backupOut = null;
                 java.io.File dst = new java.io.File(getFilesDir(), BACKUP_FILE_NAME);
-                // rename 在同一文件系统内是原子的、且直接覆盖目标，不会出现"目标已删、新文件未就位"的空档
-                if (!backupTmp.renameTo(dst)) {
-                    if (dst.exists()) dst.delete();
-                    if (!backupTmp.renameTo(dst)) copyFile(backupTmp, dst);
-                }
-            } catch (Exception ignore) {
+                // Both files are in the same private directory. Never delete the
+                // last complete backup as a fallback if the atomic rename fails.
+                android.system.Os.rename(backupTmp.getAbsolutePath(), dst.getAbsolutePath());
+                backupTmp = null;
+                return true;
+            } catch (Exception error) {
+                abortBackup();
+                return false;
             }
-            try {
-                if (backupTmp.exists()) backupTmp.delete();
-            } catch (Exception ignore) {
-            }
-            backupTmp = null;
         }
 
         /** 放弃本次备份（JS 抛错或写入失败时调用） */
