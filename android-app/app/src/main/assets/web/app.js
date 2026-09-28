@@ -748,7 +748,7 @@ VM.index = (function() {
       currentFaceCrop=c.face_crop||'';
       renderImagePreview();
       document.getElementById('indexModalOverlay').classList.add('active');
-    editBaseline = editSignature();
+      editBaseline = editSignature();
     });
   }
 
@@ -788,33 +788,33 @@ VM.index = (function() {
   function submitForm(e) {
     e.preventDefault();
     return AppNavigation.save(async function () {
-    var form=document.getElementById('indexCharForm');
-    if(!form.checkValidity()){form.reportValidity();showToast('请填写完整后再返回，或点取消放弃修改','error');return false;}
-    var editId=document.getElementById('indexEditId').value;
-    var data={
-      name:document.getElementById('indexName').value.trim(),
-      alias:document.getElementById('indexAlias').value.trim(),
-      university:document.getElementById('indexUniversity').value.trim(),
-      region:document.getElementById('indexRegion').value.trim(),
-      naming_rationale:document.getElementById('indexNamingRationale').value.trim(),
-      height:document.getElementById('indexHeight').value.trim(),
-      gender:document.getElementById('indexGender').value,
-      birthday:document.getElementById('indexBirthday').value.trim(),
-      appearance:document.getElementById('indexAppearance').value.trim(),
-      identity_period:document.getElementById('indexIdentityPeriod').value.trim(),
-      birth_time:document.getElementById('indexBirthTime').value.trim(),
-      birthplace:document.getElementById('indexBirthplace').value.trim(),
-      status:document.getElementById('indexStatus').value,
-      setting:document.getElementById('indexSetting').value.trim(),
-    };
-    if(currentImageFiles.length===0)return doSubmitFinal(editId,data);
-    data.newUrls = await Promise.all(currentImageFiles.map(async function (item) {
-      var fd = new FormData(); fd.append('file', item.file);
-      var response = await fetch('/api/images/upload', { method: 'POST', body: fd });
-      if (!response.ok) throw new Error('图片上传失败，请重试');
-      return (await response.json()).image_url;
-    }));
-    return doSubmitFinal(editId, data);
+      var form=document.getElementById('indexCharForm');
+      if(!form.checkValidity()){form.reportValidity();showToast('请填写完整后再返回，或点取消放弃修改','error');return false;}
+      var editId=document.getElementById('indexEditId').value;
+      var data={
+        name:document.getElementById('indexName').value.trim(),
+        alias:document.getElementById('indexAlias').value.trim(),
+        university:document.getElementById('indexUniversity').value.trim(),
+        region:document.getElementById('indexRegion').value.trim(),
+        naming_rationale:document.getElementById('indexNamingRationale').value.trim(),
+        height:document.getElementById('indexHeight').value.trim(),
+        gender:document.getElementById('indexGender').value,
+        birthday:document.getElementById('indexBirthday').value.trim(),
+        appearance:document.getElementById('indexAppearance').value.trim(),
+        identity_period:document.getElementById('indexIdentityPeriod').value.trim(),
+        birth_time:document.getElementById('indexBirthTime').value.trim(),
+        birthplace:document.getElementById('indexBirthplace').value.trim(),
+        status:document.getElementById('indexStatus').value,
+        setting:document.getElementById('indexSetting').value.trim(),
+      };
+      if(currentImageFiles.length===0)return doSubmitFinal(editId,data);
+      data.newUrls = await Promise.all(currentImageFiles.map(async function (item) {
+        var fd = new FormData(); fd.append('file', item.file);
+        var response = await fetch('/api/images/upload', { method: 'POST', body: fd });
+        if (!response.ok) throw new Error('图片上传失败，请重试');
+        return (await response.json()).image_url;
+      }));
+      return doSubmitFinal(editId, data);
     });
   }
 
@@ -853,7 +853,7 @@ VM.index = (function() {
   window.cancelEditIndex = cancelEdit;
   window.closeModalAutoSaveIndex = closeModalAutoSave;
 
-  function openDetailModal(id, returnView){
+  function openDetailModal(id){
     if (!AppNavigation.isInternal()) return AppNavigation.enter('indexDetailOverlay', function () { return openDetailModal(id); });
     var navigationToken = AppNavigation.token();
     return fetch(API+'/'+id).then(function(r){if (!r.ok) throw new Error("内容不存在"); return r.json();}).then(function(c){
@@ -1275,29 +1275,29 @@ VM.worldview = (function() {
       document.getElementById('worldContent').value = e.content || '';
       document.getElementById('worldCategoryGroup').style.display = (e.main_category === '人物背景故事') ? 'none' : '';
       document.getElementById('worldModalOverlay').classList.add('active');
-    editBaseline = formNavigationSignature('worldEntryForm');
+      editBaseline = formNavigationSignature('worldEntryForm');
     });
   }
 
   function submitForm(e) {
     e.preventDefault();
     return AppNavigation.save(function () {
-    var editId = document.getElementById('worldEditId').value;
-    var data = {
-      main_category: document.getElementById('worldMainCategoryInput').value,
-      title: document.getElementById('worldTitle').value.trim(),
-      category: document.getElementById('worldCategoryInput').value.trim(),
-      content: document.getElementById('worldContent').value.trim()
-    };
-    if (!data.title) { showToast('标题不能为空', 'error'); return; }
-    var url = editId ? API + '/' + editId : API;
-    var method = editId ? 'PUT' : 'POST';
-    return fetch(url, { method: method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }).then(function(r) {
-      if (!r.ok) throw new Error();
-      markAppDataChanged();
-      showToast(editId ? '已更新' : '已创建', 'success');
-      return closeModal();
-    });
+      var editId = document.getElementById('worldEditId').value;
+      var data = {
+        main_category: document.getElementById('worldMainCategoryInput').value,
+        title: document.getElementById('worldTitle').value.trim(),
+        category: document.getElementById('worldCategoryInput').value.trim(),
+        content: document.getElementById('worldContent').value.trim()
+      };
+      if (!data.title) { showToast('标题不能为空', 'error'); return; }
+      var url = editId ? API + '/' + editId : API;
+      var method = editId ? 'PUT' : 'POST';
+      return fetch(url, { method: method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }).then(function(r) {
+        if (!r.ok) throw new Error();
+        markAppDataChanged();
+        showToast(editId ? '已更新' : '已创建', 'success');
+        return closeModal();
+      });
     });
   }
 
@@ -1331,7 +1331,7 @@ VM.worldview = (function() {
   window.cancelEditWorld = cancelEdit;
   window.closeModalAutoSaveWorld = closeModalAutoSave;
 
-  function openDetailModal(id, returnView) {
+  function openDetailModal(id) {
     if (!AppNavigation.isInternal()) return AppNavigation.enter('worldDetailOverlay', function () { return openDetailModal(id); });
     var navigationToken = AppNavigation.token();
     return fetch(API + '/' + id).then(function(r) { if (!r.ok) throw new Error("内容不存在"); return r.json(); }).then(async function(e) {
@@ -1594,8 +1594,7 @@ VM.worldview = (function() {
     openDeleteModal: openDeleteModal, closeDeleteModal: closeDeleteModal, confirmDelete: confirmDelete,
     closeModal: closeModal, closeDetailModal: closeDetailModal, detailEdit: detailEdit,
     // 供统计页榜单直接打开某世界观条目详情（统计页 → 世界观卡片）。
-    // 需要先按 main_category 切好大类，否则详情弹窗背后的列表 tab 会对不上。
-    openDetailModal: openDetailModal, selectMainCategory: selectMainCategory,
+    openDetailModal: openDetailModal,
     getMainCategory: function () { return activeMainCategory; },
     insertDocLink: insertDocLink, closeDocLinkPicker: closeDocLinkPicker, pickDocLink: pickDocLink, openDocFromLink: openDocFromLink,
     handleCardClick: handleCardClick,
@@ -2109,24 +2108,24 @@ VM.relations = (function() {
   function submitForm(e) {
     e.preventDefault();
     return AppNavigation.save(function () {
-    var form = document.getElementById('relForm');
-    if (!form.checkValidity()) { form.reportValidity(); return; }
-    var editId = document.getElementById('relEditId').value;
-    var fromId = parseInt(document.getElementById('relFromChar').value);
-    var toId = parseInt(document.getElementById('relToChar').value);
-    if (fromId === toId) { showToast('不能选择同一个角色', 'error'); return; }
-    var data = {
-      from_char_id: fromId, to_char_id: toId,
-      relation_type: document.getElementById('relType').value.trim(),
-      description: document.getElementById('relDesc').value.trim()
-    };
-    var url = editId ? API_REL + '/' + editId : API_REL;
-    var method = editId ? 'PUT' : 'POST';
-    return fetch(url, { method: method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }).then(function(r) {
-      if (!r.ok) return r.json().then(function(e) { throw new Error(e.detail || '操作失败'); });
-      markAppDataChanged(); showToast(editId ? '已更新' : '已创建', 'success');
-      return closeModal();
-    });
+      var form = document.getElementById('relForm');
+      if (!form.checkValidity()) { form.reportValidity(); return; }
+      var editId = document.getElementById('relEditId').value;
+      var fromId = parseInt(document.getElementById('relFromChar').value);
+      var toId = parseInt(document.getElementById('relToChar').value);
+      if (fromId === toId) { showToast('不能选择同一个角色', 'error'); return; }
+      var data = {
+        from_char_id: fromId, to_char_id: toId,
+        relation_type: document.getElementById('relType').value.trim(),
+        description: document.getElementById('relDesc').value.trim()
+      };
+      var url = editId ? API_REL + '/' + editId : API_REL;
+      var method = editId ? 'PUT' : 'POST';
+      return fetch(url, { method: method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }).then(function(r) {
+        if (!r.ok) return r.json().then(function(e) { throw new Error(e.detail || '操作失败'); });
+        markAppDataChanged(); showToast(editId ? '已更新' : '已创建', 'success');
+        return closeModal();
+      });
     });
   }
 
@@ -2238,22 +2237,22 @@ VM.relations = (function() {
   }
   function saveFamilies() {
     return AppNavigation.save(async function () {
-      var changes = Object.keys(familyEditMap).map(function (cid) {
-        var character = allCharacters.find(function (item) { return item.id === Number(cid); });
-        return { character: character, family: familyEditMap[cid].trim() };
-      }).filter(function (item) { return item.character && (item.character.family || '').trim() !== item.family; });
-      var results = await Promise.all(changes.map(async function (item) {
-        try {
-          var response = await fetch(API_CHAR + '/' + item.character.id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ family: item.family }) });
-          if (!response.ok) return false;
-          item.character.family = item.family;
-          return true;
-        } catch (error) { return false; }
-      }));
-      if (results.some(Boolean)) markAppDataChanged();
-      if (results.some(function (ok) { return !ok; })) throw new Error('部分家族保存失败，输入已保留，请重试');
-      if (changes.length) showToast('家族已保存', 'success');
-      return AppNavigation.close('relFamilyOverlay');
+        var changes = Object.keys(familyEditMap).map(function (cid) {
+          var character = allCharacters.find(function (item) { return item.id === Number(cid); });
+          return { character: character, family: familyEditMap[cid].trim() };
+        }).filter(function (item) { return item.character && (item.character.family || '').trim() !== item.family; });
+        var results = await Promise.all(changes.map(async function (item) {
+          try {
+            var response = await fetch(API_CHAR + '/' + item.character.id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ family: item.family }) });
+            if (!response.ok) return false;
+            item.character.family = item.family;
+            return true;
+          } catch (error) { return false; }
+        }));
+        if (results.some(Boolean)) markAppDataChanged();
+        if (results.some(function (ok) { return !ok; })) throw new Error('部分家族保存失败，输入已保留，请重试');
+        if (changes.length) showToast('家族已保存', 'success');
+        return AppNavigation.close('relFamilyOverlay');
     });
   }
 

@@ -272,3 +272,18 @@ test('cancelled sync preview does not reappear when its request finishes', async
   assert.equal(await page.locator('#syncConfirmOverlay.active').count(), 0);
   await back(); assert.equal(await back(), 'root');
 });
+test('an offline write still in progress prevents exit even after navigation', async () => {
+  const result = await page.evaluate(async () => {
+    window.exitReplies = [];
+    window.Android = { resetBackExit() {}, finishNavigationExit: (id, ready) => exitReplies.push([id, ready]) };
+    const original = charDB.create;
+    charDB.create = async data => { await new Promise(resolve => { window.finishWrite = resolve; }); return original(data); };
+    const pending = fetch('/api/characters', { method: 'POST', body: JSON.stringify({ name: '延迟保存' }) });
+    await AppNavigation.prepareExit(1);
+    finishWrite(); await pending;
+    window.flushBackupForExit = () => Promise.resolve();
+    await AppNavigation.prepareExit(2);
+    return exitReplies;
+  });
+  assert.deepEqual(result, [[1, false], [2, true]]);
+});

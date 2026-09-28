@@ -4,6 +4,7 @@
   'use strict';
   var history = [], layers = {}, key = 'view:home', generation = 0;
   var internal = 0, restoring = false, saving = false, exiting = false, opening = false;
+  var pendingWrites = 0;
 
   function resetExit() {
     if (window.Android && Android.resetBackExit) Android.resetBackExit();
@@ -195,6 +196,8 @@
     if (!busy() && !history.length) {
       if (typeof _syncInFlight !== 'undefined' && _syncInFlight) {
         showToast('同步正在进行，请完成后再退出');
+      } else if (pendingWrites) {
+        showToast('正在保存数据，请稍候再退出');
       } else {
         exiting = true;
         window.navigationExitReady = false;
@@ -226,6 +229,10 @@
     isCurrent: function (token) { return token === generation; },
     isInternal: function () { return internal > 0; },
     isBusy: busy,
+    trackWrite: function (operation) {
+      pendingWrites++;
+      return Promise.resolve(operation).finally(function () { pendingWrites--; });
+    },
     suspendLayers: function () {
       openLayers().forEach(function (id) {
         var el = document.getElementById(id);

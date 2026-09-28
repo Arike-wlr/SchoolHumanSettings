@@ -26,5 +26,10 @@ public class BackExitGateTest {
 }`);
     execFileSync(java('javac'), ['-d', temp, source, runner], { stdio: 'pipe' });
     assert.match(execFileSync(java('java'), ['-cp', temp, 'com.occharacters.BackExitGateTest'], { encoding: 'utf8' }), /PASS/);
-  } finally { fs.rmSync(temp, { recursive: true, force: true }); }
+  } finally {
+    const target = fs.realpathSync(temp);
+    assert.ok(target.startsWith(fs.realpathSync(os.tmpdir()) + path.sep));
+    assert.ok(path.basename(target).startsWith('oc-back-gate-'));
+    fs.rmSync(target, { recursive: true, force: true });
+  }
 });
