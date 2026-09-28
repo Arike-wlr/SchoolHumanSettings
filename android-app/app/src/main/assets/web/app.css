@@ -665,15 +665,36 @@ table.matrix td.hot { color: #fff; font-weight: 600; }
   #view-home .card-title { font-size: 1.02rem; }
   #view-home .card-desc { font-size: .78rem; }
 
-  /* ---- 角色 / 世界观 / 关系列表：单列改多列 ---- */
+  /* ---- 角色 / 关系列表：单列改多列（容器里直接就是卡片） ----
+     ⚠️ #view-worldview .card-list 不在此列！它的子项是 .cat-group 分组，
+     把分组容器 grid 化会把每个分组挤成窄列、组内卡片随之压扁换行
+     （表现：竖排文字 + 大片空白）。世界观页只把内层 .card-row 放宽即可，见下。 */
   #view-index .card-list,
-  #view-worldview .card-list,
   #view-relations .card-list {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
     gap: 12px;
     padding: 6px 28px 28px;
   }
+
+  /* 世界观页：外层保持纵向堆叠（分组一个一个往下排），内层 .card-row 自适应多列。
+     与桌面端 desktop-offline/worldview.html 的结构保持一致（那边 .card-row 也是 grid）。
+     用 auto-fill + 最小列宽 300px 实现「真正自适应」而不写死列数：
+       768px(内容 712) → 2 列（卡片约 341px）
+       1024px(内容 968) → 3 列（卡片约 312px，接近桌面观感）
+       ≥1400px → 4 列
+     300px 是权衡点：再小则 768 挤成 3 列，再大则 1024 只能排 2 列。 */
+  #view-worldview .card-list {
+    display: flex; flex-direction: column;
+    gap: 16px;
+    padding: 6px 28px 28px;
+  }
+  #view-worldview .card-row { grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
+  /* 同列卡片等高、底部按钮对齐：grid item 默认 stretch 会把卡片拉到同高，
+     但卡片内部必须自己把 .card-actions 推到底部，否则内容少的卡片按钮浮在中间。
+     仅在大屏（≥768px 多列）下启用——手机是单列，保持自然高度即可。 */
+  #view-worldview .card { display: flex; flex-direction: column; }
+  #view-worldview .card-actions { margin-top: auto; }
 
   /* 工具栏 / 标签栏 / 上传区同步加宽，与列表左右对齐 */
   #view-index .toolbar { padding: 14px 28px 10px; }
@@ -741,7 +762,8 @@ table.matrix td.hot { color: #fff; font-weight: 600; }
   .stats-facts { grid-template-columns: repeat(auto-fit, minmax(112px, 1fr)); }
   .stats-fam-cards { grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 10px; }
   .stats-panel { padding: 16px 20px 18px; }
-  /* 世界观卡片行（.card-row）本就 auto-fill，放宽最小列宽即可 */
+  /* 通用世界观卡片行（.card-row）在 ≥768px 的列数在下方 #view-worldview 规则里显式指定。
+     这里保留原 auto-fill 放宽，供非世界观场景（如通用 .card-row）使用。 */
   .card-row { grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; }
 }
 
@@ -755,11 +777,15 @@ table.matrix td.hot { color: #fff; font-weight: 600; }
 
   #view-home .cards { grid-template-columns: repeat(3, 1fr); max-width: 820px; }
 
+  /* 世界观页的 .card-row 列数由 ≥768px 段的 auto-fill 自适应规则决定，
+     此处不再覆盖（避免把 1024px 强行拉到 4 列、卡片过窄）。 */
+
   /* 横屏平板宽度充足（≥1024px 有效内容宽约 950px+），列宽收到 320px
-     让常见尺寸能排下 3 列，而不是留一大片空白 */
+     让常见尺寸能排下 3 列，而不是留一大片空白
+     （世界观页的 .card-list 装的是 .cat-group 分组，同样不能 grid 化，故不列入） */
   #view-index .card-list,
-  #view-worldview .card-list,
   #view-relations .card-list { grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); padding-left: 36px; padding-right: 36px; }
+  #view-worldview .card-list { padding-left: 36px; padding-right: 36px; }
 
   #view-index .toolbar, #view-worldview .toolbar, #view-relations .toolbar { padding-left: 36px; padding-right: 36px; }
   .region-tabs, .cat-tabs, .type-tabs, .main-cat-tabs { padding-left: 36px; padding-right: 36px; }
