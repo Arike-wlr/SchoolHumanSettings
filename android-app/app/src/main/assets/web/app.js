@@ -1129,7 +1129,8 @@ VM.worldview = (function() {
     if (tab) tab.classList.add('active');
     document.getElementById('worldSearchInput').value = '';
     document.getElementById('worldSearchWrap').classList.remove('has-value');
-    document.getElementById('catTabs').style.display = (mainCat === '人物背景故事') ? 'none' : '';
+    // 分类标签页对所有大类都显示（人物背景故事分「单人 / 多人」）
+    document.getElementById('catTabs').style.display = '';
     return loadEntries();
   }
 
@@ -1234,7 +1235,7 @@ VM.worldview = (function() {
   function cardHTML(e, gi) {
     var ct = e.content || '';
     var preview = ct.length > 120 ? ct.substring(0, 120) + '…' : ct;
-    var showCat = activeMainCategory !== '人物背景故事' && e.category;
+    var showCat = !!e.category;
     var ec = selectedIds.has(e.id) ? ' selected' : '';
     var selec = selectedIds.has(e.id) ? ' selected' : '';
     return '<div class="card' + ec + '" data-drag-id="' + e.id + '" data-drag-idx="' + (gi !== undefined ? gi : 0) + '" onclick="VM.worldview.handleCardClick(' + e.id + ')">' +
@@ -1249,6 +1250,17 @@ VM.worldview = (function() {
       '<div class="card-actions"><button class="btn-action" onclick="event.stopPropagation();VM.worldview.openEditModal(' + e.id + ')">编辑</button><button class="btn-action danger" onclick="event.stopPropagation();VM.worldview.openDeleteModal(' + e.id + ',\'' + esc(e.title) + '\')">删除</button></div></div>';
   }
 
+  // 分类字段显隐：人物背景故事用「单人/多人」下拉，其余大类用自由文本
+  function syncCategoryFields(mainCat, categoryValue) {
+    var isBgp = mainCat === '人物背景故事';
+    document.getElementById('worldCategoryGroup').style.display = isBgp ? 'none' : '';
+    document.getElementById('worldBgpCategoryGroup').style.display = isBgp ? '' : 'none';
+    if (isBgp) {
+      var sel = document.getElementById('worldBgpCategorySelect');
+      sel.value = (categoryValue === '单人' || categoryValue === '多人') ? categoryValue : '单人';
+    }
+  }
+
   function openCreateModal() {
     if (!AppNavigation.isInternal()) return AppNavigation.enter('worldModalOverlay', function () { return openCreateModal(); });
     document.getElementById('worldModalTitle').textContent = '添加新设定';
@@ -1256,7 +1268,7 @@ VM.worldview = (function() {
     document.getElementById('worldEditId').value = '';
     document.getElementById('worldEntryForm').reset();
     document.getElementById('worldMainCategoryInput').value = activeMainCategory;
-    document.getElementById('worldCategoryGroup').style.display = (activeMainCategory === '人物背景故事') ? 'none' : '';
+    syncCategoryFields(activeMainCategory, '');
     document.getElementById('worldModalOverlay').classList.add('active');
     editBaseline = formNavigationSignature('worldEntryForm');
   }
@@ -1273,7 +1285,7 @@ VM.worldview = (function() {
       document.getElementById('worldTitle').value = e.title || '';
       document.getElementById('worldCategoryInput').value = e.category || '';
       document.getElementById('worldContent').value = e.content || '';
-      document.getElementById('worldCategoryGroup').style.display = (e.main_category === '人物背景故事') ? 'none' : '';
+      syncCategoryFields(e.main_category || '', e.category || '');
       document.getElementById('worldModalOverlay').classList.add('active');
       editBaseline = formNavigationSignature('worldEntryForm');
     });
@@ -1283,10 +1295,15 @@ VM.worldview = (function() {
     e.preventDefault();
     return AppNavigation.save(function () {
       var editId = document.getElementById('worldEditId').value;
+      var mainCat = document.getElementById('worldMainCategoryInput').value;
+      // 人物背景故事取「单人/多人」下拉值，其余大类取自由文本输入
+      var category = (mainCat === '人物背景故事')
+        ? document.getElementById('worldBgpCategorySelect').value
+        : document.getElementById('worldCategoryInput').value.trim();
       var data = {
-        main_category: document.getElementById('worldMainCategoryInput').value,
+        main_category: mainCat,
         title: document.getElementById('worldTitle').value.trim(),
-        category: document.getElementById('worldCategoryInput').value.trim(),
+        category: category,
         content: document.getElementById('worldContent').value.trim()
       };
       if (!data.title) { showToast('标题不能为空', 'error'); return; }
@@ -1341,8 +1358,7 @@ VM.worldview = (function() {
       detailEntryId = e.id;
       document.getElementById('worldDetailTitle').textContent = e.title;
       var body = '';
-      if (e.main_category === '人物背景故事') {}
-      else if (e.category) body += '<div class="detail-section"><div class="detail-label">分类</div><div class="detail-value">' + esc(e.category) + '</div></div>';
+      if (e.category) body += '<div class="detail-section"><div class="detail-label">分类</div><div class="detail-value">' + esc(e.category) + '</div></div>';
       if (e.content) body += '<div class="detail-section"><div class="detail-label">内容</div><div class="detail-value">' + renderContentWithDocLinks(e.content) + '</div></div>';
       document.getElementById('worldDetailBody').innerHTML = body || '<p style="color:var(--text-light);text-align:center;padding:20px;">暂无内容</p>';
       document.getElementById('worldDetailOverlay').classList.add('active');
@@ -1583,7 +1599,7 @@ VM.worldview = (function() {
   function restoreNavigation(state) {
     if (state) { activeMainCategory = state.main; activeCategory = state.category; document.getElementById('worldSearchInput').value = state.search; exportMode = state.exporting; selectedIds = new Set(state.selected); }
     document.querySelectorAll('#view-worldview .main-cat-tab').forEach(function (el) { el.classList.toggle('active', el.dataset.main === activeMainCategory); });
-    document.getElementById('catTabs').style.display = activeMainCategory === '人物背景故事' ? 'none' : '';
+    document.getElementById('catTabs').style.display = '';
     return Promise.resolve(loadEntries()).then(function () { selectCategory(activeCategory); onSearch(); document.body.classList.toggle('export-mode', exportMode); });
   }
   return {

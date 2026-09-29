@@ -584,6 +584,13 @@
           <input type="text" id="categoryInput" list="catList" placeholder="襟江枕海甲东南" autocomplete="off">
           <datalist id="catList"></datalist>
         </div>
+        <div class="form-group" id="bgpCategoryGroup" style="display:none;">
+          <label for="bgpCategorySelect">分类</label>
+          <select id="bgpCategorySelect">
+            <option value="单人">单人</option>
+            <option value="多人">多人</option>
+          </select>
+        </div>
         <div class="form-group">
           <label for="content">内容</label>
           <textarea id="content" rows="6" placeholder="详细描述世界观内容… 可用 [[文件名|显示文字]] 插入文档链接"></textarea>
@@ -713,8 +720,8 @@ function selectMainCategory(mainCat) {
   if (tab) tab.classList.add('active');
   document.getElementById('searchInput').value = '';
   document.getElementById('searchWrap').classList.remove('has-value');
-  // 人物背景故事不显示分类标签
-  document.getElementById('catTabs').style.display = (mainCat === '人物背景故事') ? 'none' : '';
+  // 分类标签页对所有大类都显示（人物背景故事分「单人 / 多人」）
+  document.getElementById('catTabs').style.display = '';
   loadEntries();
 }
 
@@ -821,7 +828,7 @@ function renderGrid(entries) {
 function cardHTML(e) {
   const contentText = e.content || '';
   const preview = contentText.length > 180 ? contentText.substring(0, 180) + '…' : contentText;
-  const showCat = activeMainCategory !== '人物背景故事' && e.category;
+  const showCat = !!e.category;
   const cardExtraClass = selectedIds.has(e.id) ? ' selected' : '';
   return `
     <div class="card${cardExtraClass}" draggable="true" data-id="${e.id}"
@@ -850,6 +857,17 @@ function esc(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
 
+// 分类字段显隐：人物背景故事用「单人/多人」下拉，其余大类用自由文本
+function syncCategoryFields(mainCat, categoryValue) {
+  const isBgp = mainCat === '人物背景故事';
+  document.getElementById('categoryGroup').style.display = isBgp ? 'none' : '';
+  document.getElementById('bgpCategoryGroup').style.display = isBgp ? '' : 'none';
+  if (isBgp) {
+    const sel = document.getElementById('bgpCategorySelect');
+    sel.value = (categoryValue === '单人' || categoryValue === '多人') ? categoryValue : '单人';
+  }
+}
+
 // ====== 创建 ======
 function openCreateModal() {
   editReturnToDetail = null;
@@ -858,8 +876,7 @@ function openCreateModal() {
   document.getElementById('editId').value = '';
   document.getElementById('mainCategoryInput').value = activeMainCategory;
   document.getElementById('entryForm').reset();
-  // 人物背景故事隐藏分类字段
-  document.getElementById('categoryGroup').style.display = (activeMainCategory === '人物背景故事') ? 'none' : '';
+  syncCategoryFields(activeMainCategory, '');
   document.getElementById('modalOverlay').classList.add('active');
 }
 
@@ -875,8 +892,7 @@ async function openEditModal(id) {
     document.getElementById('title').value = e.title;
     document.getElementById('categoryInput').value = e.category || '';
     document.getElementById('content').value = e.content || '';
-    // 人物背景故事隐藏分类字段
-    document.getElementById('categoryGroup').style.display = (e.main_category === '人物背景故事') ? 'none' : '';
+    syncCategoryFields(e.main_category || '', e.category || '');
     document.getElementById('modalOverlay').classList.add('active');
   } catch (err) {
     showToast('获取设定数据失败', 'error');
@@ -890,11 +906,16 @@ async function submitForm(e) {
   if (!form.checkValidity()) { form.reportValidity(); return; }
 
   const editId = document.getElementById('editId').value;
+  const mainCat = document.getElementById('mainCategoryInput').value.trim();
+  // 人物背景故事取「单人/多人」下拉值，其余大类取自由文本输入
+  const category = (mainCat === '人物背景故事')
+    ? document.getElementById('bgpCategorySelect').value
+    : document.getElementById('categoryInput').value.trim();
   const data = {
     title: document.getElementById('title').value.trim(),
-    category: document.getElementById('categoryInput').value.trim(),
+    category: category,
     content: document.getElementById('content').value.trim(),
-    main_category: document.getElementById('mainCategoryInput').value.trim(),
+    main_category: mainCat,
   };
 
   try {
@@ -970,12 +991,22 @@ function cancelEdit() {
   if (backId) openDetailModal(backId);
 }
 
-document.getElementById('modalOverlay').addEventListener('click', function(e) {
-  if (e.target === this) closeModal();
-});
-document.getElementById('deleteOverlay').addEventListener('click', function(e) {
-  if (e.target === this) closeDeleteModal();
-});
+// 点遮罩关闭：必须「mousedown 与 mouseup 都落在遮罩本身」才关闭。
+// ⚠️ 不能只看 click 的 e.target ——在 textarea 里拖选文字、鼠标滑出弹窗外松手时，
+// 部分浏览器会把 click 派发到共同祖先（即 overlay），导致正在编辑的内容被误关丢弃。
+// 记录 mousedown 的落点即可区分「真的点空白处」与「拖选溢出」。
+function bindOverlayClose(overlayId, closeFn) {
+  var el = document.getElementById(overlayId);
+  if (!el) return;
+  var downOnOverlay = false;
+  el.addEventListener('mousedown', function(e) { downOnOverlay = (e.target === el); });
+  el.addEventListener('click', function(e) {
+    if (e.target === el && downOnOverlay) closeFn();
+    downOnOverlay = false;
+  });
+}
+bindOverlayClose('modalOverlay', closeModal);
+bindOverlayClose('deleteOverlay', closeDeleteModal);
 
 // ====== 详情查看 ======
 let detailEntryId = null;
@@ -1001,14 +1032,14 @@ async function openDetailModal(id, opts) {
 
     document.getElementById('detailTitle').textContent = e.title;
     const catEl = document.getElementById('detailCat');
-    if (e.category && e.main_category !== '人物背景故事') { catEl.textContent = e.category; catEl.style.display = ''; }
+    if (e.category) { catEl.textContent = e.category; catEl.style.display = ''; }
     else { catEl.style.display = 'none'; }
 
     let body = '';
     // 详情里的 [[文档]] 链接要能「关掉文档后跳回本条详情」，
     // 故先把来源 id 设为这条（renderContentWithDocLinks 会读它）。
     contentLinkSourceId = e.id;
-    if (e.category && e.main_category !== '人物背景故事') body += detailSection('分类', e.category);
+    if (e.category) body += detailSection('分类', e.category);
     body += detailSection('内容', e.content);
     contentLinkSourceId = null;
     document.getElementById('detailBody').innerHTML = body;
