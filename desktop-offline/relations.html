@@ -2040,7 +2040,9 @@ document.getElementById('infoOverlay').addEventListener('click', function(e) {
 });
 
 // --- 关系列表 ---
-let draggedRelIndex = null;
+// 拖拽排序时被拖动的**关系 id**（不是列表下标：列表可能处在搜索/类型筛选下，
+// 下标与 allRelations 不一致，用下标搬运会插错位置）。
+let draggedRelId = null;
 
 function renderRelList() {
   const list = document.getElementById('relList');
@@ -2083,23 +2085,25 @@ function renderRelList() {
   }
   empty.style.display = 'none';
 
-  list.innerHTML = filtered.map((r, i) => {
+  list.innerHTML = filtered.map((r) => {
     const fromName = r.from_name || '角色#' + r.from_char_id;
     const toName = r.to_name || '角色#' + r.to_char_id;
     const typeHtml = r.relation_type ? `<span class="rel-type ${r.relation_type === 'CP' ? 'rel-type-cp' : r.relation_type === '继承记忆' ? 'rel-type-memory' : r.relation_type === '参与组建' ? 'rel-type-formation' : r.relation_type === '师生' ? 'rel-type-teacher' : ''}">${esc(r.relation_type)}</span>` : '';
     const arrow = ['CP', '朋友', '冤家', '亲属'].includes(r.relation_type) ? '⇄' : '→';
     const checked = selectedIds.has(r.id) ? 'checked' : '';
     const selectedClass = selectedIds.has(r.id) ? ' selected' : '';
+    // ⚠️ 拖拽排序一律用 id 定位，不能用列表下标 —— filtered 的 i 与 allRelations
+    // 的下标在有搜索/类型筛选时并不一致，用 i 去 splice allRelations 会插错位置。
     return `
-      <div class="rel-item${selectedClass}" id="rel-${r.id}" draggable="true" data-index="${i}" data-id="${r.id}"
+      <div class="rel-item${selectedClass}" id="rel-${r.id}" draggable="true" data-id="${r.id}"
            onmouseenter="highlightRelation(${r.id}, true)"
            onmouseleave="highlightRelation(${r.id}, false)"
-           ondragstart="onRelDragStart(event, ${i})"
+           ondragstart="onRelDragStart(event, ${r.id})"
            ondragover="onRelDragOver(event)"
            ondragend="onRelDragEnd(event)"
            ondragenter="onRelDragEnter(event, this)"
            ondragleave="onRelDragLeave(event, this)"
-           ondrop="onRelDrop(event, ${i})">
+           ondrop="onRelDrop(event, ${r.id})">
         <input type="checkbox" class="rel-checkbox" ${checked} onchange="toggleCardSelect(${r.id}, this.checked)" onclick="event.stopPropagation()">
         <span class="drag-handle" title="拖动排序">⠿</span>
         <div class="rel-info" onclick="${exportMode ? `toggleCardSelect(${r.id}, !${selectedIds.has(r.id)})` : `openEditModal(${r.id})`}">
@@ -2119,11 +2123,14 @@ function renderRelList() {
   if (exportMode) updateExportButtons();
 }
 
-function onRelDragStart(e, idx) {
-  draggedRelIndex = idx;
-  e.target.classList.add('dragging');
+function onRelDragStart(e, id) {
+  draggedRelId = id;
+  // ⚠️ 用 closest 取卡片本身：e.target 常是卡片内的子元素（文字/span），
+  // 直接给 e.target 加 dragging 类会让整个卡片的半透明样式失效。
+  const el = e.target.closest ? e.target.closest('.rel-item') : e.target;
+  if (el) el.classList.add('dragging');
   e.dataTransfer.effectAllowed = 'move';
-  e.dataTransfer.setData('text/plain', '');
+  e.dataTransfer.setData('text/plain', String(id));
 }
 
 function onRelDragOver(e) {
@@ -2140,21 +2147,34 @@ function onRelDragLeave(e, el) {
   el.classList.remove('drag-over');
 }
 
-function onRelDrop(e, toIdx) {
+function onRelDrop(e, toId) {
   e.preventDefault();
-  e.target.closest('.rel-item')?.classList.remove('drag-over');
-  if (draggedRelIndex === null || draggedRelIndex === toIdx) return;
-  const item = allRelations.splice(draggedRelIndex, 1)[0];
+  const el = e.target.closest ? e.target.closest('.rel-item') : e.target;
+  if (el) el.classList.remove('drag-over');
+  const fromId = draggedRelId;
+  draggedRelId = null;
+  if (fromId == null || fromId === toId) return;
+
+  // 在 allRelations 全量数组里按 id 找真实下标，再搬运。
+  const fromIdx = allRelations.findIndex(r => r.id === fromId);
+  const toIdx = allRelations.findIndex(r => r.id === toId);
+  if (fromIdx < 0 || toIdx < 0) return;
+
+  const item = allRelations.splice(fromIdx, 1)[0];
+  // ⚠️ 语义：把源放到**目标卡片所在的位置**（目标顺延）。
+  // 源在目标之前时，移除源后目标下标已前移 1，所以直接插到 toIdx，
+  // 才等于「占据目标原位」，且拖到最后一项能真正落到末尾。
   allRelations.splice(toIdx, 0, item);
+
   saveRelOrder();
   renderRelList();
-  draggedRelIndex = null;
 }
 
 function onRelDragEnd(e) {
-  e.target.classList.remove('dragging');
+  const el = e.target.closest ? e.target.closest('.rel-item') : e.target;
+  if (el) el.classList.remove('dragging');
   document.querySelectorAll('.rel-item').forEach(el => el.classList.remove('drag-over'));
-  draggedRelIndex = null;
+  draggedRelId = null;
 }
 
 async function saveRelOrder() {
