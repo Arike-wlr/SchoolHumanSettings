@@ -260,21 +260,55 @@ android-sdk/platform-tools/adb.exe forward tcp:9222 localabstract:webview_devtoo
 
 ---
 
-## 附：新增的文件
+## 附：`tools/` 文件清单
+
+### 入口（双击即用）
 
 | 文件 | 作用 |
 |---|---|
-| `tools/mobile-dev-server.py` | 方案 A/A+ 的静态服务器（DEV 探针、ocDev 工具、测试数据、API 代理、禁缓存） |
-| `tools/手机版调试.bat` | 双击启动方案 A |
-| `tools/手机版调试-连后端.bat` | 双击启动方案 A+（前端+后端+代理） |
-| `tools/mobile-dev-tools.js` | 页面内的 `ocDev` 数据工具 + 图片回退表 + 右下角可收起调试面板（自动灌数据） |
-| `tools/export-mock-backup.py` | 从数据库导出「手机版备份格式」的测试数据 |
-| `tools/push-mobile.py` | 方案 B 的推送工具 |
-| `tools/verify-mock-data.js` | 无头 Chrome 自动化验证：灌数据→渲染→浮层不挡导航（开发工具自身用） |
-| `tools/_check-overlay.js` | 专项检查：底部导航可见时，DEV 浮层是否压住它（并截图） |
-| `tools/_waitport.py` | 端口探测小工具（给 bat 用） |
+| `手机版调试.bat` | 启动方案 A（静态服务器 :8100） |
+| `手机版调试-连后端.bat` | 启动方案 A+（前端 + 后端 + 代理一把起） |
+
+### 服务与数据
+
+| 文件 | 作用 |
+|---|---|
+| `mobile-dev-server.py` | 方案 A/A+ 的静态服务器（DEV 探针、ocDev 工具、测试数据、API 代理、禁缓存）<br>参数：`--port` `--lan` `--proxy` `--backend` `--no-probe` |
+| `mobile-dev-tools.js` | 页面内的 `ocDev` 数据工具 + 图片回退表 + 右下角可收起调试面板（自动灌数据） |
+| `export-mock-backup.py` | 从数据库导出「手机版备份格式」的测试数据 → `.workbuddy/mock/mock-backup.json` |
+| `push-mobile.py` | 方案 B 的推送工具（`--push --restart` / `--status` / `--disable` / `--list`） |
+
+### 验证脚本（都是开发工具自身用的，不影响产品代码）
+
+| 文件 | 作用 | 前置 |
+|---|---|---|
+| `verify-mock-data.js` | ocDev 端到端：自动灌数据 → 渲染 → seed/reset → 浮层不挡底部导航 | 调试服务器 :8100 |
+| `verify-stat-chars.py` | 统计口径 **Python 侧**：直调 `backend.get_stats()`，写出 `py_stats.json` | 无（不需要起服务） |
+| `verify-stat-chars.js` | 统计口径 **JS 侧**：`node:vm` 跑 `api-shim.js`，与上者逐项比对 | 先跑 `.py`；需 mock 数据 |
+| `verify-stat-render.js` | 统计页渲染：桌面版 + 手机版都断言新文案出现、旧文案为零、无报错 | 调试服务器 :8100 + 后端 :8000 |
+
+> ⚠️ 统计口径改动后**必须跑 `verify-stat-chars.py` + `.js` 这一对**（两路一致才算过）。
+> 详见 `.workbuddy/memory/MEMORY.md` 的「改口径后必做」。
+
+### 辅助
+
+| 文件 | 作用 |
+|---|---|
+| `waitport.py` | 端口探测小工具（给 bat 用）：`python tools/waitport.py 8000` → 通=exit 0 |
+
+### 改到产品代码的两个文件
+
+| 文件 | 作用 |
+|---|---|
 | `MainActivity.java` | 新增 `resolveStartUrl()`，支持开发模式加载 |
 | `image-store.js` | `imageRefToSrcSafe()` 加开发期回退分支（生产行为不变） |
 
 ⚠️ 方案 B 需要**重新打一次包**才能用（因为改了 Java）。在打这次包之前，
 方案 A / A+ 立即可用，不受影响。
+
+### 命名约定
+
+- **不带下划线** = 长期保留（上面所有文件都是）
+- **`_` 开头** = 一次性排查脚本，查完即删。当前 `tools/` 下没有 `_` 开头的文件。
+
+> 注意：`.workbuddy/tmp_scan/` 是这些脚本的临时输出目录，不在 `tools/` 里。

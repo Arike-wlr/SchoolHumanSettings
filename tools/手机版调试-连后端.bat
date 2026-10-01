@@ -38,7 +38,7 @@ rem 轮询等后端就绪（最多约 20 秒）
 set "READY="
 for /l %%i in (1,1,40) do (
   if not defined READY (
-    "%VENV_PY%" "%~dp0_waitport.py" 8000 >nul 2>&1 && set "READY=1"
+    "%VENV_PY%" "%~dp0waitport.py" 8000 >nul 2>&1 && set "READY=1"
     if not defined READY ping -n 1 -w 500 127.0.0.1 >nul
   )
 )

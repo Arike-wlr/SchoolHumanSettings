@@ -1,9 +1,11 @@
 /**
  * 统计「全字段字数」改动 —— 页面渲染验证。
- *   1) 桌面版 stats.html（后端 :8000）：新标签出现、总字数 26834、无控制台报错
+ *   1) 桌面版 stats.html（后端 :8000）：新标签出现、总字数与 Python 侧一致、无控制台报错
  *   2) 手机版统计视图（调试服务器 :8100）：同样检查
  *
- * 用法：node tools/_verify-stat-render.js
+ * 用法：node tools/verify-stat-render.js
+ * 前置：先跑 tools/verify-stat-chars.py（期望总字数从它产出的 py_stats.json 读，
+ *       不写死 —— 否则用户一改内容这个脚本就误报失败）
  */
 const { spawn } = require('child_process');
 const fs = require('fs');
@@ -15,6 +17,18 @@ const PORT_DBG = 9369;
 const PROFILE = path.join(os.tmpdir(), 'statrender-' + Date.now());
 const OUTDIR = path.join(__dirname, '..', '.workbuddy', 'tmp_scan');
 const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+// 期望值来源：Python 侧写出的 py_stats.json（页面用 toLocaleString()，同样是逗号分组）
+let EXPECT_TOTAL = null;
+try {
+  const t = JSON.parse(fs.readFileSync(path.join(OUTDIR, 'py_stats.json'), 'utf8')).total_setting_chars;
+  EXPECT_TOTAL = t.toLocaleString('en-US');
+} catch (e) { /* 下面会提示 */ }
+
+// ⚠️ 要塞进「浏览器侧」脚本的东西必须在 Node 侧先算成字符串。
+//    浏览器脚本体是 cdp.eval(`...`) 的模板字符串，只有 ${} 里的内容会被 Node 求值，
+//    裸写变量名会被原样发到浏览器 → ReferenceError: xxx is not defined。
+const EXPECT_JS = EXPECT_TOTAL === null ? 'null' : `has(${JSON.stringify(EXPECT_TOTAL)})`;
 
 function get(u) {
   return new Promise((res, rej) => {
@@ -81,7 +95,7 @@ class CDP {
         hasOldSettingLabel: has('setting 字数'),
         hasOldAvgLabel: has('人均 setting 字数'),
         hasOldTotal: has('角色设定总字数'),
-        has26834: has('26,834'),
+        hasExpectTotal: ${EXPECT_JS},
         hint: (body.match(/全字段[\\s\\S]{0,40}/) || [''])[0].replace(/\\s+/g,' '),
       });
     })()`);
@@ -90,7 +104,8 @@ class CDP {
     const d = JSON.parse(desk);
     if (!d.hasAllFieldsLabel || !d.hasAvgAll || !d.hasTotalAll) { console.log('  ❌ 新标签缺失'); failed++; }
     if (d.hasOldSettingLabel || d.hasOldAvgLabel || d.hasOldTotal) { console.log('  ❌ 旧标签残留'); failed++; }
-    if (!d.has26834) { console.log('  ❌ 未出现 26,834'); failed++; }
+    if (EXPECT_TOTAL === null) { console.log('  ⚠️ 跳过「总字数」断言（先跑 tools/verify-stat-chars.py）'); }
+    else if (!d.hasExpectTotal) { console.log(`  ❌ 页面未出现期望总字数 ${EXPECT_TOTAL}`); failed++; }
 
     // ---------------- 2) 手机版 ----------------
     await cdp.send('Emulation.setDeviceMetricsOverride', { width: 430, height: 932, deviceScaleFactor: 2, mobile: true });
@@ -111,8 +126,9 @@ class CDP {
         hasOldSettingLabel: has('setting 字数'),
         hasOldAvgLabel: has('人均 setting 字数'),
         hasOldTotal: has('角色设定总字数'),
-        has26834: has('26,834'),
-        crowns: document.querySelectorAll('#view-stats .crown-body').length,
+        hasExpectTotal: ${EXPECT_JS},
+        // ⚠️ 手机版榜单的类名是 .stats-crown-row（不是桌面版的 .crown-body）
+        crowns: document.querySelectorAll('#view-stats .stats-crown-row').length,
       });
     })()`);
     console.log('\n=== 手机版统计视图 ===');
@@ -120,8 +136,9 @@ class CDP {
     const m = JSON.parse(mob);
     if (!m.hasAllFieldsLabel || !m.hasAvgAll || !m.hasTotalAll) { console.log('  ❌ 新标签缺失'); failed++; }
     if (m.hasOldSettingLabel || m.hasOldAvgLabel || m.hasOldTotal) { console.log('  ❌ 旧标签残留'); failed++; }
-    if (!m.has26834) { console.log('  ❌ 未出现 26,834'); failed++; }
-    if (m.crowns < 1) { console.log('  ⚠️ 榜单未渲染'); }
+    if (EXPECT_TOTAL === null) { console.log('  ⚠️ 跳过「总字数」断言（先跑 tools/verify-stat-chars.py）'); }
+    else if (!m.hasExpectTotal) { console.log(`  ❌ 页面未出现期望总字数 ${EXPECT_TOTAL}`); failed++; }
+    if (m.crowns < 1) { console.log('  ❌ 榜单未渲染（选择器：.stats-crown-row）'); failed++; }
 
     // ---------------- 控制台噪音 ----------------
     const bad = cdp.logs.filter(l => l.lvl === 'exception' || /Uncaught|Failed to|SyntaxError/.test(l.txt || ''));

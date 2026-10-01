@@ -1,12 +1,15 @@
 /**
  * 统计口径两路验证 —— JS 侧：node:vm 加载 api-shim.js，喂 mock DB，调 computeStats()。
- * 与 Python 侧 tools/_verify-stat-chars.py 写出的 py_stats.json 逐项比对。
+ * 与 Python 侧 tools/verify-stat-chars.py 写出的 py_stats.json 逐项比对。
  *
  * 用法：
- *   1) .venv\Scripts\python.exe tools\_verify-stat-chars.py     （先生成 py_stats.json）
- *   2) node tools/_verify-stat-chars.js
+ *   1) .venv\Scripts\python.exe tools\export-mock-backup.py     （DB 改过就必须重跑，否则快照过期）
+ *   2) .venv\Scripts\python.exe tools\verify-stat-chars.py      （生成 py_stats.json）
+ *   3) node tools\verify-stat-chars.js
  *
  * ⚠️ vm 里没有 Blob / window，要补桩（api-shim.js 顶层 `const _originalFetch = window.fetch`）。
+ * ⚠️ 两侧数据源不同：Python 读 **实时 DB**，JS 读 **mock 快照**。快照过期会表现为
+ *    「到处都对不上」——脚本会自动检测并提示，别把它当成口径 bug。
  */
 const fs = require('fs');
 const os = require('os');
@@ -17,6 +20,25 @@ const ROOT = path.join(__dirname, '..');
 const SHIM = path.join(ROOT, 'android-app', 'app', 'src', 'main', 'assets', 'web', 'api-shim.js');
 const MOCK = path.join(ROOT, '.workbuddy', 'mock', 'mock-backup.json');
 const PY = path.join(ROOT, '.workbuddy', 'tmp_scan', 'py_stats.json');
+const DB = path.join(ROOT, 'server', 'oc_characters.db');
+
+// --- 数据新鲜度自检：把「快照过期」和「口径算错」区分开 ---
+// 两侧数据源不同（Python 读实时 DB，JS 读 mock 快照），DB 改过没重导出就会到处对不上。
+function staleTips() {
+  const tips = [];
+  let mtime = p => { try { return fs.statSync(p).mtimeMs; } catch { return null; } };
+  const tMock = mtime(MOCK), tPy = mtime(PY), tDb = mtime(DB);
+  const fmt = t => t ? new Date(t).toLocaleString('zh-CN') : '不存在';
+  if (tDb && tMock && tMock < tDb) {
+    tips.push(`mock 快照比 DB 旧（mock ${fmt(tMock)} < DB ${fmt(tDb)}）`);
+    tips.push('→ 先跑：.venv\\Scripts\\python.exe tools\\export-mock-backup.py');
+  }
+  if (tPy && tDb && tPy < tDb) {
+    tips.push(`py_stats.json 比 DB 旧（${fmt(tPy)} < ${fmt(tDb)}）`);
+    tips.push('→ 重跑：.venv\\Scripts\\python.exe tools\\verify-stat-chars.py');
+  }
+  return tips;
+}
 
 const mock = JSON.parse(fs.readFileSync(MOCK, 'utf8'));
 const src = fs.readFileSync(SHIM, 'utf8');
@@ -63,7 +85,7 @@ vm.runInContext(src, sandbox, { filename: 'api-shim.js' });
   console.log('  地区设定厚度      ', js.regions.slice(0, 6).map(r => [r.name, r.avg_setting]));
 
   if (!fs.existsSync(PY)) {
-    console.log('\n⚠️ 找不到 py_stats.json，先跑 tools/_verify-stat-chars.py');
+    console.log('\n⚠️ 找不到 py_stats.json，先跑 tools/verify-stat-chars.py');
     process.exitCode = 2;
     return;
   }
@@ -93,6 +115,11 @@ vm.runInContext(src, sandbox, { filename: 'api-shim.js' });
   } else {
     console.log('不一致 ❌');
     problems.forEach(p => console.log('  - ' + p));
+    const tips = staleTips();
+    if (tips.length) {
+      console.log('\n⚠️ 先排除「数据源过期」，再怀疑口径代码：');
+      tips.forEach(t => console.log('  ' + t));
+    }
   }
   process.exitCode = problems.length === 0 ? 0 : 1;
 })().catch(e => { console.error('出错:', e && e.stack || e); process.exitCode = 2; });
