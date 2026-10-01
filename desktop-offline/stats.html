@@ -737,12 +737,12 @@ function render(d) {
   html += '<div class="panel">' + completenessView(COMP) + '</div>';
 
   // ---------- 角色之最 ----------
-  html += '<h2 class="section-title">角色之最<span class="section-hint">设定 ' +
+  html += '<h2 class="section-title">角色之最<span class="section-hint">全字段 ' +
     (HL.total_setting_chars || 0).toLocaleString() + ' 字 · 平均 ' +
     (C.total ? Math.round((HL.total_setting_chars || 0) / C.total) : 0) + ' 字/人</span></h2>';
   html += '<div class="stat-grid">';
 
-  html += panel('📝 设定最厚', 'setting 字数', crownList(HL.items && HL.items.longest_setting, '字'));
+  html += panel('📝 设定最厚', '全字段字数', crownList(HL.items && HL.items.longest_setting, '字'));
   html += panel('🖼 图片最多', '张数', crownList(HL.items && HL.items.most_images, '张'));
   html += panel('📊 设定篇幅分布', '共 ' + (C.total || 0) + ' 位', barChart(HL.setting_distribution, C.total));
 
@@ -812,7 +812,7 @@ function render(d) {
   html += '</div>';
 
   // ---------- 地区圈子 ----------
-  html += '<h2 class="section-title">地区圈子<span class="section-hint">凝聚力＝同地区内部关系占比 · 设定厚度＝人均设定字数</span></h2>';
+  html += '<h2 class="section-title">地区圈子<span class="section-hint">凝聚力＝同地区内部关系占比 · 设定厚度＝人均全字段字数</span></h2>';
   html += '<div class="stat-grid">';
 
   html += panel('🤝 地区凝聚力', (REG.length ? REG.length + ' 个活跃地区' : ''),
@@ -822,7 +822,7 @@ function render(d) {
       })), 100)
       : '<div class="panel-note">关系数据不足（每个地区至少需 3 条关系）</div>');
 
-  html += panel('✍️ 设定厚度', '人均 setting 字数',
+  html += panel('✍️ 设定厚度', '人均全字段字数',
     REG.length
       ? barChart(REG.slice().sort((a, b) => b.avg_setting - a.avg_setting)
           .map(r => ({ name: r.name, count: r.avg_setting })), 0, { pct: false, unit: '字' })
@@ -843,7 +843,7 @@ function render(d) {
     '<div class="facts">' +
       fact('设定字数', (W.content_chars || 0).toLocaleString(), ' 字') +
       fact('平均每条', W.total ? Math.round((W.content_chars || 0) / W.total).toLocaleString() : 0, ' 字') +
-      fact('角色设定总字数', (HL.total_setting_chars || 0).toLocaleString(), ' 字') +
+      fact('角色全字段总字数', (HL.total_setting_chars || 0).toLocaleString(), ' 字') +
     '</div>');
 
   html += '</div>';

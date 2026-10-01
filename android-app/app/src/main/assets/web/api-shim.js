@@ -430,6 +430,9 @@ async function persistReorder(storeName, items) {
 //   - 存在状态空值归「存在」；
 //   - 家族按 ; ； , ， 、 / | 换行 拆分；
 //   - 关系度按两端计次（自环算 1），配对按无向去重；
+//   - 字数按码点计（Array.from().length，不是 str.length）；
+//     **角色「设定字数」= 全部文本字段之和**（见 STATS_CHAR_TEXT_FIELDS / statsCharTotalCount），
+//     不只是 setting。榜单「设定最厚」、篇幅分布、地区设定厚度、总字数都用这个口径。
 //   - 不解析 birth_time / birthday（自由文本）。
 // ============================================================
 var STATS_TOP_N = 12;
@@ -511,6 +514,24 @@ function statsCharCount(str) {
   return Array.from(String(str == null ? '' : str)).length;
 }
 
+// 角色「设定字数」参与统计的文本字段（与后端 backend.py 的 CHAR_TEXT_FIELDS 必须逐字一致）。
+// 不含 id / sort_order / 时间戳等管理字段；也不含 image_url / images / face_crop ——
+// 那些是图片引用（data URL 能长到几十万字符），算进字数会得出天文数字。
+var STATS_CHAR_TEXT_FIELDS = [
+  'name', 'alias', 'university', 'region', 'gender', 'birthday', 'height',
+  'appearance', 'identity_period', 'birth_time', 'birthplace', 'status',
+  'setting', 'family', 'naming_rationale'
+];
+
+// 角色设定字数 = 所有文本字段字数加起来（不只是 setting）。
+function statsCharTotalCount(c) {
+  var n = 0, o = c || {};
+  for (var i = 0; i < STATS_CHAR_TEXT_FIELDS.length; i++) {
+    n += statsCharCount(o[STATS_CHAR_TEXT_FIELDS[i]]);
+  }
+  return n;
+}
+
 async function computeStats() {
   var chars = await charDB.list();
   var worlds = await worldDB.list('');
@@ -548,7 +569,7 @@ async function computeStats() {
 
     // 地区聚合
     var reg = statsBucket(c.region);
-    regionSettingSum[reg] = (regionSettingSum[reg] || 0) + statsCharCount(c.setting);
+    regionSettingSum[reg] = (regionSettingSum[reg] || 0) + statsCharTotalCount(c);
     regionCharCount[reg] = (regionCharCount[reg] || 0) + 1;
   });
 
@@ -781,12 +802,12 @@ async function computeStats() {
     ['1–199 字', function(n) { return n > 0 && n < 200; }],
     ['未填写', function(n) { return n === 0; }]
   ].map(function(pair) {
-    var cnt = chars.filter(function(c) { return pair[1](statsCharCount(c.setting)); }).length;
+    var cnt = chars.filter(function(c) { return pair[1](statsCharTotalCount(c)); }).length;
     return { name: pair[0], count: cnt };
   }).filter(function(x) { return x.count > 0 || x.name === '未填写'; });
 
   var highlights = {
-    longest_setting: topBy(function(c) { return statsCharCount(c.setting); }),
+    longest_setting: topBy(function(c) { return statsCharTotalCount(c); }),
     most_relations: topBy(function(c) { return degree[c.id] || 0; }),
     richest_types: topBy(function(c) { return Object.keys(typeKinds[c.id] || {}).length; }),
     most_images: topBy(function(c) { return statsNormalizeImages(c).length; }),
@@ -858,7 +879,7 @@ async function computeStats() {
       world_longest: (longestEntry && longestEntry.chars) ? longestEntry : null,
       world_longest_list: worldLongestList,
       setting_distribution: settingDist,
-      total_setting_chars: chars.reduce(function(a, c) { return a + statsCharCount(c.setting); }, 0)
+      total_setting_chars: chars.reduce(function(a, c) { return a + statsCharTotalCount(c); }, 0)
     },
     documents: {
       total: docs.length,

@@ -70,12 +70,41 @@ function imageStoreAvailable() {
  * 把任意图片引用换算成能放进 <img src> 的地址。
  * img:// 引用在无原生仓库时无法解析，返回空串，由上层显示"图片不可用"占位 ——
  * 这只会发生在"图片已在 Android 上迁移成引用、却又在别处打开"的场景。
+ *
+ * ⚠️ 下面两处 dev 分支只在原生桥缺失时生效。真机上页面 origin 是
+ * https://appassets.androidplatform.net，相对路径 /api/... 会 404；
+ * 而 __ocDevImgMap 根本不存在。所以带桥时行为与改动前逐字一致。
  */
 function imageRefToSrcSafe(ref) {
   var v = (ref == null) ? '' : String(ref).trim();
   if (!v) return '';
-  if (isImageRef(v)) return nativeImageStore() ? imageRefToSrc(v) : '';
+  if (isImageRef(v)) {
+    if (nativeImageStore()) return imageRefToSrc(v);
+    // 开发期：img:// 在电脑浏览器里无法解析，查同步时记下的服务器地址顶替。
+    return devImageFallback(v) || '';
+  }
+  // 开发期：同步下来的相对路径（/api/images/xxx）在静态调试服务器上需要补上后端基址
+  // （--proxy 时为同源，基址为空串，等价于原样返回）。真机上不会走到这里。
+  if (!nativeImageStore() && v.charAt(0) === '/' && v.charAt(1) !== '/') {
+    return devServerBase() + v;
+  }
   return /^(?:data:image\/|blob:|https?:\/\/)/i.test(v) ? v : '';
+}
+
+/**
+ * 开发期兜底：把 img:// 引用换回它对应的服务器图片地址。
+ * 依赖 ocDev 在灌数据时写入 window.__ocDevImgMap（img://<id> → 服务器路径），
+ * 生产环境没有这张表，函数恒返回空串，逻辑与改动前一致。
+ */
+function devImageFallback(ref) {
+  var map = (typeof window !== 'undefined') ? window.__ocDevImgMap : null;
+  var hit = map && map[ref];
+  return hit ? devServerBase() + hit : '';
+}
+
+/** 开发期后端基址。默认空串（同源），由调试服务器在注入时设定。 */
+function devServerBase() {
+  return (typeof window !== 'undefined' && window.__OC_DEV_BASE__) || '';
 }
 
 // ---------- 字节 / base64 / data URL 互转 ----------

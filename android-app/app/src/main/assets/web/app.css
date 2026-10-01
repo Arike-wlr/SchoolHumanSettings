@@ -668,7 +668,11 @@ table.matrix td.hot { color: #fff; font-weight: 600; }
   /* ---- 角色 / 关系列表：单列改多列（容器里直接就是卡片） ----
      ⚠️ #view-worldview .card-list 不在此列！它的子项是 .cat-group 分组，
      把分组容器 grid 化会把每个分组挤成窄列、组内卡片随之压扁换行
-     （表现：竖排文字 + 大片空白）。世界观页只把内层 .card-row 放宽即可，见下。 */
+     （表现：竖排文字 + 大片空白）。世界观页只把内层 .card-row 放宽即可，见下。
+     ⚠️ #charGrid 里除了 .card 还有 .region-divider（「南京 · 26位」分组标题）。
+     它也是 grid item，不加 grid-column 就会**独占第一个单元格**，
+     把第一张卡片挤到第二格 → 表现「第一张卡片左边空一大块」。
+     必须让它横跨整行，卡片才会从下一行第一格开始。 */
   #view-index .card-list,
   #view-relations .card-list {
     display: grid;
@@ -676,6 +680,9 @@ table.matrix td.hot { color: #fff; font-weight: 600; }
     gap: 12px;
     padding: 6px 28px 28px;
   }
+  #view-index .region-divider { grid-column: 1 / -1; margin: 6px 0 0; }
+  /* 分组标题独占整行后，标题与它下面那行卡片之间靠 grid 的 row-gap(12px) 已经够，
+     但两行卡片之间不应该再出现 12px 之外的多余空白 —— 标题行自身不带 padding-bottom。 */
 
   /* 世界观页：外层保持纵向堆叠（分组一个一个往下排），内层 .card-row 自适应多列。
      与桌面端 desktop-offline/worldview.html 的结构保持一致（那边 .card-row 也是 grid）。

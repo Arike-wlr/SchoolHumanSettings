@@ -3168,7 +3168,7 @@ VM.stats = (function() {
 
     // ---------- 角色之最 ----------
     html += '<div class="stats-section-title">角色之最</div>';
-    html += panel('📝 设定最厚', 'setting 字数', crownList(HL.items && HL.items.longest_setting, '字'));
+    html += panel('📝 设定最厚', '全字段字数', crownList(HL.items && HL.items.longest_setting, '字'));
     html += panel('🖼 图片最多', '张数', crownList(HL.items && HL.items.most_images, '张'));
     html += panel('📊 设定篇幅分布', '共 ' + num(C.total) + ' 位', barChart(HL.setting_distribution, num(C.total)));
 
@@ -3240,7 +3240,7 @@ VM.stats = (function() {
       }), 100)
       : '<div class="stats-note">关系数据不足（每个地区至少需 3 条关系）</div>');
 
-    html += panel('✍️ 设定厚度', '人均 setting 字数',
+    html += panel('✍️ 设定厚度', '人均全字段字数',
       REG.length
         ? barChart(REG.slice().sort(function(a, b) { return num(b.avg_setting) - num(a.avg_setting); })
             .map(function(r) { return { name: r.name, count: num(r.avg_setting) }; }), 0, 0, { pct: false, unit: '字' })
@@ -3254,7 +3254,7 @@ VM.stats = (function() {
     html += panel('✍️ 内容体量', '字数统计', facts([
       ['世界观字数', num(W.content_chars).toLocaleString(), ' 字'],
       ['平均每条', num(W.total) ? Math.round(num(W.content_chars) / num(W.total)).toLocaleString() : 0, ' 字'],
-      ['角色设定总字数', num(HL.total_setting_chars).toLocaleString(), ' 字']
+      ['角色全字段总字数', num(HL.total_setting_chars).toLocaleString(), ' 字']
     ]));
 
     // ---------- 素材与文档 ----------

@@ -67,6 +67,25 @@ public class MainActivity extends AppCompatActivity {
     private static final String IMAGES_DIR = "images";
     private WebViewAssetLoader assetLoader;
 
+    // ==================== 开发模式（调试 H5 用）====================
+    // 背景：改一行 H5 就要「打 APK → 传到手机 → 覆盖安装」，一轮好几分钟。
+    // 做法：把 assets/web 全量拷到私有目录 files/web-dev/，启动时若该目录存在
+    //       （或手动开启开关），就从它加载 —— 之后改 H5 只需 adb push + 重启 App。
+    // 开关：files/web-dev/.enabled 存在即生效；用 tools/push-mobile.py --push 创建。
+    // ⚠️ 正式发布前请用 --disable 关掉，否则用户看到的是旧副本。
+    private static final String DEV_WEB_DIR = "web-dev";
+    private static final String DEV_WEB_FLAG = ".enabled";
+
+    private String resolveStartUrl() {
+        File devDir = new File(getFilesDir(), DEV_WEB_DIR);
+        File flag = new File(devDir, DEV_WEB_FLAG);
+        File devIndex = new File(devDir, "index.html");
+        if (devDir.isDirectory() && flag.isFile() && devIndex.isFile()) {
+            return "file://" + devIndex.getAbsolutePath();
+        }
+        return "file:///android_asset/web/index.html";
+    }
+
     // 文件导出相关
     private ActivityResultLauncher<Intent> saveFileLauncher;
     private byte[] pendingFileBytes;
@@ -214,9 +233,9 @@ public class MainActivity extends AppCompatActivity {
         jsBridge = new JsBridge();
         webView.addJavascriptInterface(jsBridge, "Android");
 
-        // 直接加载本地离线页面
+        // 直接加载本地离线页面（开发模式下优先用 files/web-dev/ 里的副本）
         webView.setVisibility(View.VISIBLE);
-        webView.loadUrl("file:///android_asset/web/index.html");
+        webView.loadUrl(resolveStartUrl());
 
         getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
             @Override

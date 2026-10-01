@@ -1349,6 +1349,9 @@ def global_search(q: str = ""):
 #   - 关系度 = 该角色作为 from 或 to 出现的关系条数（无向计次，自环算 1）。
 #   - 字数一律按 **Unicode 码点** 计数（Python 的 len 天然如此；JS 端必须用
 #     Array.from(str).length，用 str.length 会把 emoji 算成 2 个而对不上）。
+#   - **角色「设定字数」= 全部文本字段之和**（见 CHAR_TEXT_FIELDS / _char_all_text_len），
+#     不只是 setting 字段。榜单「设定最厚」、篇幅分布、地区设定厚度、总字数都用这个口径。
+#     不含图片引用与 id/时间戳等管理字段。
 #   - **绝不解析 birth_time / birthday**，它们是自由文本。
 
 STATS_TOP_N = 12          # 各分布榜最多返回多少项
@@ -1440,6 +1443,24 @@ def _char_text_len(value) -> int:
     return len(str(value or ""))
 
 
+# 角色「设定字数」参与统计的文本字段（手机版 api-shim.js 的 STATS_CHAR_TEXT_FIELDS 必须逐字一致）
+CHAR_TEXT_FIELDS = (
+    "name", "alias", "university", "region", "gender", "birthday", "height",
+    "appearance", "identity_period", "birth_time", "birthplace", "status",
+    "setting", "family", "naming_rationale",
+)
+
+
+def _char_all_text_len(c) -> int:
+    """角色设定字数 = 所有文本字段字数加起来（不只是 setting）。
+
+    不包括 id / sort_order / created_at / updated_at 等管理字段；
+    也不包括 image_url / images / face_crop —— 那些是图片引用（data URL 能长到几十万字符），
+    算进「设定字数」会得出天文数字，而且本来也不算设定文字。
+    """
+    return sum(_char_text_len(c.get(f)) for f in CHAR_TEXT_FIELDS)
+
+
 @app.get("/api/stats")
 def get_stats():
     """总览统计：角色 / 世界设定 / 关系 三类数据的聚合视图"""
@@ -1496,11 +1517,11 @@ def get_stats():
     # ---------- 亮点：每个地区的关系个数（用于地区凝聚力 / 设定厚度）----------
     region_total_rel = {}      # 地区 -> 该地区角色涉及的关系数（两端计次）
     region_inside_rel = {}     # 地区 -> 其中两端都在该地区的关系数
-    region_setting_sum = {}    # 地区 -> setting 字数合计
+    region_setting_sum = {}    # 地区 -> 角色「全字段字数」合计
     region_char_count = {}     # 地区 -> 角色数
     for c in chars:
         r = _norm_bucket(c.get("region"))
-        region_setting_sum[r] = region_setting_sum.get(r, 0) + _char_text_len(c.get("setting"))
+        region_setting_sum[r] = region_setting_sum.get(r, 0) + _char_all_text_len(c)
         region_char_count[r] = region_char_count.get(r, 0) + 1
 
     # ---------- 世界设定 ----------
@@ -1769,7 +1790,7 @@ def get_stats():
             type_kinds.setdefault(cid, set()).add(rt)
 
     highlights = {
-        "longest_setting": _top(lambda c: _char_text_len(c.get("setting"))),
+        "longest_setting": _top(_char_all_text_len),
         "most_relations": _top(lambda c: degree.get(c["id"], 0)),
         "richest_types": _top(lambda c: len(type_kinds.get(c["id"], ()))),
         "most_images": _top(lambda c: len(c.get("images") or [])),
@@ -1786,7 +1807,7 @@ def get_stats():
     ]
     setting_dist = []
     for label, pred in buckets:
-        cnt = sum(1 for c in chars if pred(_char_text_len(c.get("setting"))))
+        cnt = sum(1 for c in chars if pred(_char_all_text_len(c)))
         if cnt or label == "未填写":
             setting_dist.append({"name": label, "count": cnt})
 
@@ -1799,7 +1820,7 @@ def get_stats():
         "world_longest": world_longest,
         "world_longest_list": world_longest_list,
         "setting_distribution": setting_dist,
-        "total_setting_chars": sum(_char_text_len(c.get("setting")) for c in chars),
+        "total_setting_chars": sum(_char_all_text_len(c) for c in chars),
     }
 
     # ---------- 文档 ----------
