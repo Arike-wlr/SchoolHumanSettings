@@ -3187,22 +3187,36 @@ VM.stats = (function() {
       heroCard('文档 / 图片', num(D.total) + ' / ' + num(I.files), '', (D.size_display || '0 B') + ' 文档' + (I.size_display ? ' · ' + I.size_display + ' 图片' : '')) +
     '</div>';
 
+    // ---------- 设定完整度体检 ----------
+    // 板块顺序：先"体检"（一眼看整体填写情况）再看"分布"。
+    html += '<div class="stats-section-title">设定完整度体检</div>';
+    html += '<div class="stats-panel">' + completenessView(COMP) + '</div>';
+
     // ---------- 角色分布 ----------
     html += '<div class="stats-section-title">角色分布</div>';
     html += panel('📍 地区分布', 'Top ' + regionTop.length + (regionBlank ? ' · 未填写 ' + regionBlank.count : ''), barChart(regionTop, num(C.total), 12));
     html += panel('⚧ 性别构成', num(C.total) + ' 位', pillGroup(C.gender, num(C.total)));
     html += panel('🌗 存在状态', '按 status 字段', barChart(C.status, num(C.total)));
-    html += panel('🏛 家族规模', num(FAM.families) + ' 个家族 · ' + num(FAM.with_family) + ' 人有归属', famCards(FAM.list));
-
-    // ---------- 设定完整度体检 ----------
-    html += '<div class="stats-section-title">设定完整度体检</div>';
-    html += '<div class="stats-panel">' + completenessView(COMP) + '</div>';
+    // （「🏛 家族规模」已移到「关系网络」——家族是关系的来源，和家族羁绊放一起更顺）
 
     // ---------- 角色之最 ----------
     html += '<div class="stats-section-title">角色之最</div>';
     html += panel('📝 设定最厚', '全字段字数', crownList(HL.items && HL.items.longest_setting, '字'));
     html += panel('🖼 图片最多', '张数', crownList(HL.items && HL.items.most_images, '张'));
     html += panel('📊 设定篇幅分布', '共 ' + num(C.total) + ' 位', barChart(HL.setting_distribution, num(C.total)));
+
+    // ---------- 世界观与内容 ----------
+    // 板块顺序：紧跟在「角色之最」之后（角色最厚 → 世界观最厚，读起来连贯），
+    // 内容全部收在这一块里（大类分布 / 内容体量 / 最长的世界观条目），不要再拆出去。
+    html += '<div class="stats-section-title">世界观与内容</div>';
+    html += panel('📚 大类分布', num(W.total) + ' 条', barChart(W.main_category, num(W.total)));
+    // 「内容体量」只放世界观自身的两个量：正文合计 + 条均（⚠️ 不硬凑第三个，用户明确要求）。
+    //    不放角色的量（世界观块归世界观）；不放「最长条目」（下面榜单的「榜首 N 字」已有）；
+    //    不放「标题字数」（用户认为没用）。
+    html += panel('✍️ 内容体量', '字数统计', facts([
+      ['世界观字数', num(W.content_chars).toLocaleString(), ' 字'],
+      ['平均每条', num(W.total) ? Math.round(num(W.content_chars) / num(W.total)).toLocaleString() : 0, ' 字']
+    ]));
 
     // 最长的世界观条目：Top N（兼容只返回单条的旧数据）
     var worldRank = (HL.world_longest_list && HL.world_longest_list.length)
@@ -3255,6 +3269,8 @@ VM.stats = (function() {
     // 这两个榜从「角色之最」移来（本质是"关系"指标）；点击切关系网并聚焦该角色。
     html += panel('🎭 关系类型最丰富', '不同类型数', crownList(HL.items && HL.items.richest_types, '种', { focusRelations: true }));
     html += panel('👪 家族羁绊最多', '所属家族数', crownList(HL.items && HL.items.most_family, '个', { focusRelations: true }));
+    // 从「角色分布」移来：家族归属本身就是一种关系（同家族自动计入关系数）。
+    html += panel('🏛 家族规模', num(FAM.families) + ' 个家族 · ' + num(FAM.with_family) + ' 人有归属', famCards(FAM.list));
 
     if ((R.isolated || []).length) {
       html += panel('🔌 孤立角色', '尚无任何关系 · Top ' + R.isolated.length,
@@ -3279,15 +3295,6 @@ VM.stats = (function() {
         : '<div class="stats-note">数据不足</div>');
 
     html += panel('🕸 地区关系矩阵', '越深关系越多', matrixHTML(R.cross_region, regionTop));
-
-    // ---------- 世界观与内容 ----------
-    html += '<div class="stats-section-title">世界观与内容</div>';
-    html += panel('📚 大类分布', num(W.total) + ' 条', barChart(W.main_category, num(W.total)));
-    html += panel('✍️ 内容体量', '字数统计', facts([
-      ['世界观字数', num(W.content_chars).toLocaleString(), ' 字'],
-      ['平均每条', num(W.total) ? Math.round(num(W.content_chars) / num(W.total)).toLocaleString() : 0, ' 字'],
-      ['角色全字段总字数', num(HL.total_setting_chars).toLocaleString(), ' 字']
-    ]));
 
     // ---------- 素材与文档 ----------
     html += '<div class="stats-section-title">素材与文档</div>';
