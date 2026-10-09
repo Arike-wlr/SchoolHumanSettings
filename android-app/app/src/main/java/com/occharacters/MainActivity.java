@@ -642,15 +642,26 @@ public class MainActivity extends AppCompatActivity {
             String lower = fileName == null ? "" : fileName.toLowerCase(java.util.Locale.US);
             Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
             intent.addCategory(Intent.CATEGORY_OPENABLE);
-            // 按扩展名给 MIME：txt 用 json 类型会被某些机型改成 .json
-            intent.setType(lower.endsWith(".txt") ? "text/plain"
-                    : lower.endsWith(".json") ? "application/json"
-                    : "application/octet-stream");
+            // 按扩展名给 MIME：txt 用 json 类型会被某些机型改成 .json。
+            // 文档导出（下载按钮）也走这里，docx/pdf 给对类型，
+            // 否则部分文件管理器/网盘会把它们当成未知二进制文件。
+            intent.setType(mimeForFile(lower));
             intent.putExtra(Intent.EXTRA_TITLE, fileName);
             saveFileLauncher.launch(intent);
         } catch (Exception e) {
             Toast.makeText(this, "导出失败: " + e.getMessage(), Toast.LENGTH_SHORT).show();
         }
+    }
+
+    /** 扩展名 → MIME。未知后缀一律 octet-stream（不猜，避免被系统改扩展名）。 */
+    private static String mimeForFile(String lower) {
+        if (lower.endsWith(".txt")) return "text/plain";
+        if (lower.endsWith(".json")) return "application/json";
+        if (lower.endsWith(".md")) return "text/markdown";
+        if (lower.endsWith(".docx")) return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+        if (lower.endsWith(".doc")) return "application/msword";
+        if (lower.endsWith(".pdf")) return "application/pdf";
+        return "application/octet-stream";
     }
 
     private void writeToUri(Uri uri) {

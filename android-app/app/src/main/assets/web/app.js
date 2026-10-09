@@ -1627,7 +1627,6 @@ VM.documents = (function() {
   var currentViewFile = '';
   var loadGeneration = 0;
   var viewerGeneration = 0;
-  var viewerObjectUrl = null;
 
   function onFileSelect(e) { if (e.target.files.length > 0) uploadFiles(e.target.files); e.target.value = ''; }
 
@@ -1664,7 +1663,9 @@ VM.documents = (function() {
       var sn = encodeURIComponent(f.name);
       return '<div class="file-card"><span class="file-icon">' + icon + '</span><div class="file-info"><div class="file-name">' + esc(f.name) + '</div><div class="file-meta">' + (f.size_display || '') + ' · ' + (f.modified || '') + '</div></div><div class="file-actions">' +
         (canView ? '<button class="btn-action" onclick="VM.documents.openViewer(\'' + sn + '\')">查看</button>' : '') +
-        '<a class="btn-action" href="' + API + '/' + sn + '" download>下载</a>' +
+        // ⚠️ 下载必须走 JS：App 内页面从 file:// 加载，<a href="/api/files/x" download>
+        // 会把相对路径解析成 file:///api/files/x（不存在）→ 直接报「网页无法打开」。
+        '<button class="btn-action" onclick="VM.documents.downloadFile(\'' + sn + '\')">下载</button>' +
         '<button class="btn-action danger" onclick="VM.documents.openDeleteModal(\'' + sn + '\')">删除</button></div></div>';
     }).join('');
   }
@@ -1700,18 +1701,8 @@ VM.documents = (function() {
     document.getElementById('docViewerTitle').textContent = fn;
     var ext = fn.split('.').pop().toLowerCase();
     document.getElementById('docViewerTag').textContent = ext.toUpperCase();
-    releaseViewerObjectUrl();
-    if (location.protocol === 'file:' && typeof docDB !== 'undefined') {
-      docDB.get(fn).then(function(doc) {
-        if (generation !== viewerGeneration) return;
-        if (doc && doc.blob) {
-          viewerObjectUrl = URL.createObjectURL(doc.blob);
-          document.getElementById('docViewerDownload').href = viewerObjectUrl;
-        } else document.getElementById('docViewerDownload').href = '#';
-      }).catch(function() { document.getElementById('docViewerDownload').href = '#'; });
-    } else {
-      document.getElementById('docViewerDownload').href = API + '/' + en;
-    }
+    // 下载按钮不预置 href：统一由 downloadFile(currentViewFile) 处理
+    // （App 内从 file:// 加载，<a href="/api/files/x"> 会被当成不存在的本地路径）
     body.innerHTML = '<div class="viewer-loading"><div class="spinner"></div><div>加载中…</div></div>';
     document.getElementById('docViewerOverlay').classList.add('active');
     return fetch(API + '/' + en + '/view').then(function(r) {
@@ -1763,8 +1754,49 @@ VM.documents = (function() {
     }
   }
 
-  function releaseViewerObjectUrl() {
-    if (viewerObjectUrl) { URL.revokeObjectURL(viewerObjectUrl); viewerObjectUrl = null; }
+  // 把 blob 另存到设备（App 内）。有原生桥走系统「另存为」；
+  // 没有桥（浏览器直接打开本地 html 调试）返回 false 交给调用方兜底。
+  function saveBlobToDevice(blob, fileName, msg) {
+    if (typeof Android !== 'undefined' && Android.saveFile) {
+      var reader = new FileReader();
+      reader.onloadend = function() { Android.saveFile(reader.result, fileName); };
+      reader.readAsDataURL(blob);
+      showToast(msg || '请选择保存位置', 'success');
+      return true;
+    }
+    return false;
+  }
+
+  // 下载文档。⚠️ 不能用 <a href="API + '/' + name" download>：
+  // App 内页面从 file:///android_asset/web/index.html 加载，相对路径 /api/files/x
+  // 会解析成 file:///api/files/x —— 这个文件不存在，WebView 就弹「网页无法打开」。
+  // 而 WebView 也没有 setDownloadListener，blob: 链接同样不会有反应。
+  // 所以离线态一律从 IndexedDB 取 blob → 交原生桥另存为。
+  function downloadFile(en) {
+    var fn = decodeURIComponent(en);
+    if (location.protocol !== 'file:' || typeof docDB === 'undefined') {
+      // 在线态（免打包调试用的 mobile-dev-server / 真后端）：/api/files/{name} 是真实地址
+      var a = document.createElement('a');
+      a.href = API + '/' + en;
+      a.download = fn;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      return;
+    }
+    docDB.get(fn).then(function(doc) {
+      if (!doc || !doc.blob) { showToast('文件不存在', 'error'); return; }
+      if (saveBlobToDevice(doc.blob, fn, '请选择保存位置')) return;
+      // 无原生桥：退回浏览器 blob 下载
+      var url = URL.createObjectURL(doc.blob);
+      var a = document.createElement('a');
+      a.href = url; a.download = fn;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(function() { URL.revokeObjectURL(url); }, 4000);
+      showToast('已下载 ' + fn, 'success');
+    }).catch(function() { showToast('下载失败', 'error'); });
+  }
+
+  function downloadCurrent() {
+    if (currentViewFile) downloadFile(currentViewFile);
   }
 
   function closeViewer() {
@@ -1773,7 +1805,6 @@ VM.documents = (function() {
     document.getElementById('docViewerOverlay').classList.remove('active');
     document.getElementById('docViewerBody').innerHTML = '';
     currentViewFile = '';
-    releaseViewerObjectUrl();
   }
 
   document.getElementById('docDeleteOverlay').addEventListener('click', function(ev) { if (ev.target === this) closeDeleteModal(); });
@@ -1787,7 +1818,8 @@ VM.documents = (function() {
     init: init, refresh: loadFiles,
     onFileSelect: onFileSelect,
     openDeleteModal: openDeleteModal, closeDeleteModal: closeDeleteModal, confirmDelete: confirmDelete,
-    openViewer: openViewer, closeViewer: closeViewer
+    openViewer: openViewer, closeViewer: closeViewer,
+    downloadFile: downloadFile, downloadCurrent: downloadCurrent
   };
 })();
 
