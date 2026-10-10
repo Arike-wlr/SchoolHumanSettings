@@ -123,6 +123,19 @@
       font-weight: 600; color: var(--text, #3d2b1f);
       margin-bottom: 8px; font-size: .85rem;
     }
+    /* 详情面板底部的「仅同步这一条」 */
+    .sync-detail-actions {
+      margin-top: 10px; padding-top: 10px;
+      border-top: 1px dashed var(--border, #e0d6c8);
+      display: flex; gap: 8px;
+    }
+    .sync-btn-item {
+      flex: 1; padding: 10px; border: none; border-radius: 8px;
+      background: var(--accent, #8b5e3c); color: #fff;
+      font-size: .84rem; font-weight: 500; cursor: pointer;
+    }
+    .sync-btn-item:active { transform: scale(.97); }
+    .sync-btn-item:disabled { opacity: .5; cursor: not-allowed; }
     .sync-field-row {
       display: grid; grid-template-columns: 92px 1fr;
       align-items: start; gap: 8px; padding: 6px 0;
@@ -561,12 +574,44 @@
     const typeLabel = changeType === 'added' ? '新增' : (changeType === 'deleted' ? '删除' : '修改');
     const fields = SYNC_BLOCK_FIELDS[blockKey] || [];
     const fieldHtml = renderFieldDiff(item.source, item.target, fields);
+    // 「仅同步这一条」：按方向决定是下载还是上传，只写这一条记录。
+    // ⚠️ onclick 里只嵌 direction/blockKey/changeType/idx 这些受控字面量，
+    //    不拼 label（可能含引号）——label 在 executeSyncItem 内部从 _currentSyncDiff 取。
+    const verb = direction === 'download' ? '下载' : '上传';
     panel.innerHTML = `
       <div class="sync-detail-title">${SYNC_BLOCK_LABEL[blockKey] || blockKey} · ${typeLabel}：${escSync(item.label)}</div>
       ${fieldHtml}
+      <div class="sync-detail-actions">
+        <button class="sync-btn-item" onclick="executeSyncItem('${direction}','${blockKey}','${changeType}',${idx})">仅${verb}这一条</button>
+      </div>
     `;
   }
   window.showItemDetail = showItemDetail;
+
+  // 只同步详情面板里当前这一条（added→新增 / deleted→删除 / modified→更新）。
+  // direction 是查看 diff 时的方向（点按钮时直接沿用，不依赖 pendingSyncAction）。
+  async function executeSyncItem(direction, blockKey, changeType, idx) {
+    if (!_currentSyncDiff) return;
+    const block = _currentSyncDiff[blockKey] || {};
+    const detailArr = (block.details && block.details[changeType]) || [];
+    const item = detailArr[idx];
+    if (!item) return;
+    const label = item.label;
+    const scope = scopeFromKeys([blockKey]);
+    scope.only = {};
+    scope.only[blockKey] = [label];
+    // 关掉当前确认面板再执行（与「仅同步某块」同一路径，避免遮罩叠层）。
+    await cancelSyncConfirm();
+    const itemLabel = `仅同步这一条：${label}`;
+    try {
+      if (direction === 'download') await doDownloadExecute(scope, blockKey, itemLabel);
+      else await doUploadExecute(scope, blockKey, itemLabel);
+    } finally {
+      // 重新计算差异并打开面板：已同步的那条会从列表里消失，方便继续处理下一条。
+      try { await showSyncConfirm(direction); } catch (e) { /* 重开失败不覆盖执行结果提示 */ }
+    }
+  }
+  window.executeSyncItem = executeSyncItem;
 
   // 渲染一个 block 的 chips（added/deleted/modified），每个 chip 可点击。
   function formatChips(blockKey, changes) {
@@ -744,9 +789,10 @@
   }
 
   // 实际执行下载；scope 为 null 表示全量（向后兼容）。
-  async function doDownloadExecute(scope, blockKey) {
+  // itemLabel：单条同步时的自定义提示文案（如「仅同步这一条：张三」），优先于块级默认文案。
+  async function doDownloadExecute(scope, blockKey, itemLabel) {
     const status = document.getElementById('syncStatus');
-    const label = blockKey && blockKey !== 'all' ? `仅下载${SYNC_BLOCK_LABEL[blockKey]}` : '下载';
+    const label = itemLabel || (blockKey && blockKey !== 'all' ? `仅下载${SYNC_BLOCK_LABEL[blockKey]}` : '下载');
     status.textContent = `正在${label}...`;
     status.className = 'sync-status';
     try {
@@ -770,9 +816,10 @@
   }
 
   // 实际执行上传；scope 为 null 表示全量（向后兼容）。
-  async function doUploadExecute(scope, blockKey) {
+  // itemLabel：单条同步时的自定义提示文案，优先于块级默认文案。
+  async function doUploadExecute(scope, blockKey, itemLabel) {
     const status = document.getElementById('syncStatus');
-    const label = blockKey && blockKey !== 'all' ? `仅上传${SYNC_BLOCK_LABEL[blockKey]}` : '上传';
+    const label = itemLabel || (blockKey && blockKey !== 'all' ? `仅上传${SYNC_BLOCK_LABEL[blockKey]}` : '上传');
     status.textContent = `正在${label}...`;
     status.className = 'sync-status';
     try {

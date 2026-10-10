@@ -4,8 +4,8 @@
 // ============================================================
 
 // 模块版本号：用于验证手机是否加载了最新代码
-// （本次改动的可辨识标记：批量图片存在性核验，不再逐张下载整图）
-const SYNC_VERSION = '抗大抗大越抗越大 · 批量核验';
+// （本次改动的可辨识标记：差异面板里可「仅同步这一条」，scope 支持 only 细化到条目）
+const SYNC_VERSION = '抗大抗大越抗越大';
 
 // 默认 scope：四个块全部启用（与历史"一锅端"行为一致）。
 // downloadFromServer / uploadToServer 接受 scope 参数以支持只同步某一个块。
@@ -21,6 +21,29 @@ function scopeFromKeys(keys) {
     else if (k === 'docs') s.docs = true;
   }
   return s;
+}
+
+// ============= 单条同步（scope.only） =============
+// 在"按块"（chars/worlds/rels/docs）之上再细一层：scope.only 形如
+//   { chars:['张三'], worlds:['校的构成'], rels:['A→B(朋友)'], docs:['xx.docx'] }
+// 数组里是该块要同步的"标签"（label）。只有标签命中的条目会被写入/删除；
+// 某块没出现在 only 里（或为空数组）就按整块执行，行为与改动前完全一致。
+//
+// 取某块的标签集合；无则返回 null，表示"不过滤、整块执行"。
+function scopeOnlySet(scope, key) {
+  const only = scope && scope.only;
+  if (!only || !Array.isArray(only[key]) || !only[key].length) return null;
+  return new Set(only[key]);
+}
+
+// 就地按标签集合过滤 diff（added/deleted/modified 各自按 label 命中保留）。
+// labels 为 null 时原样返回（不做任何过滤）。返回同一个 diff 对象，方便链式使用。
+function applyOnlyFilter(diff, labels) {
+  if (!labels) return diff;
+  diff.added = diff.added.filter(i => labels.has(i.label));
+  diff.deleted = diff.deleted.filter(i => labels.has(i.label));
+  diff.modified = diff.modified.filter(i => labels.has(i.label));
+  return diff;
 }
 
 // 版本升级只更新标记，不清空图片缓存；坏映射在实际读取时按 miss 处理并可恢复。
@@ -751,9 +774,18 @@ async function downloadFromServer(onProgress, scope) {
   const serverRels = await relRes.json();
   const serverDocs = await docListRes.json();
 
+  // 单条同步：先取出各块要同步的标签集合（null = 整块）。
+  // 角色的标签就是 name，所以能直接用来筛选要处理图片的角色，避免为一条变更拉全部图片。
+  const charOnly = scopeOnlySet(scope, 'chars');
+  const worldOnly = scopeOnlySet(scope, 'worlds');
+  const relOnly = scopeOnlySet(scope, 'rels');
+  const docOnly = scopeOnlySet(scope, 'docs');
+
   // 2. 转换服务器图片 URL → data URL（离线可显示）。只在下载角色时需要。
-  if (scope.chars && serverChars.some(c => (c.images && c.images.length) || c.image_url)) {
-    await convertServerImagesToDataUrl(serverChars, url, onProgress);
+  let charServerPool = serverChars;
+  if (scope.chars && charOnly) charServerPool = serverChars.filter(c => charOnly.has(c.name));
+  if (scope.chars && charServerPool.some(c => (c.images && c.images.length) || c.image_url)) {
+    await convertServerImagesToDataUrl(charServerPool, url, onProgress);
   }
   timer.lap('拉取数据+图片');
 
@@ -763,14 +795,15 @@ async function downloadFromServer(onProgress, scope) {
   ]);
   const localRelsNamed = enrichRelationsWithNames(localRels, localChars);
 
-  // 4. 计算增量差异（始终全部计算，方便结果统计与未执行块的状态提示）
-  const charDiff = computeRecordDiff(serverChars, localChars,
-    (s, t) => s.name === t.name, charContentEqual, r => r.name);
-  const worldDiff = computeRecordDiff(serverWorlds, localWorlds,
-    (s, t) => s.title === t.title, worldContentEqual, r => r.title);
-  const relDiff = computeRecordDiff(serverRels, localRelsNamed,
+  // 4. 计算增量差异（始终全部计算，方便结果统计与未执行块的状态提示）；
+  //    单条同步时只保留标签命中的那一条。
+  const charDiff = applyOnlyFilter(computeRecordDiff(serverChars, localChars,
+    (s, t) => s.name === t.name, charContentEqual, r => r.name), charOnly);
+  const worldDiff = applyOnlyFilter(computeRecordDiff(serverWorlds, localWorlds,
+    (s, t) => s.title === t.title, worldContentEqual, r => r.title), worldOnly);
+  const relDiff = applyOnlyFilter(computeRecordDiff(serverRels, localRelsNamed,
     (s, t) => s.from_name === t.from_name && s.to_name === t.to_name && s.relation_type === t.relation_type,
-    relContentEqual, r => `${r.from_name}→${r.to_name}(${r.relation_type})`);
+    relContentEqual, r => `${r.from_name}→${r.to_name}(${r.relation_type})`), relOnly);
 
   const charChanges = charDiff.added.length + charDiff.deleted.length + charDiff.modified.length;
   const worldChanges = worldDiff.added.length + worldDiff.deleted.length + worldDiff.modified.length;
@@ -834,9 +867,11 @@ async function downloadFromServer(onProgress, scope) {
     const localDocMap = new Map(localDocs.map(d => [d.name, d]));
     const serverDocNames = new Set(serverDocs.map(d => d.name));
     for (const ld of localDocs) {
+      if (docOnly && !docOnly.has(ld.name)) continue;
       if (!serverDocNames.has(ld.name)) { await docDB.delete(ld.name); docDeleted++; }
     }
     toDownload = serverDocs.filter(sd => {
+      if (docOnly && !docOnly.has(sd.name)) return false;
       const ld = localDocMap.get(sd.name);
       return !ld || ld.size !== sd.size;
     });
@@ -879,6 +914,12 @@ async function uploadToServer(onProgress, scope) {
   if (!url) throw new Error('未配置服务器地址');
   const timer = createSyncTimer();
 
+  // 单条同步：各块要同步的标签集合（null = 整块）。
+  const charOnly = scopeOnlySet(scope, 'chars');
+  const worldOnly = scopeOnlySet(scope, 'worlds');
+  const relOnly = scopeOnlySet(scope, 'rels');
+  const docOnly = scopeOnlySet(scope, 'docs');
+
   // 1. 读取本地数据
   onProgress && onProgress('正在读取本地数据...');
   const [localChars, localWorlds, localRels, localDocs] = await Promise.all([
@@ -912,8 +953,11 @@ async function uploadToServer(onProgress, scope) {
     (s, t) => s.name === t.name, charContentEqual, r => r.name);
   // 若不传角色，则不需要核验图片映射，避免给未执行的块做无谓的网络请求。
   let staleDataUrls = new Set();
+  // 单条同步：图片核验只针对目标角色，避免为一条变更核验全部角色的图片映射。
+  const charLocalPool = (scope.chars && charOnly)
+    ? localChars.filter(c => charOnly.has(c.name)) : localChars;
   if (scope.chars) {
-    staleDataUrls = await verifyUploadImageMappings(localChars, url, cacheIndex);
+    staleDataUrls = await verifyUploadImageMappings(charLocalPool, url, cacheIndex);
     // 用核验结果重算角色差异：本地图片映射在当前服务器已失效时仍判为 modified。
     const recomputedLocalChars = await canonicalizeRecordsForDiff(localChars, url, true, cacheIndex, { staleDataUrls });
     const recomputedCharDiff = computeRecordDiff(recomputedLocalChars, comparableServerChars,
@@ -928,11 +972,13 @@ async function uploadToServer(onProgress, scope) {
   for (const item of [...charDiff.deleted, ...charDiff.modified]) {
     item.target = serverChars.find(c => c.name === item.target.name) || item.target;
   }
-  const worldDiff = computeRecordDiff(localWorlds, serverWorlds,
-    (s, t) => s.title === t.title, worldContentEqual, r => r.title);
-  const relDiff = computeRecordDiff(localRelsNamed, serverRels,
+  const worldDiff = applyOnlyFilter(computeRecordDiff(localWorlds, serverWorlds,
+    (s, t) => s.title === t.title, worldContentEqual, r => r.title), worldOnly);
+  const relDiff = applyOnlyFilter(computeRecordDiff(localRelsNamed, serverRels,
     (s, t) => s.from_name === t.from_name && s.to_name === t.to_name && s.relation_type === t.relation_type,
-    relContentEqual, r => `${r.from_name}→${r.to_name}(${r.relation_type})`);
+    relContentEqual, r => `${r.from_name}→${r.to_name}(${r.relation_type})`), relOnly);
+  // 单条同步：角色 diff 在"核验图片后的重算"之上再过滤一次。
+  applyOnlyFilter(charDiff, charOnly);
 
   const charChanges = charDiff.added.length + charDiff.deleted.length + charDiff.modified.length;
   const worldChanges = worldDiff.added.length + worldDiff.deleted.length + worldDiff.modified.length;
@@ -1066,12 +1112,14 @@ async function uploadToServer(onProgress, scope) {
     const serverDocMap = new Map(serverDocs.map(d => [d.name, d]));
     const localDocNames = new Set(localDocs.map(d => d.name));
     for (const sd of serverDocs) {
+      if (docOnly && !docOnly.has(sd.name)) continue;
       if (!localDocNames.has(sd.name)) {
         await fetch(url + '/api/files/' + encodeURIComponent(sd.name), { method: 'DELETE' });
         docDeleted++;
       }
     }
     toUpload = localDocs.filter(ld => {
+      if (docOnly && !docOnly.has(ld.name)) return false;
       const sd = serverDocMap.get(ld.name);
       return !sd || sd.size !== ld.size;
     });
