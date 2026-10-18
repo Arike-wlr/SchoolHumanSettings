@@ -286,9 +286,15 @@ android-sdk/platform-tools/adb.exe forward tcp:9222 localabstract:webview_devtoo
 | `verify-stat-chars.py` | 统计口径 **Python 侧**：直调 `backend.get_stats()`，写出 `py_stats.json` | 无（不需要起服务） |
 | `verify-stat-chars.js` | 统计口径 **JS 侧**：`node:vm` 跑 `api-shim.js`，与上者逐项比对 | 先跑 `.py`；需 mock 数据 |
 | `verify-stat-render.js` | 统计页渲染：桌面版 + 手机版都断言新文案出现、旧文案为零、无报错 | 调试服务器 :8100 + 后端 :8000 |
+| `verify-trash.py` | 回收站 / 撤销 **后端逻辑**：编辑→撤销、删除→还原、关系自动挂回、图片 GC、清空 | 无（自带数据库副本，不碰真实库） |
+| `verify-trash-ui.js` | 回收站**页面**：删除→列表出现→点还原→彻底删除，含控制台报错检查 | 后端 :8000 |
 
 > ⚠️ 统计口径改动后**必须跑 `verify-stat-chars.py` + `.js` 这一对**（两路一致才算过）。
 > 详见 `.workbuddy/memory/MEMORY.md` 的「改口径后必做」。
+>
+> ⚠️ `verify-trash.py` 全程只操作 `tools/_trash_test/` 下的**数据库副本**和临时图片目录，
+> **不会动 `server/oc_characters.db`**；跑完全过会自己把副本删掉（有失败项则保留供复查）。
+> `verify-trash-ui.js` 用的是**临时角色**（`__回收站UI测试__`），跑完彻底清掉，收尾会断言角色总数不变。
 
 ### 辅助
 

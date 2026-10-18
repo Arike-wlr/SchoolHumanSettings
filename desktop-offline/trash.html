@@ -1,0 +1,629 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>回收站 · 高校拟人OC</title>
+<script>
+// 防闪烁：尽早应用主题
+(function(){
+  try {
+    var t = localStorage.getItem('oc-theme');
+    if (t === 'dark' || (!t && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+      document.documentElement.setAttribute('data-theme', 'dark');
+    }
+  } catch(e) {}
+})();
+</script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #faf8f5;
+    --card-bg: #fffef9;
+    --text: #3d322b;
+    --text-light: #8c7b6e;
+    --accent: #6b5a4e;
+    --accent-light: #a8947e;
+    --accent-pale: #f0e8dc;
+    --danger: #c0392b;
+    --danger-bg: #fce4e4;
+    --border: #e0d5c7;
+    --shadow: 0 2px 16px rgba(60,40,20,.08);
+    --shadow-lg: 0 8px 40px rgba(60,40,20,.12);
+    --radius: 14px;
+    --radius-sm: 8px;
+    --font-serif: 'Georgia', 'Noto Serif SC', 'SimSun', serif;
+    --font-sans: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+    --transition: 0.25s cubic-bezier(.4,0,.2,1);
+    --body-glow-1: rgba(168,148,126,.06);
+    --body-glow-2: rgba(107,90,78,.04);
+  }
+
+  /* ====== 深色主题 ====== */
+  html[data-theme="dark"] {
+    --bg: #1a1714;
+    --card-bg: #242019;
+    --text: #ece3d8;
+    --text-light: #a8988a;
+    --accent: #b8a48e;
+    --accent-light: #cbb99f;
+    --accent-pale: #322a22;
+    --danger: #e07060;
+    --danger-bg: #392420;
+    --border: #3d352c;
+    --shadow: 0 2px 16px rgba(0,0,0,.4);
+    --shadow-lg: 0 8px 40px rgba(0,0,0,.5);
+    --body-glow-1: rgba(168,148,126,.04);
+    --body-glow-2: rgba(107,90,78,.03);
+    color-scheme: dark;
+  }
+
+  html[data-theme="dark"] .header {
+    background: linear-gradient(135deg, #100e0c 0%, #1c1814 40%, #28221b 100%);
+  }
+
+  body {
+    font-family: var(--font-sans);
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    background-image:
+      radial-gradient(ellipse at 20% 10%, var(--body-glow-1) 0%, transparent 60%),
+      radial-gradient(ellipse at 80% 90%, var(--body-glow-2) 0%, transparent 60%);
+  }
+
+  /* 主题切换按钮 */
+  .theme-toggle {
+    background: rgba(255,255,255,.08);
+    color: #f5ede4;
+    border: 1px solid rgba(255,255,255,.15);
+    border-radius: 20px;
+    padding: 6px 14px;
+    font-size: .78rem;
+    cursor: pointer;
+    font-family: var(--font-sans);
+    transition: var(--transition);
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .theme-toggle:hover { background: rgba(255,255,255,.16); }
+  .theme-toggle .theme-toggle-icon { font-size: .95rem; line-height: 1; }
+
+  /* ====== Header ====== */
+  .header {
+    background: linear-gradient(135deg, #3d322b 0%, #5a4a3e 40%, #7a6654 100%);
+    color: #f5ede4;
+    padding: 20px 24px;
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+  }
+  .header h1 {
+    font-family: var(--font-serif);
+    font-size: 1.8rem;
+    font-weight: 400;
+    letter-spacing: 0.06em;
+  }
+  .header .subtitle {
+    margin-top: 4px; font-size: .88rem;
+    opacity: .65; letter-spacing: .08em;
+  }
+
+  /* ====== 侧边栏布局 ====== */
+  .app-layout { display: flex; min-height: 100vh; }
+  .sidebar {
+    width: 180px;
+    background: linear-gradient(180deg, #2a1a12 0%, #1a0e08 100%);
+    color: #f5ede4;
+    display: flex; flex-direction: column;
+    transition: width 0.3s cubic-bezier(.4,0,.2,1);
+    flex-shrink: 0; overflow: hidden;
+    position: sticky; top: 0; height: 100vh; z-index: 10;
+    box-shadow: 2px 0 16px rgba(0,0,0,.15);
+  }
+  .sidebar.collapsed { width: 54px; }
+  .sidebar-toggle {
+    background: none; border: none; color: #b8a090; font-size: 1.2rem;
+    padding: 14px 16px 6px; cursor: pointer; transition: var(--transition);
+    text-align: left; letter-spacing: .04em;
+  }
+  .sidebar.collapsed .sidebar-toggle { text-align: center; padding-left: 0; padding-right: 0; }
+  .sidebar-toggle:hover { color: #fff; }
+  .sidebar-nav { display: flex; flex-direction: column; padding: 8px; gap: 3px; flex: 1; }
+  .sidebar-item {
+    display: flex; align-items: center; gap: 10px; padding: 10px 12px;
+    border-radius: 8px; color: #c8b8a8; text-decoration: none;
+    font-size: .88rem; font-family: var(--font-sans); transition: var(--transition); white-space: nowrap;
+  }
+  .sidebar-item:hover { background: rgba(255,255,255,.06); color: #f5ede4; }
+  .sidebar-item.active { background: rgba(139,94,60,.3); color: #f5ede4; font-weight: 500; }
+  .sidebar-icon { font-size: 1.15rem; flex-shrink: 0; width: 22px; text-align: center; }
+  .sidebar-text { transition: opacity 0.2s, width 0.2s; overflow: hidden; }
+  .sidebar.collapsed .sidebar-text { opacity: 0; width: 0; }
+  .sidebar.collapsed .sidebar-item { gap: 0; justify-content: center; padding: 10px 0; }
+  .sidebar-footer {
+    padding: 12px; border-top: 1px solid rgba(255,255,255,.08); text-align: center;
+  }
+  .sidebar.collapsed .sidebar-footer { display: none; }
+  .main-content { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+
+  /* ====== Container ====== */
+  .container {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 24px 20px 60px;
+    width: 100%;
+  }
+
+  /* ====== 按钮 ====== */
+  .btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 9px 16px; border-radius: var(--radius-sm);
+    font-size: .86rem; font-family: var(--font-sans);
+    cursor: pointer; border: 1px solid transparent;
+    transition: var(--transition); white-space: nowrap;
+    background: var(--accent-pale); color: var(--accent);
+  }
+  .btn:hover { filter: brightness(.96); }
+  .btn:disabled { opacity: .5; cursor: not-allowed; }
+  .btn-sm { padding: 6px 12px; font-size: .8rem; }
+  .btn-primary { background: var(--accent); color: #fffef9; }
+  html[data-theme="dark"] .btn-primary { color: #1a1714; }
+  .btn-outline { background: transparent; border-color: var(--border); color: var(--text-light); }
+  .btn-outline:hover { border-color: var(--accent-light); color: var(--text); filter: none; }
+  .btn-danger { background: var(--danger-bg); color: var(--danger); }
+  .btn-danger:hover { background: var(--danger); color: #fff; filter: none; }
+
+  /* ====== 标签页 ====== */
+  .tabs {
+    display: flex; gap: 4px; margin-bottom: 18px;
+    border-bottom: 1px solid var(--border);
+  }
+  .tab {
+    padding: 10px 16px; font-size: .9rem; font-family: var(--font-sans);
+    color: var(--text-light); background: none; border: none;
+    border-bottom: 2px solid transparent; cursor: pointer;
+    transition: var(--transition); display: inline-flex; align-items: center; gap: 6px;
+  }
+  .tab:hover { color: var(--text); }
+  .tab.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+  .tab .badge {
+    display: inline-block; padding: 0 7px; border-radius: 10px;
+    background: var(--accent-pale); color: var(--accent);
+    font-size: .72rem; line-height: 1.6; font-weight: 400;
+  }
+
+  /* ====== 工具条 ====== */
+  .toolbar {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    margin-bottom: 14px;
+  }
+  .toolbar .count { color: var(--text-light); font-size: .86rem; margin-right: auto; }
+  .toolbar .count strong { color: var(--text); }
+  .toolbar select, .toolbar input[type="search"] {
+    padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm);
+    background: var(--card-bg); color: var(--text);
+    font-family: var(--font-sans); font-size: .84rem; outline: none;
+  }
+  .toolbar input[type="search"] { width: 190px; }
+  .toolbar select:focus, .toolbar input[type="search"]:focus { border-color: var(--accent-light); }
+
+  /* ====== 列表 ====== */
+  .rev-list { display: flex; flex-direction: column; gap: 8px; }
+  .rev-item {
+    display: flex; align-items: center; gap: 14px;
+    padding: 13px 16px; background: var(--card-bg);
+    border: 1px solid var(--border); border-radius: var(--radius-sm);
+    transition: var(--transition);
+  }
+  .rev-item:hover { border-color: var(--accent-light); box-shadow: var(--shadow); }
+  .rev-item .ri-icon { font-size: 1.35rem; flex-shrink: 0; width: 26px; text-align: center; }
+  .rev-item .ri-main { flex: 1; min-width: 0; }
+  .rev-item .ri-name {
+    font-weight: 600; font-size: .94rem; color: var(--text);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .rev-item .ri-meta {
+    font-size: .76rem; color: var(--text-light); margin-top: 4px;
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  }
+  .rev-item .ri-desc {
+    font-size: .8rem; color: var(--text-light); margin-top: 5px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .rev-item .ri-actions { display: flex; gap: 8px; flex-shrink: 0; }
+  .tag {
+    display: inline-block; padding: 1px 8px; border-radius: 9px;
+    background: var(--accent-pale); color: var(--accent);
+    font-size: .7rem; line-height: 1.7; white-space: nowrap;
+  }
+  .tag.del { background: var(--danger-bg); color: var(--danger); }
+  .tag.done { background: transparent; border: 1px solid var(--border); color: var(--text-light); }
+
+  /* ====== 空状态 ====== */
+  .empty { text-align: center; padding: 70px 20px; color: var(--text-light); }
+  .empty .icon { font-size: 3rem; opacity: .35; margin-bottom: 14px; }
+  .empty p { font-size: .9rem; line-height: 1.8; }
+
+  /* ====== 提示条 ====== */
+  .notice {
+    background: var(--accent-pale); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); padding: 12px 16px;
+    font-size: .82rem; color: var(--text-light); line-height: 1.7; margin-bottom: 16px;
+  }
+  .notice strong { color: var(--text); }
+
+  /* ====== Toast ====== */
+  .toast {
+    position: fixed; left: 50%; bottom: 32px; transform: translate(-50%, 20px);
+    background: var(--accent); color: #fffef9; padding: 10px 20px;
+    border-radius: 22px; font-size: .86rem; box-shadow: var(--shadow-lg);
+    opacity: 0; pointer-events: none; transition: var(--transition); z-index: 3000;
+  }
+  html[data-theme="dark"] .toast { color: #1a1714; }
+  .toast.show { opacity: 1; transform: translate(-50%, 0); }
+  /* ⚠️ 类名要和别的页面一致（search.js / export-all.js 会调 showToast(msg, 'success'|'error')） */
+  .toast.success { background: var(--accent); color: #fffef9; }
+  .toast.error { background: var(--danger); color: #fff; }
+
+  /* ====== 确认弹窗 ====== */
+  .modal-overlay {
+    position: fixed; inset: 0; background: rgba(30,20,12,.5);
+    display: none; align-items: center; justify-content: center;
+    z-index: 2000; padding: 20px;
+  }
+  .modal-overlay.active { display: flex; }
+  .modal {
+    background: var(--card-bg); border-radius: var(--radius);
+    box-shadow: var(--shadow-lg); width: 100%; max-width: 400px; padding: 24px;
+  }
+  .modal h3 { font-family: var(--font-serif); font-size: 1.1rem; font-weight: 400; margin-bottom: 10px; }
+  .modal p { font-size: .86rem; color: var(--text-light); line-height: 1.7; }
+  .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 22px; }
+
+  @media (max-width: 640px) {
+    .sidebar { width: 54px; }
+    .sidebar .sidebar-text { opacity: 0; width: 0; }
+    .rev-item { flex-wrap: wrap; }
+    .rev-item .ri-actions { width: 100%; justify-content: flex-end; }
+  }
+</style>
+</head>
+<body>
+<div class="app-layout">
+
+<aside class="sidebar" id="sidebar">
+  <button class="sidebar-toggle" onclick="toggleSidebar()" title="展开/收起侧边栏">☰</button>
+  <nav class="sidebar-nav">
+    <a href="/" class="sidebar-item">
+      <span class="sidebar-icon">📖</span><span class="sidebar-text">角色设定</span>
+    </a>
+    <a href="/worldview" class="sidebar-item">
+      <span class="sidebar-icon">🌍</span><span class="sidebar-text">世界观设定</span>
+    </a>
+    <a href="/relations" class="sidebar-item">
+      <span class="sidebar-icon">🔗</span><span class="sidebar-text">关系网</span>
+    </a>
+    <a href="/stats" class="sidebar-item">
+      <span class="sidebar-icon">📊</span><span class="sidebar-text">总览统计</span>
+    </a>
+    <a href="/documents" class="sidebar-item">
+      <span class="sidebar-icon">📄</span><span class="sidebar-text">文档管理</span>
+    </a>
+    <a href="/trash" class="sidebar-item active">
+      <span class="sidebar-icon">🗑️</span><span class="sidebar-text">回收站</span>
+    </a>
+  </nav>
+  <div class="sidebar-footer">
+    <button class="theme-toggle" onclick="toggleTheme()" title="切换深色/浅色模式">
+      <span class="theme-toggle-icon" id="themeIcon">🌙</span><span id="themeLabel">深色</span>
+    </button>
+  </div>
+</aside>
+
+<div class="main-content">
+
+<header class="header">
+  <h1>回收站</h1>
+  <p class="subtitle">删除不是终点 · 编辑也能回退</p>
+</header>
+
+<div class="container">
+
+  <div class="tabs">
+    <button class="tab active" id="tabTrash" data-tab="trash">回收站 <span class="badge" id="badgeTrash">0</span></button>
+    <button class="tab" id="tabHistory" data-tab="history">编辑历史 <span class="badge" id="badgeHistory">0</span></button>
+  </div>
+
+  <div id="paneTrash">
+    <div class="notice">
+      <strong>回收站里的是「已删除但还能拿回来」的记录。</strong>还原会把原表行原样写回（连原来的 id 一起），
+      所以挂在它身上的关系会自动重新接上。<strong>彻底删除</strong>之后才不可恢复，那时它引用的图片文件也会一并回收。
+    </div>
+    <div class="toolbar">
+      <span class="count">共 <strong id="trashCount">0</strong> 项</span>
+      <button class="btn btn-danger btn-sm" id="btnEmpty">清空回收站</button>
+    </div>
+    <div class="rev-list" id="trashList"></div>
+    <div class="empty" id="trashEmpty" style="display:none">
+      <div class="icon">🗑️</div>
+      <p>回收站是空的<br>在角色 / 世界观 / 关系网页面删除的内容会先落到这里</p>
+    </div>
+  </div>
+
+  <div id="paneHistory" style="display:none">
+    <div class="notice">
+      每次<strong>保存编辑</strong>前，都会先把改动前的整行存一份在这里（只改排序不算）。
+      选任意一条点「还原到此版本」即可回退 —— <strong>排序保持不变</strong>。
+    </div>
+    <div class="toolbar">
+      <span class="count">共 <strong id="histCount">0</strong> 条</span>
+      <select id="filterEntity">
+        <option value="">全部类型</option>
+        <option value="character">角色</option>
+        <option value="world">世界观</option>
+        <option value="relation">关系</option>
+      </select>
+      <input type="search" id="filterKw" placeholder="按名称筛选…">
+      <button class="btn btn-outline btn-sm" id="btnClearHistory">清空历史</button>
+    </div>
+    <div class="rev-list" id="histList"></div>
+    <div class="empty" id="histEmpty" style="display:none">
+      <div class="icon">📜</div>
+      <p>还没有编辑历史</p>
+    </div>
+  </div>
+
+</div>
+
+<div class="toast" id="toast"></div>
+
+<div class="modal-overlay" id="confirmOverlay">
+  <div class="modal">
+    <h3 id="confirmTitle">确认</h3>
+    <p id="confirmMsg"></p>
+    <div class="modal-actions">
+      <button class="btn btn-outline" id="confirmCancel">取消</button>
+      <button class="btn btn-danger" id="confirmOk">确定</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const API = '/api';
+const ENTITY_ICON = { character: '📖', world: '🌍', relation: '🔗' };
+const ACTION_TEXT = { edit: '编辑前', delete: '删除前' };
+
+let curTab = 'trash';
+let trashCache = null;      // /api/trash 的原始返回
+let historyCache = [];      // 全量历史
+
+// ====== 主题 ======
+function applyTheme(theme) {
+  const html = document.documentElement;
+  if (theme === 'dark') html.setAttribute('data-theme', 'dark');
+  else html.removeAttribute('data-theme');
+  const icon = document.getElementById('themeIcon');
+  const label = document.getElementById('themeLabel');
+  if (icon) icon.textContent = theme === 'dark' ? '☀️' : '🌙';
+  if (label) label.textContent = theme === 'dark' ? '浅色' : '深色';
+}
+function toggleTheme() {
+  const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+  const next = isDark ? 'light' : 'dark';
+  try { localStorage.setItem('oc-theme', next); } catch(e) {}
+  applyTheme(next);
+}
+function toggleSidebar(){ document.getElementById('sidebar').classList.toggle('collapsed'); }
+
+function esc(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+let toastTimer;
+function showToast(msg, type) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast ' + (type || '') + ' show';
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('show'), 2400);
+}
+
+// ====== 确认弹窗（Promise 版） ======
+let confirmResolve = null;
+function askConfirm(title, msg, okText) {
+  document.getElementById('confirmTitle').textContent = title;
+  document.getElementById('confirmMsg').textContent = msg;
+  document.getElementById('confirmOk').textContent = okText || '确定';
+  document.getElementById('confirmOverlay').classList.add('active');
+  return new Promise(res => { confirmResolve = res; });
+}
+function closeConfirm(val) {
+  document.getElementById('confirmOverlay').classList.remove('active');
+  if (confirmResolve) { confirmResolve(val); confirmResolve = null; }
+}
+
+// ====== 数据 ======
+async function fetchTrash(includeHistory) {
+  const res = await fetch(`${API}/trash${includeHistory ? '?include_history=1' : ''}`);
+  if (!res.ok) throw new Error('加载失败');
+  return res.json();
+}
+
+async function loadAll() {
+  try {
+    trashCache = await fetchTrash(true);
+    historyCache = trashCache.history || [];
+    renderTrash();
+    renderHistory();
+  } catch (e) {
+    showToast('加载失败：' + e.message, 'error');
+  }
+}
+
+// ====== 渲染：回收站 ======
+function renderTrash() {
+  const items = (trashCache && trashCache.deleted) || [];
+  document.getElementById('badgeTrash').textContent = items.length;
+  document.getElementById('trashCount').textContent = items.length;
+  const box = document.getElementById('trashList');
+  const empty = document.getElementById('trashEmpty');
+
+  if (!items.length) { box.innerHTML = ''; empty.style.display = ''; return; }
+  empty.style.display = 'none';
+
+  box.innerHTML = items.map(it => `
+    <div class="rev-item">
+      <span class="ri-icon">${ENTITY_ICON[it.entity] || '❔'}</span>
+      <div class="ri-main">
+        <div class="ri-name">${esc(it.label)}</div>
+        <div class="ri-meta">
+          <span class="tag">${esc(it.entity_label)}</span>
+          <span>${esc(it.created_at)} 删除</span>
+        </div>
+        ${it.desc ? `<div class="ri-desc">${esc(it.desc)}</div>` : ''}
+      </div>
+      <div class="ri-actions">
+        <button class="btn btn-primary btn-sm" data-act="restore" data-id="${it.id}">还原</button>
+        <button class="btn btn-danger btn-sm" data-act="purge" data-id="${it.id}" data-label="${esc(it.label)}">彻底删除</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+// ====== 渲染：编辑历史 ======
+function renderHistory() {
+  const ent = document.getElementById('filterEntity').value;
+  const kw = document.getElementById('filterKw').value.trim().toLowerCase();
+
+  let items = historyCache.slice();
+  if (ent) items = items.filter(x => x.entity === ent);
+  if (kw) items = items.filter(x => (x.label || '').toLowerCase().includes(kw));
+
+  document.getElementById('badgeHistory').textContent =
+    historyCache.filter(x => x.action === 'edit').length;
+  document.getElementById('histCount').textContent = items.length;
+
+  const box = document.getElementById('histList');
+  const empty = document.getElementById('histEmpty');
+  if (!items.length) { box.innerHTML = ''; empty.style.display = ''; return; }
+  empty.style.display = 'none';
+
+  box.innerHTML = items.map(it => `
+    <div class="rev-item">
+      <span class="ri-icon">${ENTITY_ICON[it.entity] || '❔'}</span>
+      <div class="ri-main">
+        <div class="ri-name">${esc(it.label)}</div>
+        <div class="ri-meta">
+          <span class="tag">${esc(it.entity_label)}</span>
+          <span class="tag ${it.action === 'delete' ? 'del' : ''}">${ACTION_TEXT[it.action] || it.action}</span>
+          <span>${esc(it.created_at)}</span>
+          ${it.restored ? '<span class="tag done">已还原</span>' : ''}
+        </div>
+        ${it.desc ? `<div class="ri-desc">${esc(it.desc)}</div>` : ''}
+      </div>
+      <div class="ri-actions">
+        <button class="btn btn-outline btn-sm" data-act="restore" data-id="${it.id}">还原到此版本</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+// ====== 动作 ======
+async function doRestore(id) {
+  const res = await fetch(`${API}/trash/restore`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ rev_id: Number(id) })
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || '还原失败');
+  return data;
+}
+
+async function doPurge(id, label) {
+  const ok = await askConfirm('彻底删除？',
+    `「${label}」将被永久删除，不可恢复。它引用的图片（若无其他地方再用）也会一并删除。`, '彻底删除');
+  if (!ok) return;
+  const res = await fetch(`${API}/trash/${Number(id)}`, { method: 'DELETE' });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || '删除失败');
+  showToast('已彻底删除');
+  await loadAll();
+}
+
+async function doEmpty(historyToo) {
+  const ok = await askConfirm(
+    historyToo ? '清空全部历史？' : '清空回收站？',
+    historyToo
+      ? '所有删除记录和编辑历史都会被永久清除，不可恢复。'
+      : '回收站里的记录将被永久删除，不可恢复。',
+    '清空');
+  if (!ok) return;
+  const res = await fetch(`${API}/trash${historyToo ? '?history_too=1' : ''}`, { method: 'DELETE' });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || '清空失败');
+  showToast(`已清除 ${data.removed || 0} 条`);
+  await loadAll();
+}
+
+// ====== 事件绑定 ======
+document.addEventListener('click', async (e) => {
+  const btn = e.target.closest('button[data-act]');
+  if (!btn) return;
+  const act = btn.dataset.act;
+  const id = btn.dataset.id;
+  btn.disabled = true;
+  try {
+    if (act === 'restore') {
+      const r = await doRestore(id);
+      showToast(r.action === 'recreated' ? `已还原「${r.label}」` : '已回退到此版本');
+      await loadAll();
+    } else if (act === 'purge') {
+      await doPurge(id, btn.dataset.label || '');
+    }
+  } catch (err) {
+    showToast(err.message, 'error');
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    curTab = tab.dataset.tab;
+    document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t === tab));
+    document.getElementById('paneTrash').style.display = curTab === 'trash' ? '' : 'none';
+    document.getElementById('paneHistory').style.display = curTab === 'history' ? '' : 'none';
+  });
+});
+
+document.getElementById('filterEntity').addEventListener('change', renderHistory);
+document.getElementById('filterKw').addEventListener('input', renderHistory);
+document.getElementById('btnEmpty').addEventListener('click', () => doEmpty(false));
+document.getElementById('btnClearHistory').addEventListener('click', () => doEmpty(true));
+document.getElementById('confirmCancel').addEventListener('click', () => closeConfirm(false));
+document.getElementById('confirmOk').addEventListener('click', () => closeConfirm(true));
+document.getElementById('confirmOverlay').addEventListener('click', function(e) {
+  if (e.target === this) closeConfirm(false);
+});
+
+window.addEventListener('DOMContentLoaded', () => {
+  applyTheme(document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light');
+  loadAll();
+});
+</script>
+
+</div><!-- /main-content -->
+</div><!-- /app-layout -->
+
+<script src="search.js?v=2"></script>
+<script src="export-all.js?v=2"></script>
+<script src="copy-detail.js"></script>
+
+</body>
+</html>

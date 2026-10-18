@@ -514,6 +514,9 @@
     <a href="/documents" class="sidebar-item">
       <span class="sidebar-icon">📄</span><span class="sidebar-text">文档管理</span>
     </a>
+    <a href="/trash" class="sidebar-item">
+      <span class="sidebar-icon">🗑️</span><span class="sidebar-text">回收站</span>
+    </a>
   </nav>
   <div class="sidebar-footer">
     <button class="theme-toggle" onclick="toggleTheme()" title="切换深色/浅色模式">
@@ -614,7 +617,7 @@
     </div>
     <div class="modal-body" style="text-align:center; padding: 28px 24px;">
       <p style="font-size:1rem; margin-bottom:4px;">确定要删除设定 <strong id="deleteTitle" style="color:var(--danger);"></strong> 吗？</p>
-      <p style="font-size:.85rem; color:var(--text-light);">此操作无法撤销</p>
+      <p style="font-size:.85rem; color:var(--text-light);">会先移入回收站，之后可以还原</p>
     </div>
     <div class="modal-footer" style="justify-content:center;">
       <button class="btn btn-ghost" onclick="closeDeleteModal()">取消</button>
@@ -960,7 +963,7 @@ async function confirmDelete() {
     await fetch(`${API}/${deleteTargetId}`, { method: 'DELETE' });
     closeDeleteModal();
     loadEntries();
-    showToast('设定已删除', 'success');
+    showToast('已移入回收站', 'success');
   } catch (e) { showToast('删除失败', 'error'); }
 }
 

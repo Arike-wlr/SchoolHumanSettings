@@ -152,10 +152,26 @@
      历史上它曾被放在 #view-relations 内部，导致首页点按钮弹不出确认框。 -->
 <div class="modal-overlay" id="exportAllOverlay"><div class="modal" style="max-width:400px;"><div class="modal-body" style="text-align:center;padding:24px 16px;"><p style="font-size:1.05rem;font-weight:600;margin-bottom:10px;">导出全部数据</p><p style="color:var(--text-light);font-size:.88rem;line-height:1.65;">将把 角色、世界观、关系 汇总导出为一个 JSON 文件。是否继续？</p></div><div class="modal-footer"><button class="btn-modal cancel" onclick="closeExportAllConfirm()">取消</button><button class="btn-modal primary" onclick="confirmExportAll()">确定导出</button></div></div></div>
 
+<!-- 全量字数排行（统计页「设定最厚 / 最长的世界观条目」点「查看全部」）。
+     必须放全局层：.modal-overlay 一旦塞进某个 .view 内，父容器 display:none 会连它一起隐藏。 -->
+<div class="modal-overlay" id="statsRankOverlay">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title" id="statsRankTitle">全量排行</span>
+      <button class="modal-close" onclick="closeStatsRank()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div id="statsRankSub" style="font-size:.72rem;color:var(--text-light);margin-bottom:10px;"></div>
+      <div id="statsRankBody"></div>
+    </div>
+  </div>
+</div>
+
 <script src="image-store.js"></script>
 <script src="db.js"></script>
 <script src="api-shim.js"></script>
-<script src="mammoth.min.js"></script>
+<!-- mammoth.min.js（约 642 KB）已改为按需加载：只在预览 .docx 时才注入。
+     见 api-shim.js 的 ensureMammoth()。首屏不再加载它。 -->
 <script src="navigation.js"></script>
 <script src="app.js"></script>
 <script src="face-crop.js"></script>

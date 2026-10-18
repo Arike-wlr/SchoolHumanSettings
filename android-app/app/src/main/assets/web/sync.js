@@ -63,7 +63,15 @@ let _syncInFlight = null;
 // 只允许一轮同步同时运行，避免两轮互相覆盖缓存和记录。
 function runSyncOnce(operation) {
   if (_syncInFlight) return Promise.reject(new Error('同步正在进行，请等待当前轮结束'));
-  _syncInFlight = Promise.resolve().then(operation).finally(() => { _syncInFlight = null; });
+  _syncInFlight = Promise.resolve().then(operation).finally(() => {
+    _syncInFlight = null;
+    // 同步一结束就补缩略图（不等用户打开列表页）——否则第一次进列表会用原图渲染一屏，
+    // 43 张大图同时解码正是卡顿来源。置于 _syncInFlight 清空**之后**，避免撞上 backfill 的避让等待。
+    // 只在「同步真带来角色变化」时有意义，但这里无法廉价判断，交给 backfill 自己过滤（thumbs 已存在的会跳过）。
+    try {
+      if (typeof VM !== 'undefined' && VM.index && VM.index.backfillThumbs) VM.index.backfillThumbs();
+    } catch (e) { /* 补图失败不影响同步结果 */ }
+  });
   return _syncInFlight;
 }
 

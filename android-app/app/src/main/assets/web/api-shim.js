@@ -26,6 +26,29 @@ window.fetch = async function (input, init) {
 };
 
 // ============================================================
+// mammoth.js 按需加载
+// mammoth.min.js（约 642 KB）只在预览 .docx 时用得上，此前 write 在
+// index.html 的 <script> 里 → 首屏白背 642 KB。现在改为首次用到才注入，
+// 并缓存 Promise（并发预览也只加载一次）。
+// ============================================================
+let _mammothPromise = null;
+function ensureMammoth() {
+  if (typeof mammoth !== 'undefined') return Promise.resolve();
+  if (_mammothPromise) return _mammothPromise;
+  _mammothPromise = new Promise((resolve) => {
+    const s = document.createElement('script');
+    // 页面从 file:///android_asset/web/ 加载，相对路径即可；
+    // 用绝对 file:// 反而在部分 WebView 上被拦，故保持相对名。
+    s.src = 'mammoth.min.js';
+    s.async = true;
+    s.onload = () => resolve();
+    s.onerror = () => { _mammothPromise = null; resolve(); }; // 失败不卡死，调用方会兜底提示
+    document.head.appendChild(s);
+  });
+  return _mammothPromise;
+}
+
+// ============================================================
 // 请求路由
 // ============================================================
 async function handleApiRequest(url, init) {
@@ -200,11 +223,14 @@ async function handleApiRequest(url, init) {
           });
         }
         if (ext === 'docx') {
-          // 用 mammoth.js 离线解析 docx → HTML
-          if (typeof mammoth === 'undefined') {
-            return makeResponse({ name: doc.name, type: 'docx', content: '⚠️ 解析库未加载', cache_key: null });
-          }
+          // 用 mammoth.js 离线解析 docx → HTML。
+          // ⚠️ mammoth.min.js 约 642 KB，已从 index.html 的 <script> 里移除，
+          //    改为**首次预览 docx 时**按需注入（首屏不必背这个体积）。
           try {
+            if (typeof mammoth === 'undefined') await ensureMammoth();
+            if (typeof mammoth === 'undefined') {
+              return makeResponse({ name: doc.name, type: 'docx', content: '⚠️ 解析库未加载（网络/文件缺失）', cache_key: null });
+            }
             const arrayBuffer = await doc.blob.arrayBuffer();
             const result = await mammoth.convertToHtml({ arrayBuffer });
             return makeResponse({
@@ -245,6 +271,12 @@ async function handleApiRequest(url, init) {
     // ---- 总览统计（离线：直接聚合 IndexedDB；口径必须与 server/backend.py 的 /api/stats 一致）----
     if (path === '/api/stats' && method === 'GET') {
       return makeResponse(await computeStats());
+    }
+
+    // ---- 全量字数排行（统计页「设定最厚 / 最长的世界观条目」点「查看全部」时用）----
+    // 口径与上面 computeStats 的 highlights 完全一致，只是不截断 Top N。
+    if (path === '/api/stats/ranks' && method === 'GET') {
+      return makeResponse(await computeStatsRanks());
     }
 
     // ---- 全局搜索（离线：从 IndexedDB 本地检索；接口与桌面版一致）----
@@ -892,5 +924,52 @@ async function computeStats() {
     }
   };
 }
+
+// ============================================================
+// 全量字数排行（GET /api/stats/ranks）
+// 与 computeStats 的 highlights 同口径，只是不截断 Top N：
+//   - 角色：STATS_CHAR_TEXT_FIELDS 15 字段之和（statsCharTotalCount），字数为 0 的不上榜
+//   - 世界观：content 正文字数（statsCharCount），0 字也保留
+// 排序：字数降序，同字数比名字/标题 —— 与后端 _top / world_rank 逐位一致。
+// ============================================================
+async function computeStatsRanks() {
+  var chars = await charDB.list();
+  var worlds = await worldDB.list('');
+
+  var charRows = [];
+  chars.forEach(function(c) {
+    var n = statsCharTotalCount(c);
+    if (!n) return;                     // 与后端 _top 一致
+    charRows.push({
+      id: c.id,
+      name: c.name || '',
+      university: c.university || '',
+      region: c.region || '',
+      value: n
+    });
+  });
+  charRows.sort(function(a, b) {
+    if (b.value !== a.value) return b.value - a.value;
+    return a.name < b.name ? -1 : (a.name > b.name ? 1 : 0);
+  });
+
+  var worldRows = [];
+  worlds.forEach(function(w) {
+    worldRows.push({
+      id: (w.id == null ? null : w.id),
+      title: w.title || '',
+      chars: statsCharCount(w.content),
+      main_category: statsBucket(w.main_category, '未分类'),
+      category: w.category || ''
+    });
+  });
+  worldRows.sort(function(a, b) {
+    if (b.chars !== a.chars) return b.chars - a.chars;
+    return a.title < b.title ? -1 : (a.title > b.title ? 1 : 0);
+  });
+
+  return { characters: charRows, worlds: worldRows };
+}
+
 
 

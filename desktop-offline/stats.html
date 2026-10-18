@@ -258,9 +258,10 @@
   }
   .panel-head {
     display: flex;
+    flex-wrap: wrap;              /* 窄窗口放不下时，右侧 note+按钮整体换行，不挤坏标题 */
     justify-content: space-between;
     align-items: baseline;
-    gap: 8px;
+    gap: 6px 8px;
     margin-bottom: 14px;
   }
   .panel-title { font-size: .95rem; font-weight: 600; color: var(--text); }
@@ -336,6 +337,67 @@
   .rank-name { flex: 1; min-width: 0; font-size: .9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .rank-sub { font-size: .74rem; color: var(--text-light); flex-shrink: 0; }
   .rank-val { font-size: .88rem; color: var(--accent); font-weight: 600; flex-shrink: 0; font-variant-numeric: tabular-nums; }
+
+  /* ====== 全量排行弹窗（「设定最厚 / 最长的世界观条目」点「查看全部」） ====== */
+  /* 面板头右侧的「查看全部 N 条 ›」小按钮 */
+  .panel-more {
+    font-family: var(--font-sans);
+    font-size: .72rem;
+    color: var(--accent);
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 2px 9px;
+    cursor: pointer;
+    transition: var(--transition);
+    flex-shrink: 0;
+    line-height: 1.5;
+  }
+  .panel-more:hover { background: var(--accent-pale); border-color: var(--accent-light); }
+  .panel-head-right { display: flex; align-items: center; gap: 8px; min-width: 0; flex-shrink: 0; max-width: 100%; }
+  .panel-head-right .panel-note { flex-shrink: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  .rank-overlay {
+    position: fixed; inset: 0;
+    background: rgba(30, 20, 10, .45);
+    display: flex; align-items: center; justify-content: center;
+    padding: 24px;
+    z-index: 2000;
+    opacity: 0; visibility: hidden;
+    transition: var(--transition);
+  }
+  .rank-overlay.active { opacity: 1; visibility: visible; }
+  .rank-modal {
+    width: min(620px, 100%);
+    max-height: min(80vh, 760px);
+    display: flex; flex-direction: column;
+    background: var(--card-bg);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-lg);
+    overflow: hidden;
+    transform: translateY(10px) scale(.99);
+    transition: var(--transition);
+  }
+  .rank-overlay.active .rank-modal { transform: translateY(0) scale(1); }
+  .rank-modal-head {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 12px;
+    padding: 16px 20px 12px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .rank-modal-title { font-size: .98rem; font-weight: 600; color: var(--text); }
+  .rank-modal-sub { font-size: .74rem; color: var(--text-light); margin-top: 2px; }
+  .rank-modal-close {
+    width: 30px; height: 30px; flex-shrink: 0;
+    border: none; border-radius: 50%;
+    background: var(--bg); color: var(--text-light);
+    font-size: 1rem; cursor: pointer; transition: var(--transition);
+  }
+  .rank-modal-close:hover { background: var(--accent-pale); color: var(--text); }
+  .rank-modal-body { overflow-y: auto; padding: 8px 12px 14px; }
+  .rank-modal-body .rank-no { width: 26px; height: 22px; border-radius: 6px; }
+  .rank-empty { padding: 28px 12px; text-align: center; color: var(--text-light); font-size: .86rem; }
 
   /* ====== 明细小格 ====== */
   .facts {
@@ -514,6 +576,9 @@
     <a href="/documents" class="sidebar-item">
       <span class="sidebar-icon">📄</span><span class="sidebar-text">文档管理</span>
     </a>
+    <a href="/trash" class="sidebar-item">
+      <span class="sidebar-icon">🗑️</span><span class="sidebar-text">回收站</span>
+    </a>
   </nav>
   <div class="sidebar-footer">
     <button class="theme-toggle" onclick="toggleTheme()" title="切换深色/浅色模式">
@@ -586,10 +651,16 @@ const PALETTE = ['c1','c2','c3','c4','c5','c6','c7','c8'];
 const pickColor = (i) => PALETTE[i % PALETTE.length];
 
 // 面板容器
-function panel(title, note, body) {
+//   action —— 可选：面板头右侧的额外按钮 HTML（如「查看全部 83 位」）
+function panel(title, note, body, action) {
+  const right = (note || action)
+    ? '<span class="panel-head-right">' +
+        (note ? '<span class="panel-note">' + note + '</span>' : '') +
+        (action || '') +
+      '</span>'
+    : '';
   return '<div class="panel"><div class="panel-head">' +
-    '<span class="panel-title">' + title + '</span>' +
-    (note ? '<span class="panel-note">' + note + '</span>' : '') +
+    '<span class="panel-title">' + title + '</span>' + right +
     '</div>' + body + '</div>';
 }
 
@@ -741,7 +812,8 @@ function render(d) {
     (C.total ? Math.round((HL.total_setting_chars || 0) / C.total) : 0) + ' 字/人</span></h2>';
   html += '<div class="stat-grid">';
 
-  html += panel('📝 设定最厚', '全字段字数', crownList(HL.items && HL.items.longest_setting, '字'));
+  html += panel('📝 设定最厚', '全字段字数', crownList(HL.items && HL.items.longest_setting, '字'),
+    moreBtn('chars', C.total, '位角色'));
   html += panel('🖼 图片最多', '张数', crownList(HL.items && HL.items.most_images, '张'));
   html += panel('📊 设定篇幅分布', '共 ' + (C.total || 0) + ' 位', barChart(HL.setting_distribution, C.total));
 
@@ -774,8 +846,10 @@ function render(d) {
     : (HL.world_longest ? [HL.world_longest] : []);
   if (worldRank.length) {
     html += '<div class="panel" style="margin-top:18px;"><div class="panel-head">' +
-      '<span class="panel-title">🌍 最长的世界观条目</span><span class="panel-note">' +
-      'Top ' + worldRank.length + ' · 榜首 ' + (worldRank[0].chars || 0).toLocaleString() + ' 字</span></div>' +
+      '<span class="panel-title">🌍 最长的世界观条目</span>' +
+      '<span class="panel-head-right"><span class="panel-note">' +
+      'Top ' + worldRank.length + ' · 榜首 ' + (worldRank[0].chars || 0).toLocaleString() + ' 字</span>' +
+      moreBtn('worlds', W.total, '条设定') + '</span></div>' +
       '<div class="rank-list">' + worldRank.map((w, i) =>
         '<a class="rank-row" href="' + (w.id != null ? '/worldview?wb=' + encodeURIComponent(w.id) + '&return=stats' : '/worldview') + '">' +
           '<span class="rank-no">' + (i + 1) + '</span>' +
@@ -964,6 +1038,83 @@ function fact(label, value, unit) {
     '<div class="fact-value">' + esc(value) + (unit ? '<small>' + unit + '</small>' : '') + '</div></div>';
 }
 
+// ====== 全量字数排行 ======
+// 榜单只给 Top N（STATS_RANK_N / STATS_WORLD_RANK_N 各 10 条），
+// 「查看全部」把这个面板的全部条目拉出来：数据走 /api/stats/ranks（与统计口径同源，
+// 前端不做任何字数计算，避免 CHAR_TEXT_FIELDS 在三处各写一遍）。
+const RANK_META = {
+  chars:  { icon: '📝', title: '设定最厚',       unit: '字', sub: '全字段字数 · 按字数降序' },
+  worlds: { icon: '🌍', title: '最长的世界观条目', unit: '字', sub: '正文内容字数 · 按字数降序' },
+};
+let _rankCache = null;      // {characters, worlds} —— 一次会话内复用，切主题不重拉
+
+function moreBtn(kind, total, noun) {
+  const n = Number(total) || 0;
+  if (!n) return '';
+  return '<button class="panel-more" onclick="openRankList(\'' + kind + '\')">' +
+    '查看全部 ' + n + ' ' + (noun || '条') + ' ›</button>';
+}
+
+function openRankList(kind) {
+  const meta = RANK_META[kind];
+  if (!meta) return;
+  document.getElementById('rankModalTitle').textContent = meta.icon + ' ' + meta.title;
+  document.getElementById('rankModalSub').textContent = meta.sub;
+  const body = document.getElementById('rankModalBody');
+  document.getElementById('rankOverlay').classList.add('active');
+
+  if (_rankCache) return paintRankList(kind, _rankCache);
+
+  body.innerHTML = '<div class="rank-empty">正在统计…</div>';
+  fetch('/api/stats/ranks')
+    .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+    .then(d => { _rankCache = d; paintRankList(kind, d); })
+    .catch(e => { body.innerHTML = '<div class="rank-empty">加载失败：' + esc(e.message) + '</div>'; });
+}
+
+function paintRankList(kind, d) {
+  const meta = RANK_META[kind];
+  const rows = (kind === 'chars' ? d.characters : d.worlds) || [];
+  document.getElementById('rankModalSub').textContent =
+    meta.sub + ' · 共 ' + rows.length + ' 条';
+
+  if (!rows.length) {
+    document.getElementById('rankModalBody').innerHTML = '<div class="rank-empty">暂无数据</div>';
+    return;
+  }
+  document.getElementById('rankModalBody').innerHTML = '<div class="rank-list">' + rows.map((it, i) => {
+    const isChar = kind === 'chars';
+    const name  = isChar ? it.name : it.title;
+    const value = isChar ? it.value : it.chars;
+    const sub   = isChar
+      ? [it.university, it.region].filter(Boolean).join(' · ')
+      : [it.main_category, it.category].filter(Boolean).join(' · ');
+    const href  = (it.id != null)
+      ? (isChar ? '/index?char=' + encodeURIComponent(it.id) + '&return=stats'
+                : '/worldview?wb=' + encodeURIComponent(it.id) + '&return=stats')
+      : (isChar ? '/index' : '/worldview');
+    return '<a class="rank-row" href="' + href + '">' +
+      '<span class="rank-no">' + (i + 1) + '</span>' +
+      '<span class="rank-name" title="' + esc(name) + '">' + esc(name) + '</span>' +
+      (sub ? '<span class="rank-sub">' + esc(sub) + '</span>' : '') +
+      '<span class="rank-val">' + (Number(value) || 0).toLocaleString() +
+        '<small style="font-size:.72rem;color:var(--text-light);font-weight:400"> 字</small></span>' +
+      '<span class="crown-go">›</span>' +
+    '</a>';
+  }).join('') + '</div>';
+}
+
+function closeRankList() {
+  document.getElementById('rankOverlay').classList.remove('active');
+}
+
+// Esc 关闭（只在弹窗打开时拦截，不影响全局）
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && document.getElementById('rankOverlay').classList.contains('active')) {
+    closeRankList();
+  }
+});
+
 // ====== 加载 ======
 function loadStats() {
   document.getElementById('statsError').style.display = 'none';
@@ -992,6 +1143,21 @@ toggleTheme = function() {
   if (body && body.style.display !== 'none') loadStats();
 };
 </script>
+<!-- 全量字数排行弹窗。「设定最厚」「最长的世界观条目」点「查看全部」打开。
+     放在 body 层级（不在 .container 里）—— 否则父容器隐藏时弹窗会一起被吃掉。 -->
+<div class="rank-overlay" id="rankOverlay" onclick="if(event.target===this)closeRankList()">
+  <div class="rank-modal">
+    <div class="rank-modal-head">
+      <div>
+        <div class="rank-modal-title" id="rankModalTitle">全量排行</div>
+        <div class="rank-modal-sub" id="rankModalSub"></div>
+      </div>
+      <button class="rank-modal-close" onclick="closeRankList()" title="关闭">✕</button>
+    </div>
+    <div class="rank-modal-body" id="rankModalBody"></div>
+  </div>
+</div>
+
 <script src="search.js?v=2"></script>
 <script src="export-all.js?v=2"></script>
 </body>

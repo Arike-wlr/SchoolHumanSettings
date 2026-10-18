@@ -424,8 +424,20 @@ html[data-theme="dark"] #view-home .card { background: var(--card-bg); box-shado
   padding-bottom: 6px;
   border-bottom: 1px solid var(--border);
   margin: 22px 0 12px;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;          /* 窄屏 hint 过长时换行，不撑破标题 */
 }
 .stats-container > .stats-section-title:first-child { margin-top: 0; }
+/* 标题右侧的灰色小字摘要（与桌面版 .section-hint 对齐） */
+.stats-section-hint {
+  font-family: var(--font-sans);
+  font-size: .72rem;
+  color: var(--text-light);
+  letter-spacing: 0;
+  font-weight: 400;
+}
 
 /* ---- 概览卡 ---- */
 .stats-hero { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
@@ -463,7 +475,9 @@ html[data-theme="dark"] #view-home .card { background: var(--card-bg); box-shado
   padding: 14px 16px 16px;
   margin-bottom: 12px;
 }
-.stats-panel-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 12px; }
+/* flex-wrap：标题 + 右侧（note 与「全部 N」按钮）一行放不下时，右侧整体掉到第二行，
+   而不是把标题压成两行。只有带按钮的两个面板会触发，其余面板仍是一行。 */
+.stats-panel-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 6px 8px; margin-bottom: 12px; }
 .stats-panel-title { font-size: .9rem; font-weight: 600; color: var(--text); }
 .stats-panel-note { font-size: .68rem; color: var(--text-light); flex-shrink: 0; }
 .stats-note { font-size: .78rem; color: var(--text-light); padding: 4px 0; }
@@ -537,6 +551,35 @@ table.matrix td.hot { color: #fff; font-weight: 600; }
 .stats-rank-row:nth-child(2) .stats-rank-no { background: var(--c2); color: #fff; }
 .stats-rank-row:nth-child(3) .stats-rank-no { background: var(--c3); color: #fff; }
 .stats-rank-name { flex: 1; min-width: 0; font-size: .86rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---- 面板头右侧的「全部 N 条」按钮 ---- */
+/* flex-shrink:0 是关键：放不下时整块换行（见 .stats-panel-head 的 flex-wrap），
+   而不是把 note 压到 0 宽、按钮挤出面板。 */
+.stats-panel-head-right { display: flex; align-items: center; gap: 6px; min-width: 0; flex-shrink: 0; max-width: 100%; }
+/* ⚠️ 必须压掉上面的 .stats-panel-note{flex-shrink:0}：否则它独占第二行不肯缩，按钮照样溢出。 */
+.stats-panel-head-right .stats-panel-note { flex-shrink: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stats-panel-more {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;              /* 触摸目标别太小（原来 21px 容易点偏） */
+  font-family: var(--font-sans);
+  font-size: .68rem;
+  line-height: 1.2;
+  color: var(--accent);
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0 10px;
+  cursor: pointer;
+}
+.stats-panel-more:active { background: var(--accent-pale); border-color: var(--accent-light); }
+
+/* ---- 全量排行（弹窗列表）：名字下面带「学校 · 地区」/「大类 · 小类」 ---- */
+.stats-rank-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.stats-rank-main .stats-rank-name { flex: none; }
+.stats-rank-sub { font-size: .68rem; color: var(--text-light); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stats-rank-val small { font-size: .68rem; color: var(--text-light); font-weight: 400; margin-left: 2px; }
 .stats-rank-val { font-size: .84rem; color: var(--accent); font-weight: 600; flex-shrink: 0; font-variant-numeric: tabular-nums; }
 
 /* ---- 明细格 ---- */

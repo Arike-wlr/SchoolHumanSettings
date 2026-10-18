@@ -257,6 +257,14 @@ function cardThumbOf(c) {
   return (typeof c.thumbs[0] === 'string' && c.thumbs[0]) ? c.thumbs[0] : '';
 }
 
+// 第 i 张图的缩略图；没有就返回空串（调用方回退原图）。
+// 目前 thumbs 只在 backfill 里生成了首图（下标 0），其余下标自然回退原图。
+function imageThumbOf(c, i) {
+  if (!c || !Array.isArray(c.thumbs)) return '';
+  var t = c.thumbs[i];
+  return (typeof t === 'string' && t) ? t : '';
+}
+
 /* ============================================================
    导航
    ============================================================ */
@@ -446,6 +454,7 @@ VM.index = (function() {
   }
 
   var _detailView = null;
+  var _detailThumbs = [];   // 当前详情角色已生成的缩略图（下标对齐 detailImages）；缺位回退原图
 
   // 结构只创建一次；切换图片只更新主图 src、计数与缩略图选中态。
   function renderDetailImage() {
@@ -460,7 +469,12 @@ VM.index = (function() {
     var next='<button id="indexDetailNext" onclick="VM.index.detailImageStep(1)" style="'+btn+'" title="下一张">›</button>';
     var multi=imgs.length>1;
     var cnt=multi?'<div id="indexDetailCounter" style="font-size:0.75rem;color:var(--text-light);margin-top:4px;"></div>':'';
-    var thumbs=multi?imgs.map(function(u,i){var src=safeImageSrc(u);return src?'<img data-thumb="'+i+'" src="'+src+'" onclick="VM.index.detailImageGo('+i+')" style="width:42px;height:42px;object-fit:cover;border-radius:4px;cursor:pointer;border:2px solid transparent;">':'<div data-thumb="'+i+'" class="image-repair-hint" onclick="VM.index.detailImageGo('+i+')" style="cursor:pointer;">图片不可用</div>';}).join(''):'';
+    var thumbs=multi?imgs.map(function(u,i){
+      // 42×42 的小图条不必加载原图：优先用已生成的缩略图（下标对齐），缺位才回退原图。
+      var tv=_detailThumbs[i];
+      var src=safeImageSrc((typeof tv==='string'&&tv)?tv:u);
+      return src?'<img data-thumb="'+i+'" src="'+src+'" onclick="VM.index.detailImageGo('+i+')" style="width:42px;height:42px;object-fit:cover;border-radius:4px;cursor:pointer;border:2px solid transparent;">':'<div data-thumb="'+i+'" class="image-repair-hint" onclick="VM.index.detailImageGo('+i+')" style="cursor:pointer;">图片不可用</div>';
+    }).join(''):'';
     wrap.innerHTML='<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">'+prev+'<div style="flex:1;text-align:center;min-width:0;">'+
       '<img id="indexDetailMain" style="max-width:100%;max-height:240px;border-radius:6px;object-fit:contain;display:none;">'+
       '<div id="indexDetailHint" class="image-repair-hint" style="display:none;">图片不可用，请重新同步</div>'+cnt+'</div>'+next+'</div>'+
@@ -621,7 +635,7 @@ VM.index = (function() {
   // ---- 首图缩略图 backfill（D004）----
   // 异步、分批、不阻塞首屏：等首屏渲染完成后再逐张生成，批次间让出主线程。
   // 期间卡片回退原图（行为不变）；只处理“有首图、缺首图缩略图”的角色，且只生成首图。
-  var thumbBackfill = { running: false, revision: -1 };
+  var thumbBackfill = { running: false, revision: -1, loading: false };
 
   function thumbBackfillCandidates() {
     var out = [];
@@ -637,6 +651,17 @@ VM.index = (function() {
 
   function scheduleThumbBackfill() {
     if (thumbBackfill.running) return;
+    // 数据还没加载过（如"同步完直接点补缩略图"、冷启动未进列表）→ 先拉一遍再排队。
+    // 拉取是幂等的（loadCharacters 内部按 revision 去重），这里只负责把数据准备好。
+    if (!allCharacters || allCharacters.length === 0) {
+      if (thumbBackfill.loading) return;
+      thumbBackfill.loading = true;
+      Promise.resolve(loadCharacters()).then(function () {
+        thumbBackfill.loading = false;
+        scheduleThumbBackfill();
+      }).catch(function () { thumbBackfill.loading = false; });
+      return;
+    }
     var queue = thumbBackfillCandidates();
     if (queue.length === 0) return;
     thumbBackfill.running = true;
@@ -673,11 +698,23 @@ VM.index = (function() {
       if (!thumb || (window.appDataRevision || 0) !== thumbBackfill.revision) return;
       // 原子读-改-写：只改 thumbs，且仅当记录当前首图未变；绝不整条覆盖（否则会回退并发同步/编辑）。
       return charDB.updateThumb(c.id, ref, thumb).then(function (result) {
-        if (result === 'ok') { c.thumbs = [thumb]; applyFilter(); }
+        if (result === 'ok') { c.thumbs = [thumb]; scheduleThumbApply(); }
       });
     }).catch(function () { /* 单张失败不打断，卡片继续用原图 */ }).then(function () {
       setTimeout(function () { runThumbBatch(queue, index + 1, 0); }, 16);   // 批次间让出主线程
     });
+  }
+
+  // 缩略图批量刷新：applyFilter() 是**全量重建**（82 张卡片全在 DOM 里），
+  // 每生成一张就刷一次 = 82 次全量重排，能在中低端机上肉眼可见地卡。
+  // 攒到一批（或补图全部结束）再刷一次，视觉上仍是"陆续出现"，开销降一个量级。
+  var thumbApplyTimer = null;
+  function scheduleThumbApply() {
+    if (thumbApplyTimer) return;
+    thumbApplyTimer = setTimeout(function () {
+      thumbApplyTimer = null;
+      try { applyFilter(); } catch (e) {}
+    }, 240);
   }
 
   var navigationLoad = null;
@@ -860,7 +897,9 @@ VM.index = (function() {
       if (!AppNavigation.isCurrent(navigationToken)) return;
       detailCharId=c.id;
       document.getElementById('indexDetailName').textContent=c.name;
-      detailImages=normalizeImages(c);detailImageIdx=0;renderDetailImage();
+      detailImages=normalizeImages(c);detailImageIdx=0;
+      _detailThumbs=Array.isArray(c.thumbs)?c.thumbs:[];   // 详情页小图条也走缩略图（42px，不必用原图）
+      renderDetailImage();
       var body='';
       if(c.university)body+=detailSection('代表高校',c.university);
       if(c.alias)body+=detailSection('别名',c.alias);
@@ -871,8 +910,10 @@ VM.index = (function() {
       body+='<div class="detail-info-row">';
       if(c.height)body+=detailSection('身高',c.height);
       if(c.gender)body+=detailSection('性别',c.gender);
-      if(c.birthday)body+=detailSection('生日',c.birthday);
       body+='</div>';
+      // 生日是自由文本，长起来能到几十字（如"10月8日，非常巧的和中国航天事业创建纪念日是同一天！"）。
+      // 放进上面那个两列网格会被挤在半屏 174px 里折成 3 行、断点还落在词中间 —— 单独占整行。
+      if(c.birthday)body+=detailSection('生日',c.birthday);
       if(c.appearance)body+=detailSection('外貌',c.appearance);
       if(c.identity_period)body+=detailSection('身份存在时间',c.identity_period);
       if(c.birth_time)body+=detailSection('诞生时间',c.birth_time);
@@ -887,7 +928,7 @@ VM.index = (function() {
   function closeDetailModal() {
     if (!AppNavigation.isInternal()) return AppNavigation.close('indexDetailOverlay');
     document.getElementById('indexDetailOverlay').classList.remove('active');
-    detailCharId = null; detailImages = []; _detailView = null;
+    detailCharId = null; detailImages = []; _detailView = null; _detailThumbs = [];
     document.getElementById('indexDetailImage').innerHTML = '';
   }
   function detailEdit() {
@@ -1060,7 +1101,10 @@ VM.index = (function() {
     handleCardClick:handleCardClick,
     enterExportMode:enterExportMode, cancelExport:cancelExport,
     toggleCardSelect:toggleCardSelect, toggleSelectAll:toggleSelectAll, confirmExport:confirmExport,
-    moveCharUp:moveCharUp, moveCharDown:moveCharDown
+    moveCharUp:moveCharUp, moveCharDown:moveCharDown,
+    // 供同步完成后立刻补缩略图（见 sync.js）：把"打开列表页才生成"提前到"同步完就生成"，
+    // 这样用户同步完第一次进列表，thumbs[] 已就绪，不必先用原图跑一遍。
+    backfillThumbs:function(){ try { scheduleThumbBackfill(); } catch(e){} }
   };
 })();
 
@@ -2960,6 +3004,111 @@ function openWorldDetailFromStats(id) {
   });
 }
 
+// ======================== 全量字数排行（统计页「查看全部」）========================
+// 「设定最厚」「最长的世界观条目」两个榜单只给 Top N，「查看全部」拉全量。
+// 数据走 /api/stats/ranks：Android 端由 api-shim 直接聚合 IndexedDB，桌面端由后端算，
+// 前端一律**不做字数计算**，避免 CHAR_TEXT_FIELDS 在三处各写一遍。
+var STATS_RANK_META = {
+  chars:  { icon: '📝', title: '设定最厚' },
+  worlds: { icon: '🌍', title: '最长的世界观条目' }
+};
+var statsRankCache = null;   // {characters, worlds} —— 一次渲染周期内复用
+
+// 面板头右侧的「全部 N 条」。手机屏窄，文案要短 —— 早前用「查看全部 83 位角色」，
+// 与 note 并排时把「最长的世界观条目」标题挤成两行、按钮还溢出到面板外。
+function moreBtn(kind, total, noun) {
+  var n = Number(total) || 0;
+  if (!n) return '';
+  return '<button class="stats-panel-more" onclick="openStatsRank(\'' + kind + '\')">全部 ' +
+    n + ' ' + (noun || '条') + ' ›</button>';
+}
+
+function openStatsRank(kind) {
+  var meta = STATS_RANK_META[kind];
+  if (!meta) return Promise.resolve(false);
+  return AppNavigation.enter('statsRankOverlay', function () {
+    document.getElementById('statsRankTitle').textContent = meta.icon + ' ' + meta.title;
+    document.getElementById('statsRankSub').textContent = '';
+    document.getElementById('statsRankOverlay').classList.add('active');
+    return paintStatsRank(kind);
+  });
+}
+
+function paintStatsRank(kind) {
+  var body = document.getElementById('statsRankBody');
+  if (statsRankCache) { renderStatsRank(kind, statsRankCache); return Promise.resolve(); }
+  body.innerHTML = '<div class="stats-note" style="padding:26px 0;text-align:center;">正在统计…</div>';
+  return fetch('/api/stats/ranks').then(function(r) {
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    return r.json();
+  }).then(function(d) {
+    statsRankCache = d;
+    renderStatsRank(kind, d);
+  }).catch(function(e) {
+    body.innerHTML = '<div class="stats-note" style="padding:26px 0;text-align:center;">加载失败：' +
+      esc(e.message) + '</div>';
+  });
+}
+
+function renderStatsRank(kind, d) {
+  var isChar = (kind === 'chars');
+  var rows = (isChar ? d.characters : d.worlds) || [];
+  document.getElementById('statsRankSub').textContent =
+    (isChar ? '全字段字数' : '正文内容字数') + ' · 共 ' + rows.length + ' 条 · 按字数降序';
+
+  var body = document.getElementById('statsRankBody');
+  if (!rows.length) {
+    body.innerHTML = '<div class="stats-note" style="padding:26px 0;text-align:center;">暂无数据</div>';
+    return;
+  }
+  body.innerHTML = '<div class="stats-rank-list">' + rows.map(function(it, i) {
+    var name = isChar ? (it.name || '') : (it.title || '');
+    var val  = isChar ? it.value : it.chars;
+    var sub  = isChar
+      ? [it.university, it.region].filter(Boolean).join(' · ')
+      : [it.main_category, it.category].filter(Boolean).join(' · ');
+    var clickable = (it.id != null);
+    var oc = clickable ? ' onclick="openStatsRankRow(\'' + kind + '\',' + it.id + ')"' : '';
+    return '<div class="stats-rank-row' + (clickable ? ' tappable' : '') + '"' + oc + '>' +
+      '<span class="stats-rank-no">' + (i + 1) + '</span>' +
+      '<span class="stats-rank-main">' +
+        '<span class="stats-rank-name" title="' + esc(name) + '">' + esc(name) + '</span>' +
+        (sub ? '<span class="stats-rank-sub">' + esc(sub) + '</span>' : '') +
+      '</span>' +
+      '<span class="stats-rank-val">' + (Number(val) || 0).toLocaleString() +
+        '<small> 字</small></span>' +
+      (clickable ? '<span class="stats-rank-go">›</span>' : '') +
+    '</div>';
+  }).join('') + '</div>';
+}
+
+// 从排行点进详情：先让排行层退出屏幕（capture 已把它记进历史），
+// 返回时导航栈会原样恢复排行列表和滚动位置。
+function openStatsRankRow(kind, id) {
+  var isChar = (kind === 'chars');
+  return AppNavigation.enter(isChar ? 'indexDetailOverlay' : 'worldDetailOverlay', function () {
+    var rankEl = document.getElementById('statsRankOverlay');
+    if (rankEl) rankEl.classList.remove('active');
+    if (isChar) {
+      navigateTo('index');
+      return VM.index.openDetailModal(id);
+    }
+    navigateTo('worldview');
+    return VM.worldview.openDetailModal(id);
+  });
+}
+
+function closeStatsRank() {
+  return AppNavigation.close('statsRankOverlay');
+}
+
+AppNavigation.register('statsRankOverlay', {
+  dispose: function () {
+    var el = document.getElementById('statsRankOverlay');
+    if (el) el.classList.remove('active');
+  }
+});
+
 // ======================== 总览统计 ========================
 // 数据来自 fetch('/api/stats')：Android 端由 api-shim.js 直接聚合 IndexedDB，
 // 口径与 server/backend.py 的 /api/stats 保持一致（改口径要三处同改）。
@@ -3025,10 +3174,16 @@ VM.stats = (function() {
     }).join('') + '</div>';
   }
 
-  function panel(title, note, body) {
+  // action —— 可选：面板头右侧的额外按钮 HTML（如「查看全部 83 位」）
+  function panel(title, note, body, action) {
+    var right = (note || action)
+      ? '<span class="stats-panel-head-right">' +
+          (note ? '<span class="stats-panel-note">' + note + '</span>' : '') +
+          (action || '') +
+        '</span>'
+      : '';
     return '<div class="stats-panel"><div class="stats-panel-head">' +
-      '<span class="stats-panel-title">' + title + '</span>' +
-      (note ? '<span class="stats-panel-note">' + note + '</span>' : '') +
+      '<span class="stats-panel-title">' + title + '</span>' + right +
       '</div>' + body + '</div>';
   }
 
@@ -3170,6 +3325,7 @@ VM.stats = (function() {
   }
 
   function render(d) {
+    statsRankCache = null;   // 每次重新统计都让「查看全部」重拉，避免同步后读到陈旧排行
     var C = d.characters || {}, W = d.worldview || {}, R = d.relations || {}, D = d.documents || {}, I = d.images || {};
     var REG = d.regions || [], COMP = d.completeness || {}, FAM = d.families || {}, HL = d.highlights || {};
     var regionTop = (C.region || []).filter(function(r) { return r.name !== '未填写'; });
@@ -3189,26 +3345,29 @@ VM.stats = (function() {
 
     // ---------- 设定完整度体检 ----------
     // 板块顺序：先"体检"（一眼看整体填写情况）再看"分布"。
-    html += '<div class="stats-section-title">设定完整度体检</div>';
+    html += '<div class="stats-section-title">设定完整度体检<span class="stats-section-hint">' + num(COMP.avg_pct) + '% · 平均填写率</span></div>';
     html += '<div class="stats-panel">' + completenessView(COMP) + '</div>';
 
     // ---------- 角色分布 ----------
-    html += '<div class="stats-section-title">角色分布</div>';
+    html += '<div class="stats-section-title">角色分布<span class="stats-section-hint">共 ' + num(C.total) + ' 位角色</span></div>';
     html += panel('📍 地区分布', 'Top ' + regionTop.length + (regionBlank ? ' · 未填写 ' + regionBlank.count : ''), barChart(regionTop, num(C.total), 12));
     html += panel('⚧ 性别构成', num(C.total) + ' 位', pillGroup(C.gender, num(C.total)));
     html += panel('🌗 存在状态', '按 status 字段', barChart(C.status, num(C.total)));
     // （「🏛 家族规模」已移到「关系网络」——家族是关系的来源，和家族羁绊放一起更顺）
 
     // ---------- 角色之最 ----------
-    html += '<div class="stats-section-title">角色之最</div>';
-    html += panel('📝 设定最厚', '全字段字数', crownList(HL.items && HL.items.longest_setting, '字'));
+    html += '<div class="stats-section-title">角色之最<span class="stats-section-hint">全字段 ' +
+      num(HL.total_setting_chars).toLocaleString() + ' 字 · 平均 ' +
+      (num(C.total) ? Math.round(num(HL.total_setting_chars) / num(C.total)) : 0) + ' 字/人</span></div>';
+    html += panel('📝 设定最厚', '全字段字数', crownList(HL.items && HL.items.longest_setting, '字'),
+      moreBtn('chars', C.total, '位角色'));
     html += panel('🖼 图片最多', '张数', crownList(HL.items && HL.items.most_images, '张'));
     html += panel('📊 设定篇幅分布', '共 ' + num(C.total) + ' 位', barChart(HL.setting_distribution, num(C.total)));
 
     // ---------- 世界观与内容 ----------
     // 板块顺序：紧跟在「角色之最」之后（角色最厚 → 世界观最厚，读起来连贯），
     // 内容全部收在这一块里（大类分布 / 内容体量 / 最长的世界观条目），不要再拆出去。
-    html += '<div class="stats-section-title">世界观与内容</div>';
+    html += '<div class="stats-section-title">世界观与内容<span class="stats-section-hint">共 ' + num(W.total) + ' 条设定</span></div>';
     html += panel('📚 大类分布', num(W.total) + ' 条', barChart(W.main_category, num(W.total)));
     // 「内容体量」只放世界观自身的两个量：正文合计 + 条均（⚠️ 不硬凑第三个，用户明确要求）。
     //    不放角色的量（世界观块归世界观）；不放「最长条目」（下面榜单的「榜首 N 字」已有）；
@@ -3234,12 +3393,16 @@ VM.stats = (function() {
             '<span class="stats-rank-val">' + num(w.chars).toLocaleString() + '</span>' +
             (clickable ? '<span class="stats-rank-go">›</span>' : '') +
           '</div>';
-        }).join('') + '</div>');
+        }).join('') + '</div>',
+        moreBtn('worlds', W.total, '条设定'));
     }
 
     // ---------- 关系网络 ----------
     var famPairs = num(R.family_new_pairs);
-    html += '<div class="stats-section-title">关系网络</div>';
+    html += '<div class="stats-section-title">关系网络<span class="stats-section-hint">手写 ' + num(R.total) +
+      ' 条' + (famPairs ? ' + 同家族自动 ' + famPairs + ' 条' : '') +
+      ' · 去重 ' + num(R.unique_pairs) + ' 对 · 涉及 ' + num(R.connected_characters) +
+      ' 位角色 · 人均 ' + avgRel.toFixed(2) + ' 条</span></div>';
     html += panel('📐 关系明细',
       '手写 ' + num(R.total) + ' 条' + (famPairs ? ' + 同家族自动 ' + famPairs + ' 条' : '') +
       ' · 去重 ' + num(R.unique_pairs) + ' 对',
@@ -3281,7 +3444,7 @@ VM.stats = (function() {
     }
 
     // ---------- 地区圈子 ----------
-    html += '<div class="stats-section-title">地区圈子</div>';
+    html += '<div class="stats-section-title">地区圈子<span class="stats-section-hint">凝聚力＝同地区内部关系占比 · 设定厚度＝人均全字段字数</span></div>';
     html += panel('🤝 地区凝聚力', REG.length ? REG.length + ' 个活跃地区 · 内部关系占比' : '',
       REG.length ? barChart(REG.map(function(r) {
         return { name: r.name + '（' + r.inside + '/' + r.total + '）', count: num(r.cohesion) };

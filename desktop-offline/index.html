@@ -867,6 +867,9 @@
     <a href="/documents" class="sidebar-item" data-page-node-id="skvjZcxBsmJRKf7AFWgEDI">
       <span class="sidebar-icon" data-page-node-id="3H0CI20Hez8F4UXSqyJANx">📄</span><span class="sidebar-text" data-page-node-id="AaU9BuvVB4rg9uHpoDufcF">文档管理</span>
     </a>
+    <a href="/trash" class="sidebar-item">
+      <span class="sidebar-icon">🗑️</span><span class="sidebar-text">回收站</span>
+    </a>
   </nav>
   <div class="sidebar-footer" data-page-node-id="mZGSORH2ykkJyX1MTEVIGI">
     <button class="theme-toggle" onclick="toggleTheme()" title="切换深色/浅色模式" data-page-node-id="VH45Vnpzxid67uUfZDOkMP">
@@ -1034,7 +1037,7 @@
     </div>
     <div class="modal-body" style="text-align:center; padding: 28px 24px;" data-page-node-id="WDDpiLQzGXG5ccHqzBfphV">
       <p style="font-size:1rem; margin-bottom:4px;" data-page-node-id="UKDfky76yGqD7tWVmcwV6R">确定要删除角色 <strong id="deleteName" style="color:var(--danger);" data-page-node-id="bGSvzK5MQ9w5SX2CtZdxOc"></strong> 吗？</p>
-      <p style="font-size:.85rem; color:var(--text-light);" data-page-node-id="g1C4vonRtPqM3lOfGAIdtT">此操作无法撤销</p>
+      <p style="font-size:.85rem; color:var(--text-light);" data-page-node-id="g1C4vonRtPqM3lOfGAIdtT">会先移入回收站，之后可以还原</p>
     </div>
     <div class="modal-footer" style="justify-content:center;" data-page-node-id="4NjnIIx7kKrS1B6XwwGY38">
       <button class="btn btn-ghost" onclick="closeDeleteModal()" data-page-node-id="RcHfqf0jKECYCBFGLFUqRw">取消</button>
@@ -1253,7 +1256,7 @@ function cardHTML(c) {
   // 图片预览（证件照样式，放右侧，顶部与名字齐平、底部与生日齐平）
   const normImgs = normalizeImages(c);
   const imgCount = normImgs.length;
-  const coverUrl = normImgs[0] || '';
+  const coverUrl = thumbUrl(normImgs[0] || '');
   let photoHTML = '';
   if (coverUrl && coverUrl.trim() !== '') {
     const badge = imgCount > 1 ? `<span style="position:absolute;right:2px;bottom:2px;background:rgba(0,0,0,0.65);color:#fff;font-size:11px;padding:1px 5px;border-radius:8px;line-height:1.4;">共${imgCount}张</span>` : '';
@@ -1318,6 +1321,17 @@ function normalizeImages(c) {
   if (!Array.isArray(imgs)) imgs = [];
   if (imgs.length === 0 && c.image_url) imgs = [c.image_url];
   return imgs;
+}
+
+// 列表卡片专用：把原图地址换成缩略图地址（长边 480px，体积约为原图 1/50~1/260）。
+// ⚠️ 只在卡片列表用。详情页大图 / 关系网头像 / 人脸框选一律传原图，别在这里拦。
+//    只处理本机的 /api/images/xxx 形态；data URL、外链、空值原样返回。
+function thumbUrl(url) {
+  const u = String(url || '').trim();
+  if (!u) return '';
+  const m = u.match(/^\/api\/images\/(.+)$/);
+  if (!m) return u;
+  return '/api/thumbs/' + m[1];
 }
 
 function fieldRow(label, value) {
@@ -1620,7 +1634,7 @@ async function confirmDelete() {
     await fetch(`${API}/${deleteTargetId}`, { method: 'DELETE' });
     closeDeleteModal();
     loadCharacters();
-    showToast('角色已删除', 'success');
+    showToast('已移入回收站', 'success');
   } catch (e) {
     showToast('删除失败', 'error');
   }

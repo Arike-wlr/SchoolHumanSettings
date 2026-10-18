@@ -11,6 +11,7 @@
 - **文档管理** — 上传/下载/删除/在线预览文档，支持 docx（含图片解析）、txt、md 格式
 - **总览统计** — 角色与世界观规模概览、地区/性别/状态分布、家族规模、**设定完整度体检**（15 个字段的填写率与待补充清单）、**角色之最**（设定最厚 / 关系最多 / 类型最丰富 / 图片最多 / 家族羁绊最多）、**最长的世界观条目 Top 10**、**地区凝聚力与设定厚度**、关系网络质量指标、地区关系矩阵、世界观字数体量、图片与文档占用，一页看完整个设定簿
 - **全局搜索** — 跨角色、世界设定、关系、文档统一检索
+- **回收站与撤销** — 删除不再是终点：角色 / 世界观 / 关系的删除都是**软删除**，先落到 `/trash` 回收站，可一键还原（连原 id 一起插回，挂在它身上的关系会自动重新接上）；每次保存编辑前也会先存一份改动前的快照，可在「编辑历史」里回退到任意版本（回退**不影响排序**）。彻底删除或清空回收站后才会真正回收图片文件
 - **一键导出** — 侧栏「导出全部」把角色 / 世界观 / 关系汇总为一个 JSON；点击后先弹确认框（确定 / 取消），确认后才下载
 - **深色模式** — 支持浅色 / 深色主题切换
 
@@ -82,6 +83,7 @@ Settings/
 │   ├── relations.html          #   关系网（力导向画布）
 │   ├── documents.html          #   文档管理
 │   ├── stats.html              #   总览统计
+│   ├── trash.html              #   回收站 / 编辑历史
 │   ├── face-crop.js            #   人脸圈选
 │   ├── search.js               #   全局搜索
 │   ├── export-all.js           #   一键导出（含确认弹窗）
@@ -223,11 +225,14 @@ powershell -ExecutionPolicy Bypass -File server/check_sync.ps1 -Fix   # 诊断 +
 | 数据                   | 存储位置                              |
 | ---------------------- | ------------------------------------- |
 | 角色、世界设定、关系网 | `server/oc_characters.db`（SQLite） |
+| 删除与编辑历史快照     | 同上，`revisions` 表                |
 | 角色图片               | `server/images/`                    |
 | 上传的文档             | `server/文字设定/` 文件夹           |
 | docx 中提取的图片缓存  | `server/文字设定/.images_cache/`    |
 
 备份整个项目文件夹即可保留所有数据。
+
+关于回收站：`revisions` 表兼作回收站（`action='delete'`）与编辑历史（`action='edit'`），存的是**改动前**的整行 JSON（已剔除 `sort_order`，所以回退不会打乱排序）。角色被软删期间关系会留在库里（关系表的外键 `ON DELETE CASCADE` 实际未生效 —— `init_db()` 没开 `PRAGMA foreign_keys`），这正是还原时关系能自动接上的原因。**图片文件在软删和编辑期间一律保留**，只有「彻底删除 / 清空回收站」时才会回收那些既没被现存角色、也没被任何剩余快照引用的图。
 
 关于人脸头像：每个角色的图片列表中，某一张图可以用 `face_crop` 字段记录圈选的人脸框；关系网节点优先显示该图，没有则回退到第一张图。该字段会随同步一并传输。
 
@@ -260,13 +265,21 @@ powershell -ExecutionPolicy Bypass -File server/check_sync.ps1 -Fix   # 诊断 +
 | 概览卡         | 角色数 / 世界观条目 / 关系数 / 文档与图片                                                                                    | —                                                                                                                                                                            |
 | 角色分布       | 地区、性别、状态分布 + 家族规模卡                                                                                            | 家族规模卡列出每个家族的成员数（非条形图）                                                                                                                                    |
 | 设定完整度体检 | 15 个字段的分字段填写率 + 整体均值 + 待补充清单                                                                              | 字段清单见`STATS_COMPLETENESS_FIELDS`；待补充清单只列缺失 ≥3 人的字段，每人最多 10 个名字                                                                                  |
-| 角色之最       | 设定最厚 / 关系最多 / 关系类型最丰富 / 图片最多 / 家族羁绊最多（各 Top 10）+ 设定篇幅分布 +**最长的世界观条目 Top 10** | 角色榜`STATS_RANK_N=10`；世界观条目榜 `STATS_WORLD_RANK_N=10`（字段 `highlights.world_longest_list`，按内容字数降序，同字数比标题）                                     |
+| 角色之最       | 设定最厚 / 关系最多 / 关系类型最丰富 / 图片最多 / 家族羁绊最多（各 Top 10）+ 设定篇幅分布 +**最长的世界观条目 Top 10** | 角色榜`STATS_RANK_N=10`；世界观条目榜 `STATS_WORLD_RANK_N=10`（字段 `highlights.world_longest_list`，按内容字数降序，同字数比标题）。**两个榜都可点「全部 N 条 ›」看全量排行**（见下）                                     |
 | 关系网络       | 关系明细（手写关系、去重对数、同家族关系、孤立、双向互惠、重复、未标类型、自环、人均）+ 关系度排行 + 孤立角色                | **同家族自动关系**见下节；`total` 只数手写关系，`unique_pairs` 含家族                                                                                               |
 | 地区圈子       | 地区凝聚力 + 设定厚度 + 地区关系矩阵                                                                                         | 凝聚力＝同地区内部关系 ÷ 该地区涉及的全部关系（**已含同家族自动关系**）；仅统计关系 ≥ `STATS_MIN_REGION`(3) 的地区。**设定厚度**＝该地区人均 `setting` 字数 |
 | 世界观与内容   | 大类分布 + 内容体量                                                                                                          | 只统计大类；**已移除小类分布**（世界观页面已有）                                                                                                                        |
 | 素材与文档     | 图片数、无图角色、取脸数、文档数与占用                                                                                       | 离线/Android 端无磁盘概念，`size_display` 为空                                                                                                                              |
 
 > **已删除的冗余面板**：关系类型分布、世界观小类分布——这两项在关系网 / 世界观页面上已有，不再在统计页重复。
+
+### 全量字数排行（「全部 N 条 ›」）
+
+榜单只渲染 Top 10，两个榜的面板头各有一个「全部 N 条 ›」按钮，点开弹出**全量**排行（桌面弹窗 / 手机整页弹层），行内显示排名、名字、学校·地区（或大类·小类）与字数，点行仍直达详情。
+
+- 数据来自 **`GET /api/stats/ranks`**（单独接口，不塞进 `/api/stats`）：该接口只在打开弹窗时请求，统计页首屏不多背十几 KB。
+- **口径与 `highlights` 完全一致**：角色＝`CHAR_TEXT_FIELDS` 15 字段之和（字数为 0 的不上榜）、世界观＝`content` 正文字数；排序同为「字数降序，同字数比名字/标题」。
+- 前端**不做任何字数计算**——桌面版直接用后端结果，手机版由 `api-shim.js` 的 `computeStatsRanks()` 本地聚合。这样 `CHAR_TEXT_FIELDS` 仍只在 `backend.py` 与 `api-shim.js` 两处维护。
 
 ### 同家族自动关系（只影响统计计数）
 
@@ -299,7 +312,7 @@ powershell -ExecutionPolicy Bypass -File server/check_sync.ps1 -Fix   # 诊断 +
 - `POST /api/characters` — 创建角色
 - `GET /api/characters/{id}` — 单个角色
 - `PUT /api/characters/{id}` — 更新角色
-- `DELETE /api/characters/{id}` — 删除角色
+- `DELETE /api/characters/{id}` — 删除角色（**软删除**，进回收站）
 - `POST /api/characters/reorder` — 角色排序
 
 **图片**
@@ -317,14 +330,14 @@ powershell -ExecutionPolicy Bypass -File server/check_sync.ps1 -Fix   # 诊断 +
 
 - `GET /api/world-buildings` — 列表
 - `POST /api/world-buildings` — 创建
-- `GET/PUT/DELETE /api/world-buildings/{id}` — 单个条目操作
+- `GET/PUT/DELETE /api/world-buildings/{id}` — 单个条目操作（删除同样是软删除）
 - `POST /api/world-buildings/reorder` — 排序
 
 **关系**
 
 - `GET /api/relations` — 列表
 - `POST /api/relations` — 创建
-- `GET/PUT/DELETE /api/relations/{id}` — 单条关系操作
+- `GET/PUT/DELETE /api/relations/{id}` — 单条关系操作（删除同样是软删除）
 - `POST /api/relations/reorder` — 排序
 
 **文档**
@@ -335,14 +348,23 @@ powershell -ExecutionPolicy Bypass -File server/check_sync.ps1 -Fix   # 诊断 +
 - `GET /api/files/{name}` — 下载文档
 - `DELETE /api/files/{name}` — 删除文档
 
+**回收站与撤销**
+
+- `GET /api/trash` — 回收站列表（`?include_history=1` 连编辑历史一起返回，最多 500 条）
+- `POST /api/trash/restore` — 还原一条快照（请求体 `{"rev_id": 1}`）：记录还在就按快照覆写，已被删就按原 id 插回
+- `DELETE /api/trash/{rev_id}` — 彻底删除一条快照（此后不可还原，图片文件一并回收）
+- `DELETE /api/trash` — 清空回收站（`?history_too=1` 连编辑历史一起清）
+- `GET /api/revisions` — 历史查询（`?entity=character&entity_id=3&limit=200`，都不传就是全库）
+
 **搜索与同步**
 
 - `GET /api/search` — 全局搜索
 - `GET /api/stats` — 总览统计数据（结构见上文「总览统计的口径」）
+- `GET /api/stats/ranks` — 全量字数排行（`{characters:[{id,name,university,region,value}], worlds:[{id,title,chars,main_category,category}]}`，均为降序）
 - `POST /api/sync/replace-all` — 同步：整库替换（供手机端上传）
 
 **页面与静态资源路由**
 
-- `/`、`/worldview`、`/relations`、`/documents`、`/stats` — 在线版页面
+- `/`、`/worldview`、`/relations`、`/documents`、`/stats`、`/trash` — 在线版页面
 - `/m`、`/m/worldview`、`/m/relations`、`/m/documents` — 手机版页面
 - `/search.js`、`/export-all.js`、`/copy-detail.js`、`/face-crop.js` — 前端脚本

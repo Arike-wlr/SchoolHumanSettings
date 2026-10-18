@@ -28,6 +28,12 @@ from pydantic import BaseModel, Field
 from typing import Optional, List
 import uuid
 
+try:
+    from PIL import Image, ImageOps
+    HAS_PIL = True
+except ImportError:  # 缺 Pillow 时退化为「不做缩略图」，不影响原图功能
+    HAS_PIL = False
+
 # 路径配置：基于本文件所在目录
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, "oc_characters.db")
@@ -35,6 +41,12 @@ UPLOAD_DIR = os.path.join(BASE_DIR, "文字设定")
 DESKTOP_DIR = os.path.join(BASE_DIR, "..", "desktop-offline")
 MOBILE_DIR = os.path.join(BASE_DIR, "..", "android-app", "app", "src", "main", "assets", "web")
 IMAGE_DIR = os.path.join(BASE_DIR, "images")
+
+# 缩略图参数：仅用于**列表卡片**，详情页/关系网头像一律走原图。
+# 480px 长边对 88~260 CSS px 的卡片有 2 倍以上余量（Retina 够用），肉眼与单图无差。
+THUMB_MAX = 480            # 长边像素
+THUMB_QUALITY = 85         # JPEG 质量
+THUMB_SUFFIX = "_thumb.jpg"  # 缩略图文件名后缀（挂在原图 sha256 名后）
 
 # 确保上传目录存在
 os.makedirs(UPLOAD_DIR, exist_ok=True)
@@ -137,6 +149,23 @@ def init_db():
         cursor.execute("ALTER TABLE relations ADD COLUMN sort_order INTEGER DEFAULT 0")
         cursor.execute("UPDATE relations SET sort_order = id")
 
+    # 历史快照表：回收站（action='delete'）与撤销（action='edit'）共用。
+    # snapshot 存的是**改动前**的整行 JSON（已剔除 sort_order），还原时按它写回原表。
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS revisions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            entity TEXT NOT NULL,           -- character / world / relation
+            entity_id INTEGER NOT NULL,     -- 原表主键（还原时按它挂回，关系才能自动接上）
+            label TEXT DEFAULT '',          -- 展示名
+            action TEXT NOT NULL,           -- edit | delete
+            snapshot TEXT NOT NULL,         -- 改动前整行 JSON
+            created_at TEXT DEFAULT (datetime('now','localtime')),
+            restored_at TEXT DEFAULT ''     -- 非空 = 这条已被还原，不再出现在回收站
+        )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_rev_entity ON revisions(entity, entity_id, id DESC)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_rev_action ON revisions(action, id DESC)")
+
     conn.commit()
     conn.close()
 
@@ -155,6 +184,25 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def no_cache_for_pages(request, call_next):
+    """页面与前端脚本一律**不缓存**。
+
+    ⚠️ 踩过：新加了一个侧边栏入口（回收站），页面 HTML 本身没变，
+    浏览器按启发式缓存（FileResponse 只有 ETag/Last-Modified、没有 Cache-Control）
+    继续吃旧副本 → 用户点开「角色设定」看不到新入口，以为没做。
+    只对非 /api 的 HTML 与 JS 生效，图片 / 缩略图 / 文档照常缓存。
+    """
+    response = await call_next(request)
+    if not request.url.path.startswith("/api/"):
+        ctype = response.headers.get("content-type", "")
+        if ctype.startswith("text/html") or ctype.startswith("application/javascript"):
+            response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+            response.headers["Pragma"] = "no-cache"
+            response.headers["Expires"] = "0"
+    return response
 
 
 # --- 数据模型 ---
@@ -324,6 +372,124 @@ def char_to_dict(row) -> dict:
     return d
 
 
+# --- 回收站 / 撤销：快照辅助 ---
+
+REV_TABLES = {
+    "character": "characters",
+    "world": "world_buildings",
+    "relation": "relations",
+}
+REV_ENTITY_LABEL = {
+    "character": "角色",
+    "world": "世界观",
+    "relation": "关系",
+}
+
+
+def _rev_label(entity: str, row) -> str:
+    """历史条目在列表里显示的名字。"""
+    d = dict(row)
+    if entity == "character":
+        return (d.get("name") or "").strip() or f"角色 #{d.get('id')}"
+    if entity == "world":
+        return (d.get("title") or "").strip() or f"设定 #{d.get('id')}"
+    return f"关系 #{d.get('id')}"
+
+
+def _rev_desc(entity: str, snap: dict) -> str:
+    """历史条目的一句摘要（正文开头）。"""
+    if entity == "character":
+        txt = snap.get("setting") or ""
+    elif entity == "world":
+        txt = snap.get("content") or ""
+    else:
+        txt = snap.get("description") or ""
+    return " ".join(str(txt).split())[:60]
+
+
+def _rev_snapshot(row) -> str:
+    """整行转 JSON。
+    ⚠️ 剔除 sort_order —— 排序是用户的主观编排，不进历史，还原时也不碰它。"""
+    d = dict(row)
+    d.pop("sort_order", None)
+    return json.dumps(d, ensure_ascii=False)
+
+
+def _rev_record(cursor, entity: str, row, action: str) -> int:
+    """写一条快照（存的是**改动前**的行）。action: 'edit' | 'delete'"""
+    cursor.execute(
+        "INSERT INTO revisions (entity, entity_id, label, action, snapshot, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+        (entity, row["id"], _rev_label(entity, row), action, _rev_snapshot(row),
+         datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+    )
+    return cursor.lastrowid
+
+
+def _rev_changed(existing, updates: dict) -> bool:
+    """updates 是否真的改了东西 —— 避免「点了保存但没动」也堆一条历史。"""
+    for k, v in updates.items():
+        if k == "updated_at":
+            continue
+        try:
+            old = existing[k]
+        except (IndexError, KeyError):
+            old = None
+        if ("" if old is None else str(old)) != ("" if v is None else str(v)):
+            return True
+    return False
+
+
+def _urls_in_char_row(row) -> list:
+    """角色行里的图片 URL（images JSON + 兼容旧 image_url）。"""
+    urls = []
+    try:
+        arr = json.loads(row["images"]) if row["images"] else []
+        if isinstance(arr, list):
+            urls = [u for u in arr if isinstance(u, str) and u]
+    except (json.JSONDecodeError, TypeError, IndexError):
+        urls = []
+    if not urls and row["image_url"]:
+        urls = [row["image_url"]]
+    return urls
+
+
+def _urls_in_char_snapshot(snap: dict) -> list:
+    """快照 JSON 里的图片 URL。"""
+    urls = []
+    try:
+        arr = json.loads(snap.get("images") or "[]")
+        if isinstance(arr, list):
+            urls = [u for u in arr if isinstance(u, str) and u]
+    except (json.JSONDecodeError, TypeError):
+        urls = []
+    cover = snap.get("image_url")
+    if isinstance(cover, str) and cover and cover not in urls:
+        urls.append(cover)
+    return urls
+
+
+def _gc_images(cursor, candidate_urls):
+    """回收站**彻底删除**后，清理这些图片文件。
+
+    ⚠️ 只要还被「现存角色」或「任何一条剩余快照」引用，就绝不能删 ——
+    否则以后还原出来是个空图。图片文件在软删除/编辑期间一律保留。
+    """
+    if not candidate_urls:
+        return
+    still = set()
+    cursor.execute("SELECT image_url, images FROM characters")
+    for row in cursor.fetchall():
+        still.update(_urls_in_char_row(row))
+    cursor.execute("SELECT snapshot FROM revisions WHERE entity = 'character'")
+    for row in cursor.fetchall():
+        try:
+            still.update(_urls_in_char_snapshot(json.loads(row["snapshot"])))
+        except (json.JSONDecodeError, TypeError):
+            pass
+    for url in set(candidate_urls) - still:
+        _delete_image_file_if_unused(cursor, url)
+
+
 # --- API 路由 ---
 
 @app.get("/api/characters")
@@ -404,17 +570,6 @@ def update_character(char_id: int, data: CharacterUpdate):
         conn.close()
         raise HTTPException(status_code=404, detail="角色不存在")
 
-    # 旧 images 列表（用于清理被移除的图片）
-    old_images = []
-    try:
-        old_images = json.loads(existing["images"]) if existing["images"] else []
-        if not isinstance(old_images, list):
-            old_images = []
-    except (json.JSONDecodeError, TypeError):
-        old_images = []
-    if not old_images and existing["image_url"]:
-        old_images = [existing["image_url"]]
-
     updates = {}
     for field in ["name", "alias", "university", "region", "naming_rationale", "height", "gender", "birthday", "appearance",
                   "identity_period", "birth_time", "setting", "family", "birthplace", "status", "image_url", "face_crop"]:
@@ -427,7 +582,10 @@ def update_character(char_id: int, data: CharacterUpdate):
         # 同步封面字段 image_url 为第一张图
         updates["image_url"] = data.images[0] if data.images else ""
 
+    # 撤销：先存「改动前」的整行（只有真的改了才记，避免点了保存但没动也堆历史）
     if updates:
+        if _rev_changed(existing, updates):
+            _rev_record(cursor, "character", existing, "edit")
         updates["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         set_clause = ", ".join(f"{k} = ?" for k in updates)
         values = list(updates.values()) + [char_id]
@@ -435,10 +593,8 @@ def update_character(char_id: int, data: CharacterUpdate):
             f"UPDATE characters SET {set_clause} WHERE id = ?", values
         )
         conn.commit()
-        # 清理被移除的旧图片文件（旧列表中存在但新列表中不存在的 URL）
-        if data.images is not None:
-            removed = [u for u in old_images if u not in data.images]
-            _delete_unused_images(cursor, removed)
+        # ⚠️ 被移除的图片文件**不在这里删** —— 旧快照还引用着它，删了撤销回来就是空图。
+        #    统一等「彻底删除 / 清空回收站」时由 _gc_images() 回收。
 
     cursor.execute("SELECT * FROM characters WHERE id = ?", (char_id,))
     row = cursor.fetchone()
@@ -456,22 +612,15 @@ def delete_character(char_id: int):
     if not row:
         conn.close()
         raise HTTPException(status_code=404, detail="角色不存在")
-    # 收集该角色所有图片 URL（images 数组 + 兼容旧 image_url）
-    old_images = []
-    try:
-        old_images = json.loads(row["images"]) if row["images"] else []
-        if not isinstance(old_images, list):
-            old_images = []
-    except (json.JSONDecodeError, TypeError):
-        old_images = []
-    if row["image_url"] and row["image_url"] not in old_images:
-        old_images.append(row["image_url"])
+    # 软删除：先存整行快照，再删原表（列表里立刻消失）。
+    # ⚠️ 图片文件一律保留 —— 还原时要原样回来；真要回收等「彻底删除 / 清空回收站」。
+    # ⚠️ 关系表的 ON DELETE CASCADE 其实不生效（没开 PRAGMA foreign_keys），
+    #    所以关系会留在库里；正好 —— 还原时角色 id 不变，关系自动重新挂上。
+    _rev_record(cursor, "character", row, "delete")
     cursor.execute("DELETE FROM characters WHERE id = ?", (char_id,))
     conn.commit()
-    # 删除角色后，清理其图片文件（如果没有其他角色引用）
-    _delete_unused_images(cursor, old_images)
     conn.close()
-    return {"message": "删除成功"}
+    return {"message": "已移入回收站"}
 
 
 @app.get("/api/world-buildings")
@@ -544,7 +693,8 @@ def update_world_building(wb_id: int, data: WorldBuildingUpdate):
     conn = get_db()
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM world_buildings WHERE id = ?", (wb_id,))
-    if not cursor.fetchone():
+    existing = cursor.fetchone()
+    if not existing:
         conn.close()
         raise HTTPException(status_code=404, detail="世界设定不存在")
 
@@ -555,6 +705,9 @@ def update_world_building(wb_id: int, data: WorldBuildingUpdate):
             updates[field] = val
 
     if updates:
+        # 撤销：先存「改动前」的整行
+        if _rev_changed(existing, updates):
+            _rev_record(cursor, "world", existing, "edit")
         updates["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         set_clause = ", ".join(f"{k} = ?" for k in updates)
         values = list(updates.values()) + [wb_id]
@@ -571,17 +724,19 @@ def update_world_building(wb_id: int, data: WorldBuildingUpdate):
 
 @app.delete("/api/world-buildings/{wb_id}")
 def delete_world_building(wb_id: int):
-    """删除世界设定"""
+    """删除世界设定（软删除：进回收站，可还原）"""
     conn = get_db()
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM world_buildings WHERE id = ?", (wb_id,))
-    if not cursor.fetchone():
+    row = cursor.fetchone()
+    if not row:
         conn.close()
         raise HTTPException(status_code=404, detail="世界设定不存在")
+    _rev_record(cursor, "world", row, "delete")
     cursor.execute("DELETE FROM world_buildings WHERE id = ?", (wb_id,))
     conn.commit()
     conn.close()
-    return {"message": "删除成功"}
+    return {"message": "已移入回收站"}
 
 
 # --- 关系网 API ---
@@ -683,7 +838,8 @@ def update_relation(rel_id: int, data: RelationUpdate):
     conn = get_db()
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM relations WHERE id = ?", (rel_id,))
-    if not cursor.fetchone():
+    existing = cursor.fetchone()
+    if not existing:
         conn.close()
         raise HTTPException(status_code=404, detail="关系不存在")
     updates = {}
@@ -706,6 +862,9 @@ def update_relation(rel_id: int, data: RelationUpdate):
         conn.close()
         raise HTTPException(status_code=400, detail="不能与自己建立关系")
     if updates:
+        # 撤销：先存「改动前」的整行
+        if _rev_changed(existing, updates):
+            _rev_record(cursor, "relation", existing, "edit")
         updates["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         set_clause = ", ".join(f"{k} = ?" for k in updates)
         values = list(updates.values()) + [rel_id]
@@ -725,17 +884,203 @@ def update_relation(rel_id: int, data: RelationUpdate):
 
 @app.delete("/api/relations/{rel_id}")
 def delete_relation(rel_id: int):
-    """删除关系"""
+    """删除关系（软删除：进回收站，可还原）"""
     conn = get_db()
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM relations WHERE id = ?", (rel_id,))
-    if not cursor.fetchone():
+    row = cursor.fetchone()
+    if not row:
         conn.close()
         raise HTTPException(status_code=404, detail="关系不存在")
+    _rev_record(cursor, "relation", row, "delete")
     cursor.execute("DELETE FROM relations WHERE id = ?", (rel_id,))
     conn.commit()
     conn.close()
-    return {"message": "删除成功"}
+    return {"message": "已移入回收站"}
+
+
+# --- 回收站 / 撤销 API ---
+
+class RestoreRequest(BaseModel):
+    rev_id: int
+
+
+def _rev_to_item(row) -> dict:
+    item = {
+        "id": row["id"],
+        "entity": row["entity"],
+        "entity_label": REV_ENTITY_LABEL.get(row["entity"], row["entity"]),
+        "entity_id": row["entity_id"],
+        "label": row["label"],
+        "action": row["action"],
+        "created_at": row["created_at"],
+        "restored": bool((row["restored_at"] or "").strip()),
+        "desc": "",
+    }
+    try:
+        item["desc"] = _rev_desc(row["entity"], json.loads(row["snapshot"]))
+    except (json.JSONDecodeError, TypeError):
+        pass
+    return item
+
+
+@app.get("/api/trash")
+def list_trash(include_history: bool = False):
+    """回收站：被软删除且尚未还原的记录。
+    include_history=1 时连编辑历史（最近 500 条）一起返回。"""
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT * FROM revisions "
+        "WHERE action = 'delete' AND (restored_at IS NULL OR restored_at = '') "
+        "ORDER BY id DESC"
+    )
+    deleted = [_rev_to_item(r) for r in cursor.fetchall()]
+    cursor.execute("SELECT COUNT(*) FROM revisions")
+    total_revisions = cursor.fetchone()[0]
+    cursor.execute("SELECT COUNT(*) FROM revisions WHERE action = 'edit'")
+    total_edits = cursor.fetchone()[0]
+    history = []
+    if include_history:
+        cursor.execute("SELECT * FROM revisions ORDER BY id DESC LIMIT 500")
+        history = [_rev_to_item(r) for r in cursor.fetchall()]
+    conn.close()
+    return {
+        "deleted": deleted,
+        "deleted_count": len(deleted),
+        "total_revisions": total_revisions,
+        "total_edits": total_edits,
+        "history": history,
+    }
+
+
+@app.get("/api/revisions")
+def list_revisions(entity: str = "", entity_id: int = 0, limit: int = 200):
+    """某个实体的历史。不传 entity 就是全库历史。"""
+    conn = get_db()
+    cursor = conn.cursor()
+    sql = "SELECT * FROM revisions WHERE 1=1"
+    args = []
+    if entity:
+        sql += " AND entity = ?"
+        args.append(entity)
+    if entity_id:
+        sql += " AND entity_id = ?"
+        args.append(entity_id)
+    sql += " ORDER BY id DESC LIMIT ?"
+    args.append(max(1, min(int(limit), 1000)))
+    cursor.execute(sql, args)
+    items = [_rev_to_item(r) for r in cursor.fetchall()]
+    conn.close()
+    return {"items": items}
+
+
+@app.post("/api/trash/restore")
+def restore_revision(data: RestoreRequest):
+    """还原一条历史快照（软删还原 / 撤销编辑 / 回滚到旧版本，都走这里）。
+
+    · 记录还在 → 按快照字段覆写（并把覆写前的状态再记一条历史，还原本身也能撤销）
+    · 记录已被删 → 按快照原样插回，**沿用原 id**（关系因此能自动重新挂上）
+    """
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM revisions WHERE id = ?", (data.rev_id,))
+    rev = cursor.fetchone()
+    if not rev:
+        conn.close()
+        raise HTTPException(status_code=404, detail="该历史记录不存在")
+    entity, entity_id = rev["entity"], rev["entity_id"]
+    table = REV_TABLES.get(entity)
+    if not table:
+        conn.close()
+        raise HTTPException(status_code=400, detail="未知的实体类型")
+    try:
+        snap = json.loads(rev["snapshot"])
+    except (json.JSONDecodeError, TypeError):
+        conn.close()
+        raise HTTPException(status_code=500, detail="快照已损坏，无法还原")
+    snap.pop("sort_order", None)
+
+    cursor.execute(f"SELECT * FROM {table} WHERE id = ?", (entity_id,))
+    current = cursor.fetchone()
+    if current is not None:
+        _rev_record(cursor, entity, current, "edit")   # 还原本身也可再撤销
+        fields = [k for k in snap.keys() if k != "id"]
+        if fields:
+            set_clause = ", ".join(f"{k} = ?" for k in fields)
+            cursor.execute(
+                f"UPDATE {table} SET {set_clause} WHERE id = ?",
+                [snap[k] for k in fields] + [entity_id],
+            )
+        action = "restored"
+    else:
+        cols = list(snap.keys())
+        placeholders = ", ".join("?" for _ in cols)
+        cursor.execute(
+            f"INSERT INTO {table} ({', '.join(cols)}) VALUES ({placeholders})",
+            [snap[c] for c in cols],
+        )
+        action = "recreated"
+
+    if rev["action"] == "delete":
+        cursor.execute(
+            "UPDATE revisions SET restored_at = ? WHERE id = ?",
+            (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), rev["id"]),
+        )
+    conn.commit()
+    conn.close()
+    return {
+        "message": "已还原",
+        "action": action,
+        "entity": entity,
+        "entity_id": entity_id,
+        "label": rev["label"],
+    }
+
+
+@app.delete("/api/trash/{rev_id}")
+def purge_revision(rev_id: int):
+    """彻底删除一条历史（回收站里的记录就此不可还原，图片文件一并回收）。"""
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM revisions WHERE id = ?", (rev_id,))
+    rev = cursor.fetchone()
+    if not rev:
+        conn.close()
+        raise HTTPException(status_code=404, detail="该历史记录不存在")
+    candidates = []
+    if rev["entity"] == "character":
+        try:
+            candidates = _urls_in_char_snapshot(json.loads(rev["snapshot"]))
+        except (json.JSONDecodeError, TypeError):
+            candidates = []
+    cursor.execute("DELETE FROM revisions WHERE id = ?", (rev_id,))
+    conn.commit()
+    _gc_images(cursor, candidates)
+    conn.close()
+    return {"message": "已彻底删除"}
+
+
+@app.delete("/api/trash")
+def empty_trash(history_too: bool = False):
+    """清空回收站。默认只清「已删除」快照；history_too=1 连编辑历史一起清。"""
+    conn = get_db()
+    cursor = conn.cursor()
+    where = "" if history_too else " WHERE action = 'delete'"
+    cursor.execute(f"SELECT entity, snapshot FROM revisions{where}")
+    candidates = []
+    for r in cursor.fetchall():
+        if r["entity"] == "character":
+            try:
+                candidates += _urls_in_char_snapshot(json.loads(r["snapshot"]))
+            except (json.JSONDecodeError, TypeError):
+                pass
+    cursor.execute(f"DELETE FROM revisions{where}")
+    removed = cursor.rowcount
+    conn.commit()
+    _gc_images(cursor, candidates)
+    conn.close()
+    return {"message": "已清空", "removed": removed}
 
 
 # --- 文档管理 API ---
@@ -795,6 +1140,49 @@ async def upload_files(files: List[UploadFile] = File(...)):
     return {"message": f"已上传 {len(uploaded)} 个文件", "files": uploaded}
 
 
+def _thumb_path_for(image_path: str) -> str:
+    """原图路径 → 对应缩略图路径（保留目录，基名后挂 _thumb.jpg）。"""
+    d, base = os.path.split(image_path)
+    stem = os.path.splitext(base)[0]
+    return os.path.join(d, stem + THUMB_SUFFIX)
+
+
+def _make_thumb(image_path: str) -> Optional[str]:
+    """为原图生成缩略图并落盘，返回缩略图路径；失败返回 None（调用方退回原图）。
+
+    ⚠️ 只在「列表卡片」用得到，详情页/关系网头像一律用原图，不要拿它替代。
+    用 EXIF 方向校正（ImageOps.exif_transpose），否则手机竖拍照片会躺倒。
+    缩略图统一转 RGB 存 JPEG —— 省流为主，卡片不需要透明通道。
+    """
+    if not HAS_PIL:
+        return None
+    thumb_path = _thumb_path_for(image_path)
+    # 已存在且不比原图旧 → 直接复用（按需生成 + 落盘缓存）
+    try:
+        if os.path.exists(thumb_path) and os.path.getmtime(thumb_path) >= os.path.getmtime(image_path):
+            return thumb_path
+    except OSError:
+        pass
+    try:
+        with Image.open(image_path) as im:
+            im = ImageOps.exif_transpose(im)
+            if im.mode not in ("RGB", "L"):
+                # 白底合成，避免透明 PNG 转 JPEG 后出现黑块
+                bg = Image.new("RGB", im.size, (255, 255, 255))
+                bg.paste(im, mask=im.split()[-1] if im.mode in ("RGBA", "LA") else None)
+                im = bg
+            elif im.mode == "L":
+                im = im.convert("RGB")
+            im.thumbnail((THUMB_MAX, THUMB_MAX), Image.LANCZOS)
+            tmp = thumb_path + ".tmp"
+            im.save(tmp, "JPEG", quality=THUMB_QUALITY, optimize=True)
+        os.replace(tmp, thumb_path)
+        return thumb_path
+    except Exception as e:
+        print(f"[thumb] 生成失败 {os.path.basename(image_path)}: {e}")
+        return None
+
+
 async def _save_image_file(file: UploadFile) -> tuple[str, str]:
     """校验并保存上传的图片，返回 (image_url, filename)。
     按文件内容 SHA-256 命名，内容相同的图片自动去重，不重复存储。"""
@@ -818,6 +1206,8 @@ async def _save_image_file(file: UploadFile) -> tuple[str, str]:
             raise HTTPException(status_code=500, detail=f"图片保存失败: {str(e)}")
     else:
         print(f"[images/upload] 内容去重命中，跳过写入: {unique_filename}")
+    # 上传即生成缩略图（一次成本，之后列表一直复用；失败不影响原图）
+    _make_thumb(image_path)
     return f"/api/images/{unique_filename}", unique_filename
 
 
@@ -846,6 +1236,17 @@ def _delete_image_file_if_unused(cursor, image_url: str):
             os.remove(image_path)
         except OSError:
             pass
+    _remove_thumb_for(image_path)
+
+
+def _remove_thumb_for(image_path: str):
+    """删除原图时连带清掉其缩略图，避免留下孤儿文件。"""
+    try:
+        tp = _thumb_path_for(image_path)
+        if os.path.exists(tp) and os.path.isfile(tp):
+            os.remove(tp)
+    except OSError:
+        pass
 
 
 def _delete_unused_images(cursor, image_urls: list):
@@ -900,7 +1301,7 @@ def delete_character_image(char_id: int, index: int):
     """删除角色的指定图片（按索引），并清理文件"""
     conn = get_db()
     cursor = conn.cursor()
-    cursor.execute("SELECT image_url, images FROM characters WHERE id = ?", (char_id,))
+    cursor.execute("SELECT * FROM characters WHERE id = ?", (char_id,))
     row = cursor.fetchone()
     if not row:
         conn.close()
@@ -920,14 +1321,15 @@ def delete_character_image(char_id: int, index: int):
         conn.close()
         raise HTTPException(status_code=400, detail="图片索引超出范围")
 
-    removed_url = images.pop(index)
+    # 撤销：先存「改动前」的整行（删图也能撤回来）
+    _rev_record(cursor, "character", row, "edit")
+    images.pop(index)
     cursor.execute(
         "UPDATE characters SET image_url = ?, images = ?, updated_at = ? WHERE id = ?",
         (images[0] if images else "", json.dumps(images), datetime.now().strftime("%Y-%m-%d %H:%M:%S"), char_id)
     )
     conn.commit()
-    # 清理被删除的图片文件（如果无其他角色引用）
-    _delete_image_file_if_unused(cursor, removed_url)
+    # ⚠️ 文件先留着（撤销要把它拿回来）；等「彻底删除 / 清空回收站」时由 _gc_images() 回收。
     conn.close()
 
     return {"message": "图片删除成功", "images": images}
@@ -940,6 +1342,23 @@ def serve_image(filename: str):
     image_path = os.path.join(IMAGE_DIR, safe_name)
     if not os.path.exists(image_path) or not os.path.isfile(image_path):
         raise HTTPException(status_code=404, detail="图片不存在")
+    return FileResponse(image_path)
+
+
+@app.get("/api/thumbs/{filename}")
+def serve_thumb(filename: str):
+    """提供**列表卡片用**的缩略图（长边 480px JPEG）。
+
+    原图不存在 → 404；有原图但缩略图缺失（老数据）→ 现场生成并落盘，
+    之后一直复用。生成失败（如缺 Pillow / 坏图）退回原图，绝不 404。
+    """
+    safe_name = os.path.basename(filename)
+    image_path = os.path.join(IMAGE_DIR, safe_name)
+    if not os.path.exists(image_path) or not os.path.isfile(image_path):
+        raise HTTPException(status_code=404, detail="图片不存在")
+    thumb_path = _make_thumb(image_path)
+    if thumb_path and os.path.isfile(thumb_path):
+        return FileResponse(thumb_path, media_type="image/jpeg")
     return FileResponse(image_path)
 
 
@@ -1025,6 +1444,7 @@ def delete_image(filename: str):
         )
     
     os.remove(image_path)
+    _remove_thumb_for(image_path)
     conn.close()
     return {"message": f"已删除图片 {safe_name}"}
 
@@ -1842,7 +2262,12 @@ def get_stats():
     }
 
     if os.path.exists(IMAGE_DIR):
-        image_files = [f for f in os.listdir(IMAGE_DIR) if os.path.isfile(os.path.join(IMAGE_DIR, f))]
+        # ⚠️ 必须排除缩略图（*_thumb.jpg）——它们是派生文件，不算「角色图片」，
+        #    否则「图片总数」会翻倍、「图片占用」也被污染。
+        image_files = [
+            f for f in os.listdir(IMAGE_DIR)
+            if os.path.isfile(os.path.join(IMAGE_DIR, f)) and not f.endswith(THUMB_SUFFIX)
+        ]
     else:
         image_files = []
     image_block = {
@@ -1864,6 +2289,60 @@ def get_stats():
         "documents": documents_block,
         "images": image_block,
     }
+
+
+@app.get("/api/stats/ranks")
+def get_stats_ranks():
+    """全量字数排行（统计页「设定最厚」「最长的世界观条目」点「查看全部」时用）。
+
+    为什么单开接口而不塞进 /api/stats：
+      - 弹窗是按需打开的，不必让统计页首屏多背十几 KB；
+      - 桌面版直接用后端的结果渲染，**不在前端重算口径**（否则 CHAR_TEXT_FIELDS
+        就会在 backend / api-shim / stats.html 三处各写一遍，容易分叉）。
+
+    口径与 /api/stats 的 highlights 完全一致：
+      - 角色：CHAR_TEXT_FIELDS 15 个文本字段字数之和（_char_all_text_len）
+      - 世界观：content 正文字数（_char_text_len）
+    排序同为「字数降序，同字数比名字/标题」，与 _top / world_rank 一致。
+    """
+    conn = get_db()
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT * FROM characters ORDER BY sort_order ASC, id ASC")
+    chars = [dict(r) for r in cursor.fetchall()]
+
+    cursor.execute("SELECT * FROM world_buildings ORDER BY sort_order ASC, id ASC")
+    worlds = [dict(r) for r in cursor.fetchall()]
+    conn.close()
+
+    # 角色：与 _top 一致 —— 字数为 0 的不上榜
+    char_rows = []
+    for c in chars:
+        n = _char_all_text_len(c)
+        if not n:
+            continue
+        char_rows.append({
+            "id": c["id"],
+            "name": c.get("name") or "",
+            "university": c.get("university") or "",
+            "region": c.get("region") or "",
+            "value": n,
+        })
+    char_rows.sort(key=lambda r: (-r["value"], r["name"]))
+
+    # 世界观：不过滤 0 字（与 world_longest_list 一致，让「空条目」也可见）
+    world_rows = []
+    for w in worlds:
+        world_rows.append({
+            "id": w.get("id"),
+            "title": w.get("title") or "",
+            "chars": _char_text_len(w.get("content")),
+            "main_category": _norm_bucket(w.get("main_category"), "未分类"),
+            "category": w.get("category") or "",
+        })
+    world_rows.sort(key=lambda r: (-r["chars"], r["title"]))
+
+    return {"characters": char_rows, "worlds": world_rows}
 
 
 # 数据同步 API（供手机端上传/下载全量数据）
@@ -1949,6 +2428,11 @@ def serve_relations():
 @app.get("/stats")
 def serve_stats():
     return FileResponse(os.path.join(DESKTOP_DIR, "stats.html"))
+
+
+@app.get("/trash")
+def serve_trash():
+    return FileResponse(os.path.join(DESKTOP_DIR, "trash.html"))
 
 
 @app.get("/")
