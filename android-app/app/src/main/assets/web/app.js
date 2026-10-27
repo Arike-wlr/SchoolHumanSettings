@@ -866,7 +866,7 @@ VM.index = (function() {
   function confirmDelete(){
     if(!deleteTargetId)return;
     fetch(API+'/'+deleteTargetId,{method:'DELETE'}).then(function(){
-      closeDeleteModal();markAppDataChanged();loadCharacters();showToast('已删除','success');
+      closeDeleteModal();markAppDataChanged();loadCharacters();showToast('已移入回收站','success');
     }).catch(function(){showToast('删除失败','error');});
   }
   function closeModal() {
@@ -1373,7 +1373,7 @@ VM.worldview = (function() {
   function confirmDelete() {
     if (!deleteTargetId) return;
     fetch(API + '/' + deleteTargetId, { method: 'DELETE' }).then(function() {
-      closeDeleteModal(); markAppDataChanged(); loadEntries(); showToast('已删除', 'success');
+      closeDeleteModal(); markAppDataChanged(); loadEntries(); showToast('已移入回收站', 'success');
     }).catch(function() { showToast('删除失败', 'error'); });
   }
   function closeModal() {
@@ -1669,6 +1669,7 @@ VM.documents = (function() {
   var API = '/api/files';
   var deleteTarget = null;
   var currentViewFile = '';
+  var currentDocxSid = '';      // docx 图片懒加载会话 id（api-shim 的 _docxSessions）
   var loadGeneration = 0;
   var viewerGeneration = 0;
 
@@ -1732,7 +1733,7 @@ VM.documents = (function() {
     if (!deleteTarget) return;
     fetch(API + '/' + deleteTarget, { method: 'DELETE' }).then(function() {
       if (currentViewFile === deleteTarget) closeViewer();
-      closeDeleteModal(); loadFiles(); showToast('已删除', 'success');
+      closeDeleteModal(); markAppDataChanged(); loadFiles(); showToast('已移入回收站', 'success');
     }).catch(function() { showToast('删除失败', 'error'); });
   }
 
@@ -1741,6 +1742,7 @@ VM.documents = (function() {
     var generation = ++viewerGeneration;
     var fn = decodeURIComponent(en);
     currentViewFile = en;
+    releaseDocxSession();          // 换文档前先放掉上一份（83 MB 的原始 buffer 才能回收）
     var body = document.getElementById('docViewerBody');
     document.getElementById('docViewerTitle').textContent = fn;
     var ext = fn.split('.').pop().toLowerCase();
@@ -1768,6 +1770,11 @@ VM.documents = (function() {
       var cacheKey = data.cache_key || '';
       if (typeof content === 'string' && !cacheKey) {
         body.innerHTML = content ? '<div class="doc-paragraph docx-html">' + content + '</div>' : '<div class="viewer-loading">文档为空</div>';
+        // 图多的 docx 走的是「文字先出、图片懒加载」：占位块滚到附近才解压那一张
+        if (data.docx_sid) {
+          currentDocxSid = data.docx_sid;
+          mountDocxLazyImages(body, data.docx_sid);
+        }
         return;
       }
       var html = '';
@@ -1846,9 +1853,99 @@ VM.documents = (function() {
   function closeViewer() {
     if (!AppNavigation.isInternal()) return AppNavigation.close('docViewerOverlay');
     ++viewerGeneration;
+    releaseDocxSession();
     document.getElementById('docViewerOverlay').classList.remove('active');
     document.getElementById('docViewerBody').innerHTML = '';
     currentViewFile = '';
+  }
+
+  // ---- docx 图片懒加载 ----
+  // 占位块进入视口前后 600px 才去解压对应图片（api-shim 的 docxLoadImage），
+  // 这样 25 张图的大文档不必在打开时一次性解压 83 MB。
+  // ⚠️ 这里不用 IntersectionObserver：在 .modal-overlay 这种「fixed 全屏 + 内部滚动」
+  //    的容器里，以 #docViewerBody 作 root 时回调不触发（实测 openViewer 后 8 秒仍无反应）。
+  //    改成「首帧先扫一遍 + scroll 时用 rAF 节流再扫」，行为可预期。
+  var docxLazyCleanup = null;
+
+  function releaseDocxSession() {
+    if (docxLazyCleanup) { try { docxLazyCleanup(); } catch (e) {} docxLazyCleanup = null; }
+    if (currentDocxSid && window.docxCloseSession) {
+      try { window.docxCloseSession(currentDocxSid); } catch (e) {}
+    }
+    currentDocxSid = '';
+  }
+
+  function mountDocxLazyImages(host, sid) {
+    var slots = Array.prototype.slice.call(host.querySelectorAll('.doc-img-lazy[data-doc-img]'));
+    if (!slots.length) return;
+    var bodyEl = document.getElementById('docViewerBody');
+    var scroller = bodyEl || window;
+
+    function box() {
+      if (scroller === window) return { top: 0, bottom: window.innerHeight };
+      var r = bodyEl.getBoundingClientRect();
+      return { top: r.top, bottom: r.bottom };
+    }
+    function check() {
+      var b = box();
+      for (var i = 0; i < slots.length; i++) {
+        var slot = slots[i];
+        if (slot.__docxLoaded) continue;
+        var r = slot.getBoundingClientRect();
+        // 上下各留 600px 预加载余量：滚到附近就先解压，滚到位时图已经出来了
+        if (r.bottom > b.top - 600 && r.top < b.bottom + 600) {
+          slot.__docxLoaded = true;
+          fillDocxImage(slot, sid);
+        }
+      }
+    }
+    var raf = 0;
+    function onScroll() {
+      if (raf) return;
+      raf = requestAnimationFrame(function () { raf = 0; check(); });
+    }
+    scroller.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('resize', onScroll, { passive: true });
+
+    docxLazyCleanup = function () {
+      if (scroller !== window) scroller.removeEventListener('scroll', onScroll);
+      window.removeEventListener('scroll', onScroll);
+      window.removeEventListener('resize', onScroll);
+      if (raf) cancelAnimationFrame(raf);
+      raf = 0;
+    };
+    check();   // 打开时屏幕上已有的图立即开始加载
+  }
+
+  function fillDocxImage(slot, sid) {
+    var idx = Number(slot.getAttribute('data-doc-img'));
+    slot.innerHTML = '<div class="doc-img-pending">图片 ' + (idx + 1) + ' · 加载中…</div>';
+    // 加载成功后要把 .doc-img-lazy 摘掉：它的 min-height:84px 是给占位用的，
+    // 图真出来以后留着会让容器比图片高、段落间多出一道空白；也免得外部脚本
+    // 用「还有几个 .doc-img-lazy」判断进度时永远得总数。
+    function done() {
+      slot.classList.remove('doc-img-lazy');
+      slot.classList.add('doc-img-done');
+      slot.setAttribute('data-doc-img-loaded', '1');
+    }
+    Promise.resolve(window.docxLoadImage(sid, idx)).then(function (url) {
+      if (!url) {
+        slot.innerHTML = '<div class="doc-img-pending error">图片 ' + (idx + 1) + ' 无法显示</div>';
+        return;
+      }
+      var img = document.createElement('img');
+      img.alt = '图片 ' + (idx + 1);
+      img.style.cssText = 'max-width:100%;height:auto;border-radius:6px;display:block;margin:0 auto;';
+      img.onerror = function () {
+        slot.innerHTML = '<div class="doc-img-pending error">图片 ' + (idx + 1) + ' 解码失败</div>';
+        done();
+      };
+      img.onload = done;
+      img.src = url;
+      slot.innerHTML = '';
+      slot.appendChild(img);
+    });
   }
 
   document.getElementById('docDeleteOverlay').addEventListener('click', function(ev) { if (ev.target === this) closeDeleteModal(); });
@@ -1909,9 +2006,11 @@ VM.relations = (function() {
     return 16;                    // 手机
   }
   var gLastTouchDist = 0, gPanning = false, gLastX = 0, gLastY = 0;
-  var gLastTapTime = 0, gLastTapNodeId = null;
-  var gTouchStartX = 0, gTouchStartY = 0, gTouchMoved = false;
-  var G_DBL_TAP_DELAY = 300, G_DBL_TAP_MOVE_TOL = 10;
+  var gLastTapTime = 0, gLastTapNodeId = null, gLastTapX = 0, gLastTapY = 0;
+  var gTouchStartX = 0, gTouchStartY = 0, gTouchClientX = 0, gTouchClientY = 0, gTouchMoved = false;
+  // G_DBL_TAP_MOVE_TOL：一次按压之内的移动容差，超过了就算「拖动」不算「点击」。
+  // G_DBL_TAP_SLOP：两下之间手指位置的容差。必须给得比命中半径宽 —— 原因见 onTouchEnd。
+  var G_DBL_TAP_DELAY = 300, G_DBL_TAP_MOVE_TOL = 10, G_DBL_TAP_SLOP = 40;
   // 鼠标路径（平板接鼠标/桌面模式）判断"这算点击还是拖动"用的基准
   var gMouseDownNodeX = 0, gMouseDownNodeY = 0, gMousePanMoved = false;
   // 聚焦高亮：单击/点按某个节点后，把 ta 的家族成员与关系对象拎出来、
@@ -2232,7 +2331,7 @@ VM.relations = (function() {
   function confirmDelete() {
     if (!deleteTargetId) return;
     fetch(API_REL + '/' + deleteTargetId, { method: 'DELETE' }).then(function() {
-      closeDeleteModal(); markAppDataChanged(); loadData(); showToast('已删除', 'success');
+      closeDeleteModal(); markAppDataChanged(); loadData(); showToast('已移入回收站', 'success');
     }).catch(function() { showToast('删除失败', 'error'); });
   }
   function closeModal() {
@@ -2729,6 +2828,9 @@ VM.relations = (function() {
     if (e.touches.length === 1) {
       var rect = gCanvas.getBoundingClientRect(), x = e.touches[0].clientX - rect.left, y = e.touches[0].clientY - rect.top;
       gTouchStartX = x; gTouchStartY = y; gTouchMoved = false;
+      // 屏幕坐标另存一份：双击的「两下是否挨着」必须用屏幕坐标判断。
+      // 画布相对坐标会被 #gFocusBanner 顶动，第一下之后立刻偏 66px。
+      gTouchClientX = e.touches[0].clientX; gTouchClientY = e.touches[0].clientY;
       var p = screenToCanvas(x, y), node = nodeAt(p.x, p.y);
       if (node) { gDragNode = node; node.fixed = true; }
       else { gPanning = true; gLastX = x; gLastY = y; }
@@ -2756,23 +2858,36 @@ VM.relations = (function() {
   function onTouchEnd(e) {
     if (e.touches.length === 0) {
       if (!gTouchMoved) {
-        var p = screenToCanvas(gTouchStartX, gTouchStartY), node = nodeAt(p.x, p.y);
-        if (node) {
-          var now = Date.now();
-          if (gLastTapNodeId === node.id && (now - gLastTapTime) < G_DBL_TAP_DELAY) {
-            // 双击 = 查看角色信息（恒定行为，不加别的分叉）+ 顺手聚焦
-            showCharInfo(node.id);
-            setGFocus(node.id);
-            gLastTapTime = 0; gLastTapNodeId = null;
-          } else {
+        var now = Date.now();
+        // 双击判定**只看「两下手指落点是否挨着 + 是否够快」**，第二下不再重新做命中检测。
+        // 为什么不能重新命中：第一下点中节点后 setGFocus 会显示 #gFocusBanner，
+        // 它是 canvas 上方的正常流元素，一带人物 chip 就有 66px 高（实测 390×844），
+        // 一出现就把 canvas 往下顶 66px。手指还停在同一块屏幕上，换算到画布坐标却已经
+        // 偏了 66px，而命中半径只有 gNodeR()+6=22px —— 第二下必然落空，
+        // 还会被当成「点空白」把刚点亮的聚焦清掉，表现就是「双击永远打不开详情」。
+        var nearLast = (now - gLastTapTime) < G_DBL_TAP_DELAY &&
+          Math.abs(gTouchClientX - gLastTapX) < G_DBL_TAP_SLOP &&
+          Math.abs(gTouchClientY - gLastTapY) < G_DBL_TAP_SLOP;
+        if (gLastTapNodeId != null && nearLast) {
+          // 双击 = 查看角色信息（恒定行为，不加别的分叉）+ 顺手聚焦
+          var id = gLastTapNodeId;
+          gLastTapTime = 0; gLastTapNodeId = null;
+          gLastTapX = gLastTapY = 0;
+          showCharInfo(id);
+          setGFocus(id);
+        } else {
+          var p = screenToCanvas(gTouchStartX, gTouchStartY), node = nodeAt(p.x, p.y);
+          if (node) {
             // 单击 = 聚焦高亮（与桌面版语义一致）
             toggleGFocus(node.id);
             gLastTapTime = now; gLastTapNodeId = node.id;
+            gLastTapX = gTouchClientX; gLastTapY = gTouchClientY;
+          } else {
+            // 点空白 = 取消聚焦
+            clearGFocus();
+            gLastTapTime = 0; gLastTapNodeId = null;
+            gLastTapX = gLastTapY = 0;
           }
-        } else {
-          // 点空白 = 取消聚焦
-          clearGFocus();
-          gLastTapTime = 0; gLastTapNodeId = null;
         }
       }
       if (gDragNode) { gDragNode.fixed = false; gDragNode = null; }
@@ -2802,7 +2917,21 @@ VM.relations = (function() {
       // 拖动过半个身位才算"拖"，否则按点击处理（避免想点却因手抖变成拖动、
       // 结果既没聚焦又挪了位置）。
       var moved = Math.abs(gDragNode.x - gMouseDownNodeX) > 3 || Math.abs(gDragNode.y - gMouseDownNodeY) > 3;
-      if (!moved) toggleGFocus(gDragNode.id);
+      if (!moved) {
+        // 鼠标也补一套双击（页面在电脑浏览器里打开时，「双击查看」的提示才不算骗人）。
+        // 不用原生 dblclick：那会先触发两次 mouseup → toggleGFocus 开了又关，
+        // 再叠一次 showCharInfo，高亮状态会闪。
+        var mid = gDragNode.id, nowMs = Date.now();
+        if (gLastTapNodeId === mid && (nowMs - gLastTapTime) < G_DBL_TAP_DELAY) {
+          gLastTapTime = 0; gLastTapNodeId = null;
+          showCharInfo(mid);
+          setGFocus(mid);
+        } else {
+          toggleGFocus(mid);
+          gLastTapTime = nowMs; gLastTapNodeId = mid;
+          gLastTapX = gLastTapY = 0;
+        }
+      }
       gDragNode.fixed = false; gDragNode = null;
     } else if (gPanning && !gMousePanMoved) {
       clearGFocus();   // 点空白取消聚焦
@@ -3510,3 +3639,185 @@ VM.stats = (function() {
   return { init: init, refresh: function() { return load(); } };
 })();
 
+
+// ======================== 软键盘：把正在编辑的输入框滚回可见区 ========================
+// 键盘弹出时原生侧会把 IME inset 做成 WebView 的下边距（见 MainActivity），视口因此变矮，
+// 原本在屏幕下半部分的输入框可能落到新视口之外 —— 用户看到的就是「输入法挡住了下面」，
+// 连光标在哪都看不见。这里在视口高度真的变化之后，把焦点元素轻轻滚回可见区。
+// 只处理「有可编辑元素处于焦点」的情况，不干扰正常浏览。
+(function () {
+  var lastH = window.innerHeight;
+  function isEditable(el) {
+    if (!el) return false;
+    var tag = (el.tagName || '').toLowerCase();
+    return tag === 'input' || tag === 'textarea' || tag === 'select' || el.isContentEditable === true;
+  }
+  window.addEventListener('resize', function () {
+    var h = window.innerHeight;
+    // 键盘弹出/收起会差一两百 px；地址栏之类的微小变化不处理（也不该抢滚动）
+    if (Math.abs(h - lastH) < 40) return;
+    lastH = h;
+    var el = document.activeElement;
+    if (!isEditable(el) || typeof el.scrollIntoView !== 'function') return;
+    // 等一帧再滚：resize 回调里拿到的还是变化前的布局位置
+    requestAnimationFrame(function () {
+      try { el.scrollIntoView({ block: 'nearest' }); } catch (e) { /* 老引擎不支持对象参数就放弃 */ }
+    });
+  }, { passive: true });
+})();
+
+/* ======================== 回收站 ======================== */
+// 语义与电脑版 /trash 的「回收站」栏一致：删除只是打个标记，这里可以还原或彻底删除。
+// 还原沿用原 id，所以挂在它身上的关系会自动重新接上。
+// 手机版没有「编辑历史」（保存编辑是直接覆盖，不留快照），因此这里只有回收站一栏。
+VM.trash = (function () {
+  var API = '/api/trash';
+  var items = [];
+  var confirmState = null;      // { mode: 'purge', key, label } | { mode: 'empty' }
+  var listBound = false;
+
+  function init() {
+    if (!listBound) {
+      listBound = true;
+      var box = document.getElementById('trashList');
+      if (box) box.addEventListener('click', onListClick);
+    }
+    return load();
+  }
+  function refresh() { return load(); }
+
+  function load() {
+    return fetch(API).then(function (r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    }).then(function (d) {
+      items = (d && d.deleted) || [];
+      render();
+    }).catch(function (e) {
+      showToast('回收站加载失败：' + e.message, 'error');
+    });
+  }
+
+  function render() {
+    var list = document.getElementById('trashList');
+    var blank = document.getElementById('trashEmptyState');
+    var cnt = document.getElementById('trashCount');
+    var emptyBtn = document.getElementById('trashEmptyBtn');
+    if (!list) return;
+    if (cnt) cnt.textContent = items.length;
+    if (emptyBtn) emptyBtn.style.display = items.length ? '' : 'none';
+    if (!items.length) { list.innerHTML = ''; if (blank) blank.style.display = ''; return; }
+    if (blank) blank.style.display = 'none';
+    list.innerHTML = items.map(function (it) {
+      return '<div class="trash-item">' +
+        '<span class="trash-item-icon">' + (it.icon || '❔') + '</span>' +
+        '<div class="trash-item-main">' +
+          '<div class="trash-item-name">' + esc(it.label) + '</div>' +
+          '<div class="trash-item-meta">' +
+            '<span class="trash-tag">' + esc(it.entity_label) + '</span>' +
+            '<span>' + esc(it.created_at) + ' 删除</span>' +
+          '</div>' +
+          (it.desc ? '<div class="trash-item-desc">' + esc(it.desc) + '</div>' : '') +
+        '</div>' +
+        '<div class="trash-item-actions">' +
+          '<button class="trash-btn restore" data-act="restore" data-key="' + esc(it.id) + '">还原</button>' +
+          '<button class="trash-btn purge" data-act="purge" data-key="' + esc(it.id) + '" data-label="' + esc(it.label) + '">彻底删除</button>' +
+        '</div>' +
+      '</div>';
+    }).join('');
+  }
+
+  function onListClick(ev) {
+    var btn = ev.target.closest ? ev.target.closest('.trash-btn') : null;
+    if (!btn) return;
+    var key = btn.getAttribute('data-key');
+    if (btn.getAttribute('data-act') === 'restore') restoreItem(key);
+    else confirmPurge(key, btn.getAttribute('data-label') || '');
+  }
+
+  function restoreItem(key) {
+    if (!key) return;
+    return fetch(API + '/restore', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rev_id: key }),
+    }).then(function (r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    }).then(function () {
+      markAppDataChanged();          // 让角色/世界观/关系/统计下次进入时重拉
+      showToast('已还原', 'success');
+      return load();
+    }).catch(function (e) {
+      showToast('还原失败：' + e.message, 'error');
+    });
+  }
+
+  function purgeItem(key) {
+    if (!key) return Promise.resolve();
+    return fetch(API + '/' + encodeURIComponent(key), { method: 'DELETE' }).then(function (r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    }).then(function () {
+      showToast('已彻底删除', 'success');
+      return load();
+    }).catch(function (e) {
+      showToast('删除失败：' + e.message, 'error');
+    });
+  }
+
+  function emptyAll() {
+    return fetch(API, { method: 'DELETE' }).then(function (r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    }).then(function () {
+      showToast('回收站已清空', 'success');
+      return load();
+    }).catch(function (e) {
+      showToast('清空失败：' + e.message, 'error');
+    });
+  }
+
+  // ---- 确认框（彻底删除 / 清空都要问一次，和电脑版一致）----
+  function openConfirm(title, msg, okText) {
+    if (!AppNavigation.isInternal()) {
+      return AppNavigation.enter('trashConfirmOverlay', function () { return openConfirm(title, msg, okText); });
+    }
+    document.getElementById('trashConfirmTitle').textContent = title;
+    document.getElementById('trashConfirmMsg').textContent = msg;
+    document.getElementById('trashConfirmOk').textContent = okText || '确定';
+    document.getElementById('trashConfirmOverlay').classList.add('active');
+  }
+  function closeConfirm() {
+    if (!AppNavigation.isInternal()) return AppNavigation.close('trashConfirmOverlay');
+    document.getElementById('trashConfirmOverlay').classList.remove('active');
+    confirmState = null;
+  }
+  function confirmPurge(key, label) {
+    confirmState = { mode: 'purge', key: key };
+    openConfirm('彻底删除', '「' + label + '」将被彻底删除，之后无法恢复。', '彻底删除');
+  }
+  function confirmEmpty() {
+    confirmState = { mode: 'empty' };
+    openConfirm('清空回收站', '回收站里的 ' + items.length + ' 项记录都会被彻底删除，无法恢复。', '清空');
+  }
+  function doConfirm() {
+    var st = confirmState;
+    if (!st) return closeConfirm();
+    closeConfirm();
+    if (st.mode === 'purge') return purgeItem(st.key);
+    if (st.mode === 'empty') return emptyAll();
+  }
+
+  AppNavigation.register('trashConfirmOverlay', {
+    capture: function () { return confirmState; },
+    restore: function (s) { confirmState = s || null; },
+    dispose: function () {
+      var el = document.getElementById('trashConfirmOverlay');
+      if (el) el.classList.remove('active');
+      confirmState = null;
+    },
+  });
+
+  return { init: init, refresh: refresh, confirmEmpty: confirmEmpty, closeConfirm: closeConfirm, doConfirm: doConfirm };
+})();

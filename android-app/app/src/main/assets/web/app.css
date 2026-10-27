@@ -337,6 +337,20 @@ body.home-active { background: linear-gradient(180deg, #3d2b1f 0%, #5a3e2b 40%, 
 .docx-html td, .docx-html th { border: 1px solid var(--border); padding: 6px 10px; font-size: .88rem; }
 .docx-html img { max-width: 100%; height: auto; border-radius: 8px; margin: .8em 0; }
 .docx-html a { color: var(--accent); }
+
+/* docx 图片懒加载占位：文字先渲染，图片滚到附近才解压（图多的大文档靠这个才不会卡几十秒） */
+.doc-img-lazy { margin: 1em 0; min-height: 84px; border-radius: 8px; }
+/* 图真出来以后换成这个类：不再有 min-height，图片自己撑高度 */
+.doc-img-done { margin: 1em 0; }
+.doc-img-done img { max-width: 100%; height: auto; border-radius: 6px; display: block; margin: 0 auto; }
+.doc-img-pending {
+  display: flex; align-items: center; justify-content: center;
+  min-height: 84px; padding: 14px;
+  border: 1px dashed var(--border); border-radius: 8px;
+  background: var(--bg);
+  font-size: .8rem; color: var(--text-light);
+}
+.doc-img-pending.error { color: var(--danger); border-color: var(--danger-bg); }
 .viewer-loading { text-align: center; padding: 40px 20px; color: var(--text-light); }
 .spinner { display: inline-block; width: 24px; height: 24px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 1s linear infinite; margin-bottom: 8px; }
 
@@ -851,3 +865,41 @@ table.matrix td.hot { color: #fff; font-weight: 600; }
   .modal { max-width: 780px; }
   .gs-panel { max-width: 720px; }
 }
+
+/* ====== 回收站 ====== */
+/* 与电脑版 /trash 的 .rev-item 同一套信息层级：图标 + 名称 + 类型标签/删除时间 + 右侧操作。 */
+.trash-body { padding: 0 16px 28px; }
+.trash-notice {
+  background: var(--accent-pale); border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: 12px 14px; font-size: .78rem; color: var(--text-light); line-height: 1.75; margin-bottom: 14px;
+}
+.trash-notice strong { color: var(--text); }
+.trash-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
+.trash-count { font-size: .82rem; color: var(--text-light); }
+.trash-empty-btn {
+  padding: 0 12px; min-height: 32px; display: inline-flex; align-items: center;
+  border: 1px solid var(--danger-bg); border-radius: 8px;
+  background: var(--danger-bg); color: var(--danger);
+  font-size: .78rem; font-family: inherit; cursor: pointer;
+}
+.trash-list { display: flex; flex-direction: column; gap: 8px; }
+.trash-item {
+  display: flex; align-items: center; gap: 12px; padding: 12px 14px;
+  background: var(--card-bg); border: 1px solid var(--border); border-radius: var(--radius-sm);
+}
+.trash-item-icon { font-size: 1.3rem; flex-shrink: 0; width: 24px; text-align: center; }
+.trash-item-main { flex: 1; min-width: 0; }
+.trash-item-name { font-weight: 600; font-size: .92rem; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.trash-item-meta { font-size: .72rem; color: var(--text-light); margin-top: 4px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.trash-item-desc { font-size: .75rem; color: var(--text-light); margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.trash-tag { padding: 1px 7px; border-radius: 9px; background: var(--accent-pale); color: var(--accent); font-size: .68rem; }
+.trash-item-actions { display: flex; flex-direction: column; gap: 6px; flex-shrink: 0; }
+.trash-btn {
+  padding: 0 10px; min-height: 30px; min-width: 64px; border-radius: 8px;
+  font-size: .76rem; font-family: inherit; cursor: pointer; border: 1px solid transparent;
+}
+.trash-btn.restore { background: var(--accent); color: #fff; }
+.trash-btn.purge { background: var(--danger-bg); color: var(--danger); border-color: var(--danger-bg); }
+.trash-blank { text-align: center; padding: 48px 20px; color: var(--text-light); }
+.trash-blank-icon { font-size: 2.4rem; margin-bottom: 10px; opacity: .55; }
+.trash-blank p { font-size: .82rem; line-height: 1.8; }

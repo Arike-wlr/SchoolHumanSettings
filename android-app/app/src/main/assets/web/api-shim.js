@@ -49,6 +49,157 @@ function ensureMammoth() {
 }
 
 // ============================================================
+// JSZip 按需加载（docx 图片懒加载用）
+// mammoth 内部虽然打包了 JSZip，但不对外暴露；这里另装一份（约 97 KB）用来
+// **只解压单张图片**。同样缓存 Promise，失败返回 null 让调用方降级。
+// ============================================================
+let _jszipPromise = null;
+function ensureJSZip() {
+  if (typeof JSZip !== 'undefined') return Promise.resolve(JSZip);
+  if (_jszipPromise) return _jszipPromise;
+  _jszipPromise = new Promise((resolve) => {
+    const s = document.createElement('script');
+    s.src = 'jszip.min.js';
+    s.async = true;
+    s.onload = () => resolve(typeof JSZip !== 'undefined' ? JSZip : null);
+    s.onerror = () => { _jszipPromise = null; resolve(null); };
+    document.head.appendChild(s);
+  });
+  return _jszipPromise;
+}
+
+// ============================================================
+// docx 图片懒加载会话
+//
+// 背景：mammoth 默认把每张图转成 base64 内联进 HTML。83 MB 的设定文档里有
+// 25 张图（解压后 83.5 MB），会生成 111 MB 的 HTML 字符串，解析要 30 秒
+// （桌面上；手机上更慢且大概率 OOM）。
+// 实测把图片字节全部读一遍本身就占 30 秒里的 99%，单纯换 blob URL 省不了时间。
+//
+// 所以：先只解析文字（约 0.3 秒），图片位置留占位块，滚动到附近才解压那一张。
+// ============================================================
+const _docxSessions = {};     // sid -> { zip, order, urls }
+let _docxSidSeq = 0;
+
+// 按 document.xml 的文档顺序取出图片对应的 zip 路径（与 mammoth 输出 <img> 的顺序一致）
+async function docxImageOrder(zip) {
+  const relFile = zip.file('word/_rels/document.xml.rels');
+  const docFile = zip.file('word/document.xml');
+  if (!relFile || !docFile) return [];
+  const relsText = await relFile.async('string');
+  const docText = await docFile.async('string');
+  const parser = new DOMParser();
+
+  const relsDoc = parser.parseFromString(relsText, 'application/xml');
+  const relMap = {};
+  const rels = relsDoc.getElementsByTagName('Relationship');
+  for (let i = 0; i < rels.length; i++) {
+    const type = rels[i].getAttribute('Type') || '';
+    if (type.indexOf('/image') < 0) continue;
+    const id = rels[i].getAttribute('Id');
+    const target = rels[i].getAttribute('Target') || '';
+    const name = target.split('/').pop();
+    if (id && name) relMap[id] = 'word/media/' + name;
+  }
+
+  const doc = parser.parseFromString(docText, 'application/xml');
+  const R_NS = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
+  const out = [];
+  const all = doc.getElementsByTagName('*');
+  for (let j = 0; j < all.length; j++) {
+    const el = all[j];
+    const tag = el.localName || '';
+    let rid = null;
+    if (tag === 'blip') {
+      // DrawingML（docx 主流）：<a:blip r:embed="rId5">
+      rid = el.getAttributeNS(R_NS, 'embed') || el.getAttribute('r:embed');
+    } else if (tag === 'imagedata') {
+      // 老式 VML：<v:imagedata r:id="rId5">
+      rid = el.getAttributeNS(R_NS, 'id') || el.getAttribute('r:id');
+    }
+    if (rid && relMap[rid]) out.push(relMap[rid]);
+  }
+  return out;
+}
+
+// 只解析文字 + 图片占位。返回 {html, sid, imageCount}；任何环节不满足就返回 null，
+// 由调用方退回 mammoth 的默认行为（宁可慢，也不能丢内容）。
+async function docxParseTextOnly(arrayBuffer) {
+  const JSZipCtor = await ensureJSZip();
+  if (!JSZipCtor) return null;
+
+  let zip;
+  try {
+    // createFolders:false —— 少建一堆目录对象，索引更快
+    zip = await JSZipCtor.loadAsync(arrayBuffer, { createFolders: false });
+  } catch (e) {
+    return null;                      // 不是合法 zip（损坏/加密），交给 mammoth 报错
+  }
+
+  let order;
+  try { order = await docxImageOrder(zip); } catch (e) { return null; }
+
+  let idx = 0;
+  let result;
+  try {
+    result = await mammoth.convertToHtml({ arrayBuffer: arrayBuffer }, {
+      convertImage: mammoth.images.imgElement(function (image) {
+        const n = idx++;
+        // 不读字节，只占个位置；稍后用 JSZip 按需解压第 n 张
+        return { src: 'docx-img:' + n, alt: image.altText || ('图片 ' + (n + 1)) };
+      }),
+    });
+  } catch (e) {
+    return null;
+  }
+
+  const imageCount = idx;
+  // 顺序对不上（例如有 mammoth 不认识的图片形式）→ 不冒险错位，退回默认解析
+  if (order.length !== imageCount) return null;
+
+  let html = result.value || '';
+  html = html.replace(/<img\b[^>]*src="docx-img:(\d+)"[^>]*>/g, function (_m, n) {
+    return '<div class="doc-img-lazy" data-doc-img="' + n + '">' +
+      '<div class="doc-img-pending">图片 ' + (Number(n) + 1) + ' · 滚动到此处加载</div></div>';
+  });
+
+  const sid = 'd' + (++_docxSidSeq);
+  _docxSessions[sid] = { zip: zip, order: order, urls: {} };
+  return { html: html, sid: sid, imageCount: imageCount };
+}
+
+// 取第 idx 张图片的 blob URL（按需解压 + 缓存）
+window.docxLoadImage = function (sid, idx) {
+  const s = _docxSessions[sid];
+  if (!s) return Promise.resolve('');
+  if (s.urls[idx]) return Promise.resolve(s.urls[idx]);
+  const name = s.order[idx];
+  if (!name) return Promise.resolve('');
+  const f = s.zip.file(name);
+  if (!f) return Promise.resolve('');
+  return f.async('uint8array').then(function (u8) {
+    const mime = /\.png$/i.test(name) ? 'image/png'
+      : /\.gif$/i.test(name) ? 'image/gif'
+      : /\.bmp$/i.test(name) ? 'image/bmp'
+      : /\.webp$/i.test(name) ? 'image/webp'
+      : 'image/jpeg';
+    const url = URL.createObjectURL(new Blob([u8], { type: mime }));
+    s.urls[idx] = url;
+    return url;
+  }).catch(function () { return ''; });
+};
+
+// 关预览时释放：撤掉所有 blob URL + 丢掉 zip 引用（83 MB 的原始 buffer 才能回收）
+window.docxCloseSession = function (sid) {
+  const s = _docxSessions[sid];
+  if (!s) return;
+  Object.keys(s.urls).forEach(function (k) {
+    try { URL.revokeObjectURL(s.urls[k]); } catch (e) {}
+  });
+  delete _docxSessions[sid];
+};
+
+// ============================================================
 // 请求路由
 // ============================================================
 async function handleApiRequest(url, init) {
@@ -94,8 +245,9 @@ async function handleApiRequest(url, init) {
         return makeResponse(merged);
       }
       if (method === 'DELETE') {
-        await charDB.delete(id);
-        return makeResponse({ message: '删除成功' });
+        // 软删除：进回收站，可从「回收站」页还原（与电脑版同一套语义）
+        const ok = await trashRecord('character', id);
+        return makeResponse({ message: ok ? '已移入回收站' : '记录不存在' }, ok ? 200 : 404);
       }
     }
     if (path === '/api/characters/reorder' && method === 'POST') {
@@ -129,8 +281,8 @@ async function handleApiRequest(url, init) {
           return makeResponse(merged);
         }
         if (method === 'DELETE') {
-          await worldDB.delete(id);
-          return makeResponse({ message: '删除成功' });
+          const ok = await trashRecord('world', id);
+          return makeResponse({ message: ok ? '已移入回收站' : '记录不存在' }, ok ? 200 : 404);
         }
       }
       if (path === '/api/world-buildings/reorder' && method === 'POST') {
@@ -173,8 +325,8 @@ async function handleApiRequest(url, init) {
           return makeResponse(merged);
         }
         if (method === 'DELETE') {
-          await relDB.delete(id);
-          return makeResponse({ message: '删除成功' });
+          const ok = await trashRecord('relation', id);
+          return makeResponse({ message: ok ? '已移入回收站' : '记录不存在' }, ok ? 200 : 404);
         }
       }
       if (path === '/api/relations/reorder' && method === 'POST') {
@@ -232,6 +384,22 @@ async function handleApiRequest(url, init) {
               return makeResponse({ name: doc.name, type: 'docx', content: '⚠️ 解析库未加载（网络/文件缺失）', cache_key: null });
             }
             const arrayBuffer = await doc.blob.arrayBuffer();
+
+            // 优先走「只解析文字 + 图片滚动到再加载」——图多的大文档从 30 秒降到约 1 秒
+            let lazy = null;
+            try { lazy = await docxParseTextOnly(arrayBuffer); } catch (e) { lazy = null; }
+            if (lazy) {
+              return makeResponse({
+                name: doc.name,
+                type: 'docx',
+                content: lazy.html,
+                docx_sid: lazy.sid,
+                docx_images: lazy.imageCount,
+                cache_key: null,
+              });
+            }
+
+            // 兜底：老路径（所有图片 base64 内联），行为与改动前一致
             const result = await mammoth.convertToHtml({ arrayBuffer });
             return makeResponse({
               name: doc.name,
@@ -262,8 +430,9 @@ async function handleApiRequest(url, init) {
           return makeResponse(doc.blob, 200, doc.blob.type);
         }
         if (method === 'DELETE') {
-          await docDB.delete(name);
-          return makeResponse({ message: `已删除 ${name}` });
+          // 文档也走软删除：blob 留在库里，还原零拷贝
+          const ok = await trashRecord('document', name);
+          return makeResponse({ message: ok ? '已移入回收站' : '文件不存在' }, ok ? 200 : 404);
         }
       }
     }
@@ -271,6 +440,38 @@ async function handleApiRequest(url, init) {
     // ---- 总览统计（离线：直接聚合 IndexedDB；口径必须与 server/backend.py 的 /api/stats 一致）----
     if (path === '/api/stats' && method === 'GET') {
       return makeResponse(await computeStats());
+    }
+
+    // ---- 回收站（软删除）----
+    // 形状对齐电脑版 GET /api/trash：{deleted[], deleted_count, total_revisions, total_edits, history[]}。
+    // 手机版没有 revisions 表（编辑不改历史、直接覆盖），所以 history 恒为空数组、
+    // total_* 恒为 0 —— 字段留着是为了前端复用同一套渲染，不必为两端写两份。
+    if (path === '/api/trash' && method === 'GET') {
+      const deleted = await listTrash();
+      return makeResponse({
+        deleted: deleted, deleted_count: deleted.length,
+        total_revisions: 0, total_edits: 0, history: [],
+      });
+    }
+    if (path === '/api/trash/restore' && method === 'POST') {
+      const data = JSON.parse(body || '{}');
+      const key = data.rev_id != null ? data.rev_id : data.id;
+      const p = parseTrashKey(key);
+      if (!p) return makeResponse({ detail: '无效的回收站记录' }, 400);
+      const ok = await restoreRecord(p.kind, p.entityId);
+      if (!ok) return makeResponse({ detail: '记录不存在或未删除' }, 404);
+      return makeResponse({ message: '已还原' });
+    }
+    if (path === '/api/trash' && method === 'DELETE') {
+      const n = await emptyTrash();
+      return makeResponse({ message: '已清空回收站', purged: n });
+    }
+    m = path.match(/^\/api\/trash\/(.+)$/);
+    if (m && method === 'DELETE') {
+      const p = parseTrashKey(decodeURIComponent(m[1]));
+      if (!p) return makeResponse({ detail: '无效的回收站记录' }, 400);
+      const ok = await purgeRecord(p.kind, p.entityId);
+      return makeResponse({ message: ok ? '已彻底删除' : '记录不存在' }, ok ? 200 : 404);
     }
 
     // ---- 全量字数排行（统计页「设定最厚 / 最长的世界观条目」点「查看全部」时用）----

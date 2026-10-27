@@ -258,7 +258,9 @@ async function readCharacterLiteAll(options) {
   const repaired = [];
   for (let i = 0; i < stale.length; i++) {
     const record = await getById(STORES.characters, stale[i]);
-    const lite = record ? buildCharacterLite(record) : null;
+    // 回收站里的角色：投影已被软删除时删掉，这里绝不能再重建它，否则列表又冒出来一条
+    if (!record || record._deleted_at) { byId.delete(stale[i]); continue; }
+    const lite = buildCharacterLite(record);
     if (lite) { byId.set(lite.id, lite); repaired.push(lite); }
     if ((i + 1) % 8 === 0) await yieldToMain();   // 分批让出主线程，不长时间占用
   }
@@ -568,7 +570,9 @@ async function updateCharacterThumb(id, expectFirstImage, thumb) {
 const charDB = {
   list: async () => {
     const all = await getAll(STORES.characters);
-    return all.sort((a, b) => (a.sort_order ?? Infinity) - (b.sort_order ?? Infinity));
+    // 回收站里的（带 _deleted_at）一概不出现：列表/统计/关系图/同步 diff 都走这里
+    return all.filter(r => !isDeleted(r))
+      .sort((a, b) => (a.sort_order ?? Infinity) - (b.sort_order ?? Infinity));
   },
   get: (id) => getById(STORES.characters, id),
   create: (data) => add(STORES.characters, data),
@@ -624,7 +628,8 @@ function invalidateCharactersShared() { _sharedCharList = null; _sharedCharLite 
 const worldDB = {
   list: async (mainCategory) => {
     const all = await getAll(STORES.worldBuildings);
-    const sorted = all.sort((a, b) => (a.sort_order ?? Infinity) - (b.sort_order ?? Infinity));
+    const sorted = all.filter(e => !isDeleted(e))
+      .sort((a, b) => (a.sort_order ?? Infinity) - (b.sort_order ?? Infinity));
     if (mainCategory) return sorted.filter(e => e.main_category === mainCategory);
     return sorted;
   },
@@ -640,7 +645,8 @@ const worldDB = {
 const relDB = {
   list: async () => {
     const all = await getAll(STORES.relations);
-    return all.sort((a, b) => (a.sort_order ?? Infinity) - (b.sort_order ?? Infinity));
+    return all.filter(r => !isDeleted(r))
+      .sort((a, b) => (a.sort_order ?? Infinity) - (b.sort_order ?? Infinity));
   },
   get: (id) => getById(STORES.relations, id),
   create: (data) => add(STORES.relations, data),
@@ -654,7 +660,8 @@ const relDB = {
 const docDB = {
   list: async () => {
     const all = await getAll(STORES.documents);
-    return all.map(d => ({
+    // 回收站里的文档不列出来，但 blob 仍留在库里 —— 还原时零拷贝就回来了
+    return all.filter(d => !isDeleted(d)).map(d => ({
       name: d.name,
       size: d.size,
       size_display: formatSizeLocal(d.size),
@@ -666,6 +673,146 @@ const docDB = {
   delete: (name) => del(STORES.documents, name),
   clear: () => clearStore(STORES.documents),
 };
+
+// ============= 回收站（软删除） =============
+// 与电脑版同一套语义：删除只打一个 _deleted_at 标记，记录本体（以及它的 id）都还留在库里；
+// 列表 / 统计 / 关系图 / 同步 diff 一律读不到它；还原就是把标记去掉 ——
+// **id 不变**，所以挂在它身上的关系自动重新接上。只有「彻底删除」才真的 del()。
+//
+// 为什么「就地打标」而不是把记录搬进另一个 store：
+//   文档条目里存的是文件 blob，搬一份就是双份磁盘；就地打标零拷贝。
+//   代价是每个读路径都得过滤 —— 所以过滤统一放在 charDB/worldDB/relDB/docDB 的 list()
+//   和 readCharacterLiteAll() 里，上层代码一行都不用改，也就不会漏。
+const TRASH_STORES = {
+  character: () => STORES.characters,
+  world: () => STORES.worldBuildings,
+  relation: () => STORES.relations,
+  document: () => STORES.documents,
+};
+const TRASH_LABELS = { character: '角色', world: '世界设定', relation: '关系', document: '文档' };
+const TRASH_ICONS = { character: '👤', world: '🌍', relation: '🔗', document: '📄' };
+
+function isDeleted(rec) { return !!(rec && rec._deleted_at); }
+
+function stampNow() {
+  const d = new Date(), p = n => String(n).padStart(2, '0');
+  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' +
+    p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds());
+}
+
+// 回收站条目的 id：`kind:entityId`。文档的 key 是文件名，可能自带冒号，
+// 所以只按**第一个**冒号切（entityId 允许含冒号）。
+function trashKey(kind, entityId) { return kind + ':' + entityId; }
+function parseTrashKey(key) {
+  const s = String(key || '');
+  const i = s.indexOf(':');
+  if (i < 0) return null;
+  const kind = s.slice(0, i), raw = s.slice(i + 1);
+  if (!TRASH_STORES[kind] || raw === '') return null;
+  return { kind: kind, entityId: kind === 'document' ? raw : Number(raw) };
+}
+
+/** 软删除一条记录。返回 false 表示本来就不存在/已在回收站。 */
+async function trashRecord(kind, entityId) {
+  const storeName = TRASH_STORES[kind] && TRASH_STORES[kind]();
+  if (!storeName) return false;
+  const rec = await getById(storeName, entityId);
+  if (!rec || rec._deleted_at) return false;
+  rec._deleted_at = stampNow();
+
+  if (kind === 'character') {
+    // 角色要同时维护派生投影，且投影必须删掉而不是改写：
+    // readCharacterLiteAll 靠「有 key 却没投影」发现需要重建，读记录时看到 _deleted_at 就跳过，
+    // 于是列表里永远不会出现它（详见 readCharacterLiteAll 里的 skip 分支）。
+    invalidateCharactersShared();
+    const db = await openDB();
+    await new Promise((resolve, reject) => {
+      const t = db.transaction([STORES.characters, STORES.characterLite], 'readwrite');
+      t.oncomplete = () => resolve();
+      t.onerror = () => reject(t.error);
+      t.objectStore(STORES.characters).put(rec);
+      t.objectStore(STORES.characterLite).delete(entityId);
+    });
+    scheduleBackup();
+    return true;
+  }
+
+  await put(storeName, rec);
+  return true;
+}
+
+/** 还原：去掉标记。角色的投影由读取路径自愈重建，这里不用管。 */
+async function restoreRecord(kind, entityId) {
+  const storeName = TRASH_STORES[kind] && TRASH_STORES[kind]();
+  if (!storeName) return false;
+  const rec = await getById(storeName, entityId);
+  if (!rec || !rec._deleted_at) return false;
+  delete rec._deleted_at;
+  if (kind === 'character') {
+    invalidateCharactersShared();
+    await putCharacter(rec);      // 同一个事务里把投影也补回去
+    return true;
+  }
+  await put(storeName, rec);
+  return true;
+}
+
+/** 彻底删除（不可恢复）。 */
+async function purgeRecord(kind, entityId) {
+  const storeName = TRASH_STORES[kind] && TRASH_STORES[kind]();
+  if (!storeName) return false;
+  if (kind === 'character') { await delCharacter(entityId); return true; }
+  await del(storeName, entityId);
+  return true;
+}
+
+/** 回收站清单（最近删除的在前）。形状对齐电脑版 /api/trash 的 deleted[]。 */
+async function listTrash() {
+  const [chars, worlds, rels, docs] = await Promise.all([
+    getAll(STORES.characters), getAll(STORES.worldBuildings),
+    getAll(STORES.relations), getAll(STORES.documents),
+  ]);
+  const nameById = new Map(chars.map(c => [c.id, c.name]));
+  const out = [];
+  const push = (kind, entityId, label, desc, at) => {
+    if (!at) return;
+    out.push({
+      id: trashKey(kind, entityId),   // 电脑版是数字 rev_id，手机版用 kind:id —— 前端只当不透明 key 用
+      entity: kind,
+      entity_label: TRASH_LABELS[kind] || kind,
+      icon: TRASH_ICONS[kind] || '❔',
+      entity_id: entityId,
+      label: label || ('#' + entityId),
+      action: 'delete',
+      created_at: at,
+      restored: false,
+      desc: desc || '',
+    });
+  };
+  chars.forEach(c => push('character', c.id, c.name,
+    [c.university, c.region].filter(Boolean).join(' · '), c._deleted_at));
+  worlds.forEach(w => push('world', w.id, w.title,
+    [w.main_category, w.category].filter(Boolean).join(' · '), w._deleted_at));
+  rels.forEach(r => {
+    const from = nameById.get(r.from_char_id) || ('#' + r.from_char_id);
+    const to = nameById.get(r.to_char_id) || ('#' + r.to_char_id);
+    push('relation', r.id, from + ' ↔ ' + to, r.relation_type || '', r._deleted_at);
+  });
+  docs.forEach(d => push('document', d.name, d.name, formatSizeLocal(d.size || 0), d._deleted_at));
+  out.sort((a, b) => (a.created_at < b.created_at ? 1 : a.created_at > b.created_at ? -1 : 0));
+  return out;
+}
+
+/** 清空回收站：把当前所有已删记录真正删掉。 */
+async function emptyTrash() {
+  const items = await listTrash();
+  for (const it of items) {
+    const p = parseTrashKey(it.id);
+    if (p) await purgeRecord(p.kind, p.entityId);
+  }
+  return items.length;
+}
+
 
 function formatSizeLocal(size) {
   for (const unit of ['B', 'KB', 'MB', 'GB']) {

@@ -101,6 +101,32 @@ public class MainActivity extends AppCompatActivity {
 
         webView = findViewById(R.id.webview);
 
+        // ==================== 软键盘避让 ====================
+        // targetSdk 35 之后，Android 15 起系统强制 edge-to-edge，AndroidManifest 里的
+        // adjustResize **不再生效**：键盘弹出时窗口不缩小，WebView 一路画到键盘底下。
+        // 表现就是编辑表单滚到最下面，底部的「保存 / 取消」被输入法完全挡住，点不到。
+        //
+        // 这里把 IME 的底部 inset 做成 WebView 的下边距 —— 效果等价于老系统的 adjustResize：
+        // 视图变矮 → WebView 的 CSS 视口跟着变矮 → position:fixed 的弹窗、100vh、贴底按钮
+        // 一起抬到键盘上方，Web 侧一行都不用改。
+        //
+        // 为什么用 margin 而不是 padding：padding 只是把内容画在更小的框里，CSS 视口不一定
+        // 跟着变；改成 margin 后 WebView 的实测高度真的变矮，视口必定跟着缩。
+        // 老系统（adjustResize 仍生效）此时窗口已经被系统缩小、ime inset 为 0，不会重复缩一次。
+        ViewCompat.setOnApplyWindowInsetsListener(webView, (v, insets) -> {
+            int imeBottom = insets.isVisible(WindowInsetsCompat.Type.ime())
+                    ? insets.getInsets(WindowInsetsCompat.Type.ime()).bottom : 0;
+            android.view.ViewGroup.MarginLayoutParams lp =
+                    (android.view.ViewGroup.MarginLayoutParams) v.getLayoutParams();
+            // 键盘动画期间会连续派发，只在真的变了才重排，避免无谓的 layout 抖动
+            if (lp.bottomMargin != imeBottom) {
+                lp.bottomMargin = imeBottom;
+                v.setLayoutParams(lp);
+            }
+            return insets;
+        });
+        ViewCompat.requestApplyInsets(webView);
+
         WebSettings settings = webView.getSettings();
         // 核心：启用 JS + DOM 存储 + IndexedDB
         settings.setJavaScriptEnabled(true);
