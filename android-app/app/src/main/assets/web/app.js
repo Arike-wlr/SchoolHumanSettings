@@ -30,6 +30,179 @@ function themeVar(name, fallback) {
     return v || fallback;
   } catch(e) { return fallback; }
 }
+
+/* ============================================================
+   可点击的输入建议下拉（替代 <datalist>）
+   Android WebView 里 <input list="..."> 的建议列表只会画出来、点它没反应，
+   等于只能手打。这里自己画一层能点的下拉：点箭头展开、点选项直接填入，
+   同时保留自由输入（分类/关系类型都允许用户写新的）。
+   ============================================================ */
+function closestByClass(el, cls) {
+  while (el && el.nodeType === 1) {
+    if (el.classList && el.classList.contains(cls)) return el;
+    el = el.parentNode;
+  }
+  return null;
+}
+
+function attachComboPicker(inputId, getOptions) {
+  var input = document.getElementById(inputId);
+  if (!input) return null;
+  if (input._comboPicker) return input._comboPicker;   // 重复挂载直接复用
+
+  input.removeAttribute('list');
+  input.setAttribute('autocomplete', 'off');
+  input.setAttribute('autocorrect', 'off');
+  input.setAttribute('autocapitalize', 'off');
+  input.setAttribute('spellcheck', 'false');
+
+  var wrap = document.createElement('div');
+  wrap.className = 'combo';
+  input.parentNode.insertBefore(wrap, input);
+  wrap.appendChild(input);
+
+  var toggle = document.createElement('button');
+  toggle.type = 'button';
+  toggle.className = 'combo-toggle';
+  toggle.setAttribute('aria-label', '展开选项');
+  toggle.setAttribute('tabindex', '-1');
+  toggle.innerHTML = '<span class="combo-caret"></span>';   // 用 CSS 画三角，避免字体缺 ▾ 字形
+  wrap.appendChild(toggle);
+
+  var panel = document.createElement('div');
+  panel.className = 'combo-panel';
+  panel.setAttribute('role', 'listbox');
+  wrap.appendChild(panel);
+
+  var items = [];
+  var isOpen = false;
+  var skipNextInput = false;   // 选完选项后派发的 input 事件不再触发展开
+
+  function currentOptions() {
+    var raw;
+    try { raw = getOptions() || []; } catch (e) { raw = []; }
+    var seen = {}, out = [];
+    for (var i = 0; i < raw.length; i++) {
+      var v = raw[i] == null ? '' : String(raw[i]).trim();
+      if (!v || seen[v]) continue;
+      seen[v] = 1;
+      out.push(v);
+    }
+    return out;
+  }
+
+  function render(filterText) {
+    var all = currentOptions();
+    var typed = (filterText == null ? '' : String(filterText)).trim().toLowerCase();
+    items = typed ? all.filter(function (v) { return v.toLowerCase().indexOf(typed) !== -1; }) : all;
+    if (!items.length) {
+      panel.innerHTML = '<div class="combo-empty">' + (all.length ? '没有匹配项，可直接输入' : '还没有可选项，直接输入即可') + '</div>';
+      return;
+    }
+    var cur = (input.value || '').trim(), html = '';
+    for (var i = 0; i < items.length; i++) {
+      html += '<button type="button" class="combo-item' + (items[i] === cur ? ' current' : '') + '" data-combo-idx="' + i + '">' + esc(items[i]) + '</button>';
+    }
+    panel.innerHTML = html;
+  }
+
+  // 往上找最近的滚动容器（网页版弹窗自己会滚动，列表不能超出它的可视范围）
+  function scrollBoundary(el) {
+    var p = el.parentNode;
+    while (p && p.nodeType === 1 && p !== document.body) {
+      var oy = '';
+      try { oy = getComputedStyle(p).overflowY; } catch (e) {}
+      if (oy === 'auto' || oy === 'scroll' || oy === 'overlay') return p;
+      p = p.parentNode;
+    }
+    return null;
+  }
+
+  function place() {
+    // 下方空间不够就向上翻；高度按可视区（软键盘弹出时 visualViewport 会变小）
+    // 和滚动容器边界一起限，免得选项列表被屏幕底部、按钮栏或弹窗边缘挡住。
+    var vv = window.visualViewport;
+    var viewBottom = (vv && vv.height) ? (vv.offsetTop || 0) + vv.height : window.innerHeight;
+    var bound = scrollBoundary(wrap);
+    var br = bound ? bound.getBoundingClientRect() : null;
+    var r = input.getBoundingClientRect();
+    var bottomLimit = br ? Math.min(viewBottom, br.bottom) : viewBottom;
+    var topLimit = br ? Math.max(0, br.top) : 0;
+    var below = bottomLimit - r.bottom - 6;
+    var above = r.top - topLimit - 6;
+    var up = below < 200 && above > below;
+    wrap.classList.toggle('combo-up', up);
+    panel.style.maxHeight = Math.max(96, Math.min(216, up ? above : below)) + 'px';
+  }
+
+  // showAll=true：点箭头展开时列出全部选项（输入框里已有的值只做高亮）；
+  // 打字时才按输入内容过滤
+  function open(showAll) {
+    render(showAll ? '' : input.value);
+    place();
+    panel.classList.add('show');
+    wrap.classList.add('open');
+    isOpen = true;
+    // 弹窗入场/键盘动画还在跑的时候位置会量偏，动画收尾后再校一次
+    setTimeout(function () { if (isOpen) place(); }, 280);
+  }
+  function close() {
+    if (!isOpen) return;
+    panel.classList.remove('show');
+    wrap.classList.remove('open');
+    isOpen = false;
+  }
+  function choose(v) {
+    input.value = v;
+    close();
+    // 这里要派发 input/change（别的监听者可能靠它更新），但别让自己的 input 监听把面板又打开
+    skipNextInput = true;
+    try { input.dispatchEvent(new Event('input', { bubbles: true })); } catch (e) {}
+    try { input.dispatchEvent(new Event('change', { bubbles: true })); } catch (e) {}
+    skipNextInput = false;
+  }
+
+  // 箭头：先挡掉 mousedown，否则输入框失焦会把面板关掉后 click 又把它打开
+  toggle.addEventListener('mousedown', function (e) { e.preventDefault(); });
+  toggle.addEventListener('click', function (e) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (isOpen) close(); else open(true);
+  });
+
+  // 选项：mousedown 阻止失焦，click 才是真正的选中
+  panel.addEventListener('mousedown', function (e) { e.preventDefault(); });
+  panel.addEventListener('click', function (e) {
+    var btn = closestByClass(e.target, 'combo-item');
+    if (!btn) return;
+    e.preventDefault();
+    e.stopPropagation();
+    var idx = Number(btn.getAttribute('data-combo-idx'));
+    if (items[idx] != null) choose(items[idx]);
+  });
+
+  // 打字即过滤：输入就展开，继续输入就按内容筛
+  input.addEventListener('input', function () {
+    if (skipNextInput) return;
+    if (!isOpen) open(); else { render(input.value); place(); }
+  });
+  input.addEventListener('blur', function () { setTimeout(close, 150); });
+  document.addEventListener('click', function (e) {
+    if (!wrap.contains(e.target)) close();
+  });
+  // 软键盘弹出/收起会改变可视区高度，重新算一次，别让列表被键盘盖住
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', function () { if (isOpen) place(); });
+  }
+
+  var api = {
+    open: function (showAll) { open(showAll !== false); },
+    close: close,
+    refresh: function () { if (isOpen) { render(input.value); place(); } }
+  };
+  input._comboPicker = api;
+  return api;
+}
 document.addEventListener('DOMContentLoaded', function () {
   applyTheme(document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light');
 
@@ -1196,6 +1369,7 @@ VM.worldview = (function() {
     container.innerHTML = html;
     var dl = document.getElementById('worldCatList');
     if (dl) dl.innerHTML = ordered.map(function(e) { return '<option value="' + esc(e[0]) + '">'; }).join('');
+    if (categoryCombo) categoryCombo.refresh();
   }
 
   function selectCategory(cat) {
@@ -1307,6 +1481,7 @@ VM.worldview = (function() {
 
   function openCreateModal() {
     if (!AppNavigation.isInternal()) return AppNavigation.enter('worldModalOverlay', function () { return openCreateModal(); });
+    if (categoryCombo) categoryCombo.close();
     document.getElementById('worldModalTitle').textContent = '添加新设定';
     document.getElementById('worldSubmitBtn').textContent = '确认添加';
     document.getElementById('worldEditId').value = '';
@@ -1322,6 +1497,7 @@ VM.worldview = (function() {
     var navigationToken = AppNavigation.token();
     return fetch(API + '/' + id).then(function(r) { if (!r.ok) throw new Error("内容不存在"); return r.json(); }).then(function(e) {
       if (!AppNavigation.isCurrent(navigationToken)) return;
+      if (categoryCombo) categoryCombo.close();
       document.getElementById('worldModalTitle').textContent = '编辑设定';
       document.getElementById('worldSubmitBtn').textContent = '保存修改';
       document.getElementById('worldEditId').value = e.id;
@@ -1632,7 +1808,21 @@ VM.worldview = (function() {
   document.getElementById('worldDeleteOverlay').addEventListener('click', function(ev) { if (ev.target === this) closeDeleteModal(); });
   document.getElementById('worldDetailOverlay').addEventListener('click', function(ev) { if (ev.target === this) closeDetailModal(); });
 
-  function init() { initTouchDrag(); return loadEntries(); }
+  // 分类输入框挂可点的历史分类下拉（取代原来点不动的 datalist）
+  var categoryCombo = null;
+  function initCategoryCombo() {
+    if (categoryCombo) return;
+    categoryCombo = attachComboPicker('worldCategoryInput', function () {
+      var seen = {}, list = [];
+      for (var i = 0; i < allEntries.length; i++) {
+        var c = (allEntries[i].category || '').trim();
+        if (c && !seen[c]) { seen[c] = 1; list.push(c); }
+      }
+      return list;
+    });
+  }
+
+  function init() { initTouchDrag(); initCategoryCombo(); return loadEntries(); }
 
   AppNavigation.register('worldDetailOverlay', { capture: function () { return detailEntryId; }, restore: openDetailModal, dispose: closeDetailModal });
   AppNavigation.register('worldModalOverlay', { dispose: closeModal, back: closeModalAutoSave });
@@ -2270,6 +2460,7 @@ VM.relations = (function() {
 
   function openCreateModal() {
     if (!AppNavigation.isInternal()) return AppNavigation.enter('relModalOverlay', function () { return openCreateModal(); });
+    if (typeCombo) typeCombo.close();
     populateCharSelects();
     document.getElementById('relModalTitle').textContent = '添加关系';
     document.getElementById('relSubmitBtn').textContent = '确认添加';
@@ -2284,6 +2475,7 @@ VM.relations = (function() {
     if (!AppNavigation.isInternal()) return AppNavigation.enter('relModalOverlay', function () { return openEditModal(id); });
     var r = allRelations.find(function(rel) { return rel.id === id; });
     if (!r) { showToast('未找到关系数据', 'error'); return; }
+    if (typeCombo) typeCombo.close();
     populateCharSelects();
     document.getElementById('relModalTitle').textContent = '编辑关系';
     document.getElementById('relSubmitBtn').textContent = '保存修改';
@@ -3075,7 +3267,22 @@ VM.relations = (function() {
   document.getElementById('relInfoOverlay').addEventListener('click', function(ev) { if (ev.target === this) closeInfoModal(); });
   document.getElementById('relDeleteOverlay').addEventListener('click', function(ev) { if (ev.target === this) closeDeleteModal(); });
 
-  function init() { initTouchDrag(); return loadData(); }
+  // 关系类型挂可点的下拉：预设类型 + 数据里已经用过的类型（原来 datalist 点不动）
+  var REL_TYPE_PRESET = ['朋友', 'CP', '单箭头', '师生', '冤家', '继承记忆', '参与组建', '亲属'];
+  var typeCombo = null;
+  function initTypeCombo() {
+    if (typeCombo) return;
+    typeCombo = attachComboPicker('relType', function () {
+      var list = REL_TYPE_PRESET.slice();
+      for (var i = 0; i < allRelations.length; i++) {
+        var t = (allRelations[i].relation_type || '').trim();
+        if (t && list.indexOf(t) === -1) list.push(t);
+      }
+      return list;
+    });
+  }
+
+  function init() { initTouchDrag(); initTypeCombo(); return loadData(); }
 
   AppNavigation.register('relModalOverlay', { dispose: closeModal, back: closeModalAutoSave });
   AppNavigation.register('relDeleteOverlay', { dispose: closeDeleteModal });

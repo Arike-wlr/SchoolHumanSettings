@@ -419,6 +419,39 @@
   .form-group textarea { min-height: 140px; }
   .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 
+  /* ====== 可点击下拉（分类，替代点不动的 datalist） ====== */
+  .combo { position: relative; }
+  .form-group .combo input { padding-right: 42px; }
+  .combo-toggle {
+    position: absolute; top: 1.5px; right: 1.5px; bottom: 1.5px; width: 40px;
+    border: none; border-radius: 0 var(--radius-sm) var(--radius-sm) 0; background: transparent;
+    color: var(--text-light); display: flex; align-items: center; justify-content: center;
+    cursor: pointer; transition: color var(--transition);
+  }
+  .combo-caret {
+    display: block; width: 0; height: 0;
+    border-left: 5px solid transparent; border-right: 5px solid transparent;
+    border-top: 6px solid currentColor; transition: transform var(--transition);
+  }
+  .combo.open .combo-toggle { color: var(--accent); }
+  .combo.open .combo-caret { transform: rotate(180deg); }
+  .combo-panel {
+    position: absolute; left: 0; right: 0; top: calc(100% + 5px); display: none;
+    padding: 5px; background: var(--card-bg); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); box-shadow: var(--shadow-lg);
+    max-height: 216px; overflow-y: auto; z-index: 20;
+  }
+  .combo-panel.show { display: block; }
+  .combo.combo-up .combo-panel { top: auto; bottom: calc(100% + 5px); }
+  .combo-item {
+    display: block; width: 100%; padding: 9px 11px; border: none; border-radius: 6px;
+    background: transparent; color: var(--text); font-family: var(--font-sans);
+    font-size: .9rem; text-align: left; cursor: pointer; transition: var(--transition);
+  }
+  .combo-item:hover { background: var(--accent-pale); color: var(--accent); }
+  .combo-item.current { color: var(--accent); font-weight: 600; }
+  .combo-empty { padding: 9px 11px; font-size: .82rem; color: var(--text-light); }
+
   .modal-footer {
     padding: 16px 24px 22px; display: flex; justify-content: flex-end; gap: 10px;
   }
@@ -584,8 +617,7 @@
         </div>
         <div class="form-group" id="categoryGroup">
           <label for="category">分类</label>
-          <input type="text" id="categoryInput" list="catList" placeholder="襟江枕海甲东南" autocomplete="off">
-          <datalist id="catList"></datalist>
+          <input type="text" id="categoryInput" placeholder="襟江枕海甲东南" autocomplete="off">
         </div>
         <div class="form-group" id="bgpCategoryGroup" style="display:none;">
           <label for="bgpCategorySelect">分类</label>
@@ -690,7 +722,7 @@ let exportMode = false;
 let editReturnToDetail = null;   // 从卡片详情进入编辑时记下 id，保存后回到该卡片
 
 // ====== 页面加载 ======
-document.addEventListener('DOMContentLoaded', () => { loadEntries(); });
+document.addEventListener('DOMContentLoaded', () => { initCategoryCombo(); loadEntries(); });
 
 async function loadEntries() {
   try {
@@ -748,7 +780,8 @@ function buildCatTabs() {
   activeCategory = '全部';
 
   const dl = document.getElementById('catList');
-  dl.innerHTML = ordered.map(([cat]) => `<option value="${cat}">`).join('');
+  if (dl) dl.innerHTML = ordered.map(([cat]) => `<option value="${cat}">`).join('');
+  if (categoryCombo) categoryCombo.refresh();
 }
 
 function selectCategory(cat) {
@@ -860,6 +893,188 @@ function esc(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
 
+/* ============================================================
+   可点击的输入建议下拉（替代 <datalist>）
+   datalist 在不同浏览器/WebView 里只把建议列表画出来、点它没反应，
+   等于只能手打。这里自己画一层能点的下拉：点箭头展开、点选项直接填入，
+   同时保留自由输入（分类允许用户写新的）。
+   ============================================================ */
+function closestByClass(el, cls) {
+  while (el && el.nodeType === 1) {
+    if (el.classList && el.classList.contains(cls)) return el;
+    el = el.parentNode;
+  }
+  return null;
+}
+
+function attachComboPicker(inputId, getOptions) {
+  const input = document.getElementById(inputId);
+  if (!input) return null;
+  if (input._comboPicker) return input._comboPicker;   // 重复挂载直接复用
+
+  input.removeAttribute('list');
+  input.setAttribute('autocomplete', 'off');
+  input.setAttribute('spellcheck', 'false');
+
+  const wrap = document.createElement('div');
+  wrap.className = 'combo';
+  input.parentNode.insertBefore(wrap, input);
+  wrap.appendChild(input);
+
+  const toggle = document.createElement('button');
+  toggle.type = 'button';
+  toggle.className = 'combo-toggle';
+  toggle.setAttribute('aria-label', '展开选项');
+  toggle.setAttribute('tabindex', '-1');
+  toggle.innerHTML = '<span class="combo-caret"></span>';   // 用 CSS 画三角，避免字体缺字形
+  wrap.appendChild(toggle);
+
+  const panel = document.createElement('div');
+  panel.className = 'combo-panel';
+  panel.setAttribute('role', 'listbox');
+  wrap.appendChild(panel);
+
+  let items = [];
+  let isOpen = false;
+  let skipNextInput = false;   // 选完选项后派发的 input 事件不再触发展开
+
+  function currentOptions() {
+    let raw;
+    try { raw = getOptions() || []; } catch (e) { raw = []; }
+    const seen = new Set(), out = [];
+    for (const v0 of raw) {
+      const v = v0 == null ? '' : String(v0).trim();
+      if (!v || seen.has(v)) continue;
+      seen.add(v);
+      out.push(v);
+    }
+    return out;
+  }
+
+  function render(filterText) {
+    const all = currentOptions();
+    const typed = (filterText == null ? '' : String(filterText)).trim().toLowerCase();
+    items = typed ? all.filter(v => v.toLowerCase().includes(typed)) : all;
+    if (!items.length) {
+      panel.innerHTML = '<div class="combo-empty">' + (all.length ? '没有匹配项，可直接输入' : '还没有可选项，直接输入即可') + '</div>';
+      return;
+    }
+    const cur = (input.value || '').trim();
+    panel.innerHTML = items.map((v, i) =>
+      `<button type="button" class="combo-item${v === cur ? ' current' : ''}" data-combo-idx="${i}">${esc(v)}</button>`
+    ).join('');
+  }
+
+  // 往上找最近的滚动容器（本页弹窗自己会滚动，列表不能超出它的可视范围）
+  function scrollBoundary(el) {
+    let p = el.parentNode;
+    while (p && p.nodeType === 1 && p !== document.body) {
+      let oy = '';
+      try { oy = getComputedStyle(p).overflowY; } catch (e) {}
+      if (oy === 'auto' || oy === 'scroll' || oy === 'overlay') return p;
+      p = p.parentNode;
+    }
+    return null;
+  }
+
+  function place() {
+    // 下方空间不够就向上翻；高度按可视区和滚动容器边界一起限，免得被弹窗边缘挡住
+    const vv = window.visualViewport;
+    const viewBottom = (vv && vv.height) ? (vv.offsetTop || 0) + vv.height : window.innerHeight;
+    const bound = scrollBoundary(wrap);
+    const br = bound ? bound.getBoundingClientRect() : null;
+    const r = input.getBoundingClientRect();
+    const bottomLimit = br ? Math.min(viewBottom, br.bottom) : viewBottom;
+    const topLimit = br ? Math.max(0, br.top) : 0;
+    const below = bottomLimit - r.bottom - 6;
+    const above = r.top - topLimit - 6;
+    const up = below < 200 && above > below;
+    wrap.classList.toggle('combo-up', up);
+    panel.style.maxHeight = Math.max(96, Math.min(216, up ? above : below)) + 'px';
+  }
+
+  // showAll=true：点箭头展开时列出全部选项（输入框里已有的值只做高亮）；
+  // 打字时才按输入内容过滤
+  function open(showAll) {
+    render(showAll ? '' : input.value);
+    place();
+    panel.classList.add('show');
+    wrap.classList.add('open');
+    isOpen = true;
+    // 弹窗入场动画还在跑的时候位置会量偏，动画收尾后再校一次
+    setTimeout(() => { if (isOpen) place(); }, 280);
+  }
+  function close() {
+    if (!isOpen) return;
+    panel.classList.remove('show');
+    wrap.classList.remove('open');
+    isOpen = false;
+  }
+  function choose(v) {
+    input.value = v;
+    close();
+    // 派发 input/change 让别的监听者知道值变了，但别让自己的 input 监听把面板又打开
+    skipNextInput = true;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    skipNextInput = false;
+  }
+
+  // 箭头：先挡掉 mousedown，否则输入框失焦会把面板关掉后 click 又把它打开
+  toggle.addEventListener('mousedown', e => e.preventDefault());
+  toggle.addEventListener('click', e => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (isOpen) close(); else open(true);
+  });
+
+  // 选项：mousedown 阻止失焦，click 才是真正的选中
+  panel.addEventListener('mousedown', e => e.preventDefault());
+  panel.addEventListener('click', e => {
+    const btn = closestByClass(e.target, 'combo-item');
+    if (!btn) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const idx = Number(btn.getAttribute('data-combo-idx'));
+    if (items[idx] != null) choose(items[idx]);
+  });
+
+  // 打字即过滤：输入就展开，继续输入就按内容筛
+  input.addEventListener('input', () => {
+    if (skipNextInput) return;
+    if (!isOpen) open(); else { render(input.value); place(); }
+  });
+  input.addEventListener('blur', () => setTimeout(close, 150));
+  document.addEventListener('click', e => {
+    if (!wrap.contains(e.target)) close();
+  });
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', () => { if (isOpen) place(); });
+  }
+
+  const api = {
+    open: showAll => open(showAll !== false),
+    close,
+    refresh: () => { if (isOpen) { render(input.value); place(); } }
+  };
+  input._comboPicker = api;
+  return api;
+}
+
+// 分类输入框挂可点的历史分类下拉（取代原来点不动的 datalist）
+let categoryCombo = null;
+function initCategoryCombo() {
+  if (categoryCombo) return;
+  categoryCombo = attachComboPicker('categoryInput', () => {
+    const seen = new Set(), list = [];
+    for (const e of allEntries) {
+      const c = (e.category || '').trim();
+      if (c && !seen.has(c)) { seen.add(c); list.push(c); }
+    }
+    return list;
+  });
+}
+
 // 分类字段显隐：人物背景故事用「单人/多人」下拉，其余大类用自由文本
 function syncCategoryFields(mainCat, categoryValue) {
   const isBgp = mainCat === '人物背景故事';
@@ -874,6 +1089,7 @@ function syncCategoryFields(mainCat, categoryValue) {
 // ====== 创建 ======
 function openCreateModal() {
   editReturnToDetail = null;
+  if (categoryCombo) categoryCombo.close();
   document.getElementById('modalTitle').textContent = '添加新设定';
   document.getElementById('submitBtn').textContent = '确认添加';
   document.getElementById('editId').value = '';
@@ -888,6 +1104,7 @@ async function openEditModal(id) {
   try {
     const res = await fetch(`${API}/${id}`);
     const e = await res.json();
+    if (categoryCombo) categoryCombo.close();
     document.getElementById('modalTitle').textContent = '编辑设定';
     document.getElementById('submitBtn').textContent = '保存修改';
     document.getElementById('editId').value = e.id;
