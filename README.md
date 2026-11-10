@@ -13,6 +13,7 @@
 - **全局搜索** — 跨角色、世界设定、关系、文档统一检索
 - **回收站与撤销** — 删除不再是终点：角色 / 世界观 / 关系的删除都是**软删除**，先落到 `/trash` 回收站，可一键还原（连原 id 一起插回，挂在它身上的关系会自动重新接上）；每次保存编辑前也会先存一份改动前的快照，可在「编辑历史」里回退到任意版本（回退**不影响排序**）。彻底删除或清空回收站后才会真正回收图片文件。**手机版也有一套本地回收站**（同样的软删除/还原/彻底删除/清空语义，但没有编辑历史），见下方「Android App」一节
 - **一键导出** — 侧栏「导出全部」把角色 / 世界观 / 关系汇总为一个 JSON；点击后先弹确认框（确定 / 取消），确认后才下载
+- **设定集导出** — 工具栏「📖 设定集」把全部角色排成一本**可离线阅读的单文件 HTML**：可选手绘风格封面与目录、按**家族 / 地区 / 年代**分章、每章附角色条目（头像、属性表、外观/设定/命名缘由、该角色的关系列表），可选附「世界观设定」「关系总表」两个附录。图片以缩略图 base64 内嵌，文件可直接归档、发给别人；打开后浏览器「打印 → 存为 PDF」就是成品排版（已写 `@page` 与分页规则）。正文里的 `[[条目标题]]` 会自动变成书内跳转
 - **深色模式** — 支持浅色 / 深色主题切换
 
 ## 技术栈
@@ -87,6 +88,7 @@ Settings/
 │   ├── face-crop.js            #   人脸圈选
 │   ├── search.js               #   全局搜索
 │   ├── export-all.js           #   一键导出（含确认弹窗）
+│   ├── setting-book.js         #   设定集导出（选项弹窗 → /api/export/setting-book）
 │   ├── copy-detail.js          #   详情复制
 │   └── （页面源码，由 server/backend.py 托管）
 ├── android-app/                # Android 离线版（WebView + SPA，IndexedDB 本地存储）
@@ -121,7 +123,7 @@ Android 离线版，基于 WebView 加载 SPA（单页应用），所有数据�
 - 过滤统一放在 `db.js` 的 `charDB/worldDB/relDB/docDB.list()` 与 `readCharacterLiteAll()` 里，上层（列表 / 统计 / 关系图 / 同步 diff）一行都不用改，也就不会漏。角色的派生投影（`characterLite`）在软删除时**删掉**而不是改写 —— `readCharacterLiteAll()` 靠「有 key 没投影」发现要重建，读到 `_deleted_at` 就跳过。
 - 文档条目的 `blob` 就地留着（不搬动），所以还原是零拷贝、也不占双份磁盘。
 - `api-shim.js` 补了与后端同形的 `/api/trash`（`GET`）、`/api/trash/restore`（`POST`）、`/api/trash/{key}`（`DELETE`）、`/api/trash`（`DELETE` 清空）。回收站条目的 `id` 手机版是 `kind:entityId` 字符串（电脑版是数字 `rev_id`），前端只当不透明 key 用。
-- **同步**：本地列表读不到已删记录，所以「上传到电脑」会把它们当成「服务器有、本地无」照旧发 `DELETE` —— 电脑端因此也是软删除，能在电脑回收站里再找回；「从电脑下载」则按电脑上的状态覆盖本地。
+- **同步**：本地列表读不到已删记录，所以「上传到电脑」会把它们当成「服务器有、本地无」照旧发 `DELETE` —— 电脑端因此也是软删除，能在电脑回收站里再找回。「从电脑下载」方向原本是**物理删**（`charDB.delete`），会让电脑端的删除在手机上彻底消失、进不了手机回收站，现已改为同样走 `trashRecord`：两个方向的删除都只是「移入回收站」。另外下载时若命中一条同名记录，会先用 `reviveTrashed()` 把回收站里那条旧记录取回来覆写，而不是 `create` 一条重名副本 —— 否则用户之后点「还原」会凭空多出一个人。
 - ⚠️ 手机端**彻底删除不回收图片文件**（图片按内容哈希共享，盲删会误伤别的记录）；电脑版的 `_gc_images()` 才做这件事。
 
 ### 项目结构
@@ -361,7 +363,7 @@ powershell -ExecutionPolicy Bypass -File server/check_sync.ps1 -Fix   # 诊断 +
 **回收站与撤销**
 
 - `GET /api/trash` — 回收站列表（`?include_history=1` 连编辑历史一起返回，最多 500 条）
-- `POST /api/trash/restore` — 还原一条快照（请求体 `{"rev_id": 1}`）：记录还在就按快照覆写，已被删就按原 id 插回
+- `POST /api/trash/restore` — 还原一条快照（请求体 `{"rev_id": 1}`）：记录还在就按快照覆写，已被删就按原 id 插回；若原 id 已空、但存在另一条**同自然键**（角色按 `name`、世界观按 `title`、关系按 `from+to+type`）的活记录，则改为覆写到那条上 —— 这是为「手机回收站还原后同步上传」准备的：上传按 name 匹配、`POST` 由 AUTOINCREMENT 重新分 id，旧快照与原 id 就此脱钩，不查重就会在库里留下两个同名记录
 - `DELETE /api/trash/{rev_id}` — 彻底删除一条快照（此后不可还原，图片文件一并回收）
 - `DELETE /api/trash` — 清空回收站（`?history_too=1` 连编辑历史一起清）
 - `GET /api/revisions` — 历史查询（`?entity=character&entity_id=3&limit=200`，都不传就是全库）
@@ -371,7 +373,8 @@ powershell -ExecutionPolicy Bypass -File server/check_sync.ps1 -Fix   # 诊断 +
 - `GET /api/search` — 全局搜索
 - `GET /api/stats` — 总览统计数据（结构见上文「总览统计的口径」）
 - `GET /api/stats/ranks` — 全量字数排行（`{characters:[{id,name,university,region,value}], worlds:[{id,title,chars,main_category,category}]}`，均为降序）
-- `POST /api/sync/replace-all` — 同步：整库替换（供手机端上传）
+- `GET /api/export/setting-book` — 设定集导出（单文件 HTML）。参数：`group=family|region|era`（分章依据）、`world=0|1`（附世界观）、`rel=0|1`（附关系总表）、`img=thumb|url|none`（图片内嵌缩略图 / 引用服务器地址 / 不要图）、`download=1`（加 `Content-Disposition` 直接下载，否则浏览器内联预览）。86 角色全量导出约 1.6 MB / 0.2 s
+- `POST /api/sync/replace-all` — 同步：整库替换（**已废弃**：手机端的 `sync.js` 走的是逐条差量 `DELETE`/`PUT`/`POST`，不再调用它；保留仅为兼容老版本客户端）
 
 **页面与静态资源路由**
 

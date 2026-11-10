@@ -820,13 +820,18 @@ async function downloadFromServer(onProgress, scope) {
   // 5. 增量同步角色
   if (scope.chars && charChanges > 0) {
     onProgress && onProgress(`正在同步角色 (${charChanges} 项变更)...`);
-    for (const item of charDiff.deleted) await charDB.delete(item.target.id);
+    // 删除走回收站，不用 charDB.delete（那是物理删）。
+    // 这里删的是「服务器上已经没有」的本地记录，而服务器端的删除本身就是软删（进 revisions），
+    // 若在手机上物理删掉，就会出现「电脑端还躺在回收站里、手机端已经彻底消失」的不对称。
+    for (const item of charDiff.deleted) await trashRecord('character', item.target.id);
     for (const item of charDiff.modified) {
       await charDB.update({ ...item.source, id: item.target.id, sort_order: item.target.sort_order });
     }
     for (const item of charDiff.added) {
+      // 回收站里若已有同名的一条，就复用它而不是 create 一条重名副本：
+      // 否则用户之后点「还原」会凭空多出一个同名角色。见 db.js 的 reviveTrashed。
       const { id, ...rest } = item.source;
-      await charDB.create(rest);
+      if (!await reviveTrashed('character', item.source.name, rest)) await charDB.create(rest);
     }
   }
 
@@ -837,20 +842,20 @@ async function downloadFromServer(onProgress, scope) {
   // 7. 增量同步世界设定
   if (scope.worlds && worldChanges > 0) {
     onProgress && onProgress(`正在同步世界设定 (${worldChanges} 项变更)...`);
-    for (const item of worldDiff.deleted) await worldDB.delete(item.target.id);
+    for (const item of worldDiff.deleted) await trashRecord('world', item.target.id);
     for (const item of worldDiff.modified) {
       await worldDB.update({ ...item.source, id: item.target.id, sort_order: item.target.sort_order });
     }
     for (const item of worldDiff.added) {
       const { id, ...rest } = item.source;
-      await worldDB.create(rest);
+      if (!await reviveTrashed('world', item.source.title, rest)) await worldDB.create(rest);
     }
   }
 
   // 8. 增量同步关系（转换 char_id：server id → local id）
   if (scope.rels && relChanges > 0) {
     onProgress && onProgress(`正在同步关系 (${relChanges} 项变更)...`);
-    for (const item of relDiff.deleted) await relDB.delete(item.target.id);
+    for (const item of relDiff.deleted) await trashRecord('relation', item.target.id);
     for (const item of relDiff.modified) {
       const localFromId = nameToLocalId.get(item.source.from_name);
       const localToId = nameToLocalId.get(item.source.to_name);
@@ -876,7 +881,8 @@ async function downloadFromServer(onProgress, scope) {
     const serverDocNames = new Set(serverDocs.map(d => d.name));
     for (const ld of localDocs) {
       if (docOnly && !docOnly.has(ld.name)) continue;
-      if (!serverDocNames.has(ld.name)) { await docDB.delete(ld.name); docDeleted++; }
+      // 文档同理：本地多出来、服务器没有的，进回收站而不是物理删（blob 就地留着，还原零拷贝）
+      if (!serverDocNames.has(ld.name)) { await trashRecord('document', ld.name); docDeleted++; }
     }
     toDownload = serverDocs.filter(sd => {
       if (docOnly && !docOnly.has(sd.name)) return false;

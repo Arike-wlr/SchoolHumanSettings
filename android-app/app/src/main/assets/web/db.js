@@ -757,6 +757,40 @@ async function restoreRecord(kind, entityId) {
   return true;
 }
 
+/**
+ * 同步「复活」：回收站里躺着一条同名的同类记录时，把它取回来用新数据覆写，返回 true。
+ *
+ * 场景：电脑端删了角色 A（服务器进回收站）→ 手机同步下载时把本地 A 也移进回收站
+ * （见 sync.js 的删除分支）→ 之后在电脑端还原 A → 手机再同步，A 又变成「服务器有、本地没有」。
+ * 若直接 create，本地会多出一条新 id 的 A，而回收站里那条同名的旧 A 还在 ——
+ * 一旦用户点还原就出现两个 A。所以这里优先复用旧记录（id 不变，关系也就还挂着）。
+ *
+ * @param kind  'character' | 'world' | 'document'（关系按 id 重映射，不参与去重）
+ * @param label 角色名 / 世界设定标题 / 文档名
+ * @param data  要写入的内容（来自服务器，不含本地 id）
+ */
+async function reviveTrashed(kind, label, data) {
+  const storeName = TRASH_STORES[kind] && TRASH_STORES[kind]();
+  if (!storeName || label == null || label === '') return false;
+  const field = kind === 'character' ? 'name' : kind === 'world' ? 'title' : 'name';
+  const all = await getAll(storeName);
+  const old = all.find(r => r._deleted_at && r[field] === label);
+  if (!old) return false;
+
+  const merged = Object.assign({}, data, { id: old.id, sort_order: old.sort_order });
+  // 保留本地的时间戳：服务器那份可能是新 id 的新记录，但这条记录的「存在历史」是旧的。
+  if (old.created_at) merged.created_at = old.created_at;
+  delete merged._deleted_at;
+
+  if (kind === 'character') {
+    invalidateCharactersShared();
+    await putCharacter(merged);     // 同事务里把 lite 投影也补回去
+  } else {
+    await put(storeName, merged);
+  }
+  return true;
+}
+
 /** 彻底删除（不可恢复）。 */
 async function purgeRecord(kind, entityId) {
   const storeName = TRASH_STORES[kind] && TRASH_STORES[kind]();

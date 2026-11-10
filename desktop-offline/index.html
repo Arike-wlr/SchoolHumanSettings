@@ -836,6 +836,41 @@
   .toast.success { background: #2d5a27; }
   .toast.error { background: var(--danger); }
 
+  /* ====== 设定集导出弹窗 ====== */
+  .book-hint {
+    font-size: .85rem; color: var(--text-light); line-height: 1.75;
+    margin-bottom: 22px;
+  }
+  .book-row { margin-bottom: 18px; }
+  .book-row > label.book-label {
+    display: block; font-size: .78rem; letter-spacing: .18em;
+    color: var(--text-light); margin-bottom: 9px;
+  }
+  .book-chips { display: flex; gap: 8px; flex-wrap: wrap; }
+  .book-chip {
+    flex: 1 1 0; min-width: 88px; padding: 9px 6px; cursor: pointer;
+    background: var(--card-bg); color: var(--text);
+    border: 1px solid var(--border); border-radius: var(--radius-sm);
+    font-family: inherit; font-size: .85rem; letter-spacing: .06em;
+    transition: var(--transition);
+  }
+  .book-chip:hover { border-color: var(--accent-light); }
+  .book-chip.active {
+    background: var(--accent-pale); border-color: var(--accent);
+    color: var(--accent); font-weight: 600;
+  }
+  .book-checks { display: flex; flex-direction: column; gap: 10px; }
+  .book-checks label {
+    display: flex; align-items: center; gap: 9px;
+    font-size: .88rem; cursor: pointer;
+  }
+  .book-checks input { width: 15px; height: 15px; accent-color: var(--accent); cursor: pointer; }
+  .book-tip {
+    font-size: .78rem; color: var(--text-light); line-height: 1.7;
+    background: var(--accent-pale); border-radius: var(--radius-sm);
+    padding: 10px 12px; margin-top: 18px;
+  }
+
   /* ====== 响应式 ====== */
   @media (max-width: 768px) {
     .grid { grid-template-columns: 1fr; }
@@ -902,6 +937,7 @@
       <button class="btn btn-primary" id="confirmExportBtn" onclick="confirmExport()" disabled data-page-node-id="C57BaFlrwVc1pas08TikR3">确认导出</button>
     </span>
     <button class="btn btn-outline btn-sm" id="exportBtn" onclick="enterExportMode()" data-page-node-id="EQiBQI5A8TbSqqzXeD1vn1">📥 导出</button>
+    <button class="btn btn-outline btn-sm" id="bookBtn" onclick="openBookModal()" title="把全部设定排成一本可离线阅读的 HTML">📖 设定集</button>
   </div>
 
   <div class="region-tabs" id="regionTabs" data-page-node-id="UWlyssGgwg4JhQEAK3f73Z"></div>
@@ -1042,6 +1078,45 @@
     <div class="modal-footer" style="justify-content:center;" data-page-node-id="4NjnIIx7kKrS1B6XwwGY38">
       <button class="btn btn-ghost" onclick="closeDeleteModal()" data-page-node-id="RcHfqf0jKECYCBFGLFUqRw">取消</button>
       <button class="btn btn-danger" id="confirmDeleteBtn" onclick="confirmDelete()" data-page-node-id="88PcpNYU4qCvO8Asdznnze">确认删除</button>
+    </div>
+  </div>
+</div>
+
+<!-- ====== 设定集导出 Modal ====== -->
+<div class="modal-overlay" id="bookOverlay" style="z-index:2000;">
+  <div class="modal" style="max-width:440px;">
+    <div class="modal-header">
+      <h2>📖 导出设定集</h2>
+      <button class="modal-close" onclick="closeBookModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <p class="book-hint">
+        把全部角色按章节排成一本可以读的 HTML，图片内嵌、单文件。<br>
+        打开后浏览器「打印 → 存为 PDF」就是现成的排版。
+      </p>
+      <div class="book-row">
+        <label class="book-label">分章方式</label>
+        <div class="book-chips">
+          <button class="book-chip active" data-group="family" onclick="pickBookGroup(this)">按家族</button>
+          <button class="book-chip" data-group="region" onclick="pickBookGroup(this)">按地区</button>
+          <button class="book-chip" data-group="era" onclick="pickBookGroup(this)">按年代</button>
+        </div>
+      </div>
+      <div class="book-row">
+        <label class="book-label">附带内容</label>
+        <div class="book-checks">
+          <label><input type="checkbox" id="bookWorld" checked> 附录一 · 世界观设定</label>
+          <label><input type="checkbox" id="bookRel" checked> 附录二 · 关系总表</label>
+        </div>
+      </div>
+      <div class="book-tip">
+        每个角色还会附上自己的关系列表；正文里的 <code>[[条目]]</code> 会自动变成书内跳转链接。
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeBookModal()">取消</button>
+      <button class="btn btn-outline" onclick="downloadBook()">下载 HTML</button>
+      <button class="btn btn-primary" onclick="previewBook()">在浏览器中打开</button>
     </div>
   </div>
 </div>
@@ -1930,6 +2005,7 @@ function toggleSidebar() {
 </script>
 <script src="search.js?v=2"></script>
 <script src="export-all.js?v=2"></script>
+<script src="setting-book.js"></script>
 <script src="copy-detail.js"></script>
 <script src="face-crop.js"></script>
 </body>

@@ -20,7 +20,7 @@ import xml.etree.ElementTree as ET
 from datetime import datetime
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi import FastAPI, HTTPException, UploadFile, File, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse, Response
@@ -383,6 +383,13 @@ REV_ENTITY_LABEL = {
     "character": "角色",
     "world": "世界观",
     "relation": "关系",
+}
+# 各类实体的「自然键」：客户端（尤其手机端同步）认的是这些业务字段，不是 id。
+# 还原时用来查重，见 restore_revision 里的说明。
+REV_NATURAL_KEYS = {
+    "character": ("name",),
+    "world": ("title",),
+    "relation": ("from_char_id", "to_char_id", "relation_type"),
 }
 
 
@@ -981,6 +988,8 @@ def restore_revision(data: RestoreRequest):
 
     · 记录还在 → 按快照字段覆写（并把覆写前的状态再记一条历史，还原本身也能撤销）
     · 记录已被删 → 按快照原样插回，**沿用原 id**（关系因此能自动重新挂上）
+      若原 id 已空、但存在另一条同自然键（name / title / from+to+type）的活记录，
+      则改为覆写到那条上，避免造出重名副本。
     """
     conn = get_db()
     cursor = conn.cursor()
@@ -1003,6 +1012,23 @@ def restore_revision(data: RestoreRequest):
 
     cursor.execute(f"SELECT * FROM {table} WHERE id = ?", (entity_id,))
     current = cursor.fetchone()
+    if current is None:
+        # 原 id 上没人了，但不代表这条记录真的死了 —— 它可能换了个 id 又活过来。
+        # 典型路径：「手机回收站还原 → 同步上传」，上传是按 name 匹配的，POST 又由 AUTOINCREMENT
+        # 重新分配 id，于是一条同名记录以新 id 复活，旧快照指向的原 id 空了出来。
+        # 此时若直接按原 id 插回，库里就会出现两条同名记录（回收站里点一次还原凭空多一个）。
+        # 所以先按自然键查重：查到就把快照覆写到活着那条上 —— 语义上也更对，活着的才是「现在」。
+        key_cols = REV_NATURAL_KEYS.get(entity, ())
+        if key_cols and all(k in snap for k in key_cols):
+            where = " AND ".join(f"{k} = ?" for k in key_cols)
+            cursor.execute(
+                f"SELECT * FROM {table} WHERE {where} LIMIT 1",
+                [snap[k] for k in key_cols],
+            )
+            dup = cursor.fetchone()
+            if dup is not None:
+                current = dup
+                entity_id = dup["id"]
     if current is not None:
         _rev_record(cursor, entity, current, "edit")   # 还原本身也可再撤销
         fields = [k for k in snap.keys() if k != "id"]
@@ -2345,6 +2371,465 @@ def get_stats_ranks():
     return {"characters": char_rows, "worlds": world_rows}
 
 
+# ============================================================
+# 设定集导出（把整库渲染成一本可离线阅读的 HTML）
+# ============================================================
+# 为什么是 HTML 而不是 PDF：不引额外依赖、图片能内嵌、浏览器「打印为 PDF」就是现成的排版器，
+# 而且导出的文件本身就是最终成品 —— 发给别人、丢进手机都能直接看。
+
+import base64
+from html import escape as _esc
+from urllib.parse import quote
+
+
+def _book_split_multi(value: str) -> List[str]:
+    """family 这类字段是「中央家族、西北家族」的混写，按常见分隔符切开。"""
+    if not value:
+        return []
+    return [p.strip() for p in re.split(r"[、,，/;；]", str(value)) if p.strip()]
+
+
+def _book_text(text: str, links: dict) -> str:
+    """把纯文本设定渲染成段落。空行分段、单换行保留为 <br>。
+
+    另外认一种行内标记：世界观正文里有 6 处 `[[条目标题]]`，
+    能对上号的（角色名/世界观标题）就变成书内锚点，对不上就原样显示成高亮词。
+    """
+    if not text or not str(text).strip():
+        return ""
+    raw = _esc(str(text).strip())
+    # 先处理链接再做分段，避免 `[[` 跨段
+    def _link(m):
+        label = m.group(1).strip()
+        target = links.get(label)
+        if target:
+            return '<a class="wikilink" href="#%s">%s</a>' % (target, label)
+        return '<span class="wikilink">%s</span>' % label
+
+    raw = re.sub(r"\[\[([^\[\]]+)\]\]", _link, raw)
+    out = []
+    for block in re.split(r"\n\s*\n", raw):
+        block = block.strip()
+        if not block:
+            continue
+        out.append("<p>" + block.replace("\n", "<br>") + "</p>")
+    return "\n".join(out)
+
+
+def _book_image(url: str, mode: str, base: str) -> str:
+    """返回 <img> 或空串。mode: thumb(内嵌缩略图) / url(引用服务器地址) / none。"""
+    if not url or mode == "none":
+        return ""
+    if mode == "url":
+        src = url if url.startswith("http") else base.rstrip("/") + url
+        return '<img class="portrait" src="%s" alt="">' % _esc(src)
+    path = _image_path_from_ref(url)
+    if not path or not os.path.isfile(path):
+        return ""
+    thumb = _make_thumb(path)
+    use = thumb if (thumb and os.path.isfile(thumb)) else path
+    try:
+        with open(use, "rb") as f:
+            data = f.read()
+        mime = "image/jpeg" if use.lower().endswith((".jpg", ".jpeg")) else \
+               "image/png" if use.lower().endswith(".png") else "image/webp"
+        return '<img class="portrait" src="data:%s;base64,%s" alt="">' % (
+            mime, base64.b64encode(data).decode("ascii"))
+    except OSError:
+        return ""
+
+
+BOOK_CSS = """
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#f5f0eb; --card:#fffef9; --text:#3d322b; --dim:#8c7b6e;
+  --accent:#8b5e3c; --accent-l:#c49a6c; --pale:#f0e4d4; --border:#e0d5c7;
+  --serif:'Georgia','Noto Serif SC','Songti SC','SimSun',serif;
+  --sans:'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif;
+}
+body{background:var(--bg);color:var(--text);font-family:var(--serif);
+     line-height:1.85;font-size:16px;-webkit-font-smoothing:antialiased}
+.page{max-width:820px;margin:0 auto;padding:44px 40px 96px}
+
+/* ---- 封面 ---- */
+.cover{text-align:center;padding:88px 0 72px;border-bottom:3px double var(--border)}
+.cover .kicker{font-family:var(--sans);font-size:12px;letter-spacing:.42em;
+  color:var(--accent-l);text-transform:uppercase;margin-bottom:26px}
+.cover h1{font-size:42px;font-weight:600;letter-spacing:.1em;line-height:1.35}
+.cover .sub{color:var(--dim);margin-top:16px;font-size:14px;letter-spacing:.06em}
+.cover .stats{display:flex;justify-content:center;gap:34px;margin-top:44px;
+  font-family:var(--sans)}
+.cover .stats div{font-size:12px;color:var(--dim);letter-spacing:.14em}
+.cover .stats strong{display:block;font-size:26px;color:var(--accent);
+  font-family:var(--serif);letter-spacing:0;margin-bottom:2px}
+
+/* ---- 目录 ---- */
+.toc{margin-top:52px}
+.toc h2{font-family:var(--sans);font-size:13px;letter-spacing:.32em;color:var(--accent);
+  padding-bottom:10px;border-bottom:1px solid var(--border);margin-bottom:22px}
+.toc ol{list-style:none}
+.toc>ol>li{margin-bottom:14px}
+.toc .ch{font-size:17px}
+.toc .ch a{color:var(--text);text-decoration:none;border-bottom:1px solid var(--pale)}
+.toc .ch .n{font-family:var(--sans);font-size:11px;color:var(--accent-l);
+  margin-left:8px;letter-spacing:.1em}
+.toc ul{list-style:none;display:flex;flex-wrap:wrap;gap:6px 16px;margin:8px 0 0 2px}
+.toc ul a{font-size:13.5px;color:var(--dim);text-decoration:none}
+.toc ul a:hover{color:var(--accent)}
+
+/* ---- 章节 ---- */
+.chapter{margin-top:64px}
+.chapter>h2{font-size:26px;font-weight:600;letter-spacing:.08em;
+  padding-bottom:12px;border-bottom:2px solid var(--accent);margin-bottom:6px}
+.chapter>.chap-meta{font-family:var(--sans);font-size:12px;color:var(--dim);
+  letter-spacing:.16em;margin-bottom:28px}
+
+/* ---- 角色条目 ---- */
+.char{margin:0 0 40px;padding:26px 28px;background:var(--card);
+  border:1px solid var(--border);border-radius:12px;break-inside:avoid}
+.char-head{display:flex;gap:20px;align-items:flex-start;margin-bottom:18px}
+.char-head .who{flex:1;min-width:0}
+.char-head h3{font-size:23px;font-weight:600;letter-spacing:.06em;line-height:1.3}
+.char-head .alias{font-family:var(--sans);font-size:13px;color:var(--dim);
+  margin-top:5px;letter-spacing:.04em}
+.char-head .uni{font-family:var(--sans);font-size:12px;color:var(--accent);
+  margin-top:7px;letter-spacing:.08em}
+.portrait{width:104px;height:104px;object-fit:cover;border-radius:10px;
+  border:1px solid var(--border);flex-shrink:0;background:var(--pale)}
+.meta{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));
+  gap:2px 18px;font-family:var(--sans);font-size:12.5px;
+  padding:12px 0 14px;border-top:1px solid var(--pale);border-bottom:1px solid var(--pale);
+  margin-bottom:16px}
+.meta span{color:var(--dim)}
+.meta b{font-weight:500;color:var(--text)}
+.field{margin-top:18px}
+.field h4{font-family:var(--sans);font-size:11.5px;letter-spacing:.24em;
+  color:var(--accent-l);margin-bottom:7px;text-transform:uppercase}
+.field p{margin-bottom:10px;text-align:justify}
+.field p:last-child{margin-bottom:0}
+.rels{font-family:var(--sans);font-size:13px;list-style:none}
+.rels li{padding:5px 0;border-bottom:1px dashed var(--pale);line-height:1.7}
+.rels li:last-child{border-bottom:none}
+.rels .type{color:var(--accent);font-size:11.5px;letter-spacing:.1em;
+  border:1px solid var(--pale);background:var(--pale);border-radius:4px;
+  padding:1px 7px;margin:0 8px;white-space:nowrap}
+.rels .desc{color:var(--dim);font-size:12px;display:block;margin-top:3px}
+.wikilink{color:var(--accent);text-decoration:none;border-bottom:1px dotted var(--accent-l)}
+
+/* ---- 世界观附录 ---- */
+.world{margin-bottom:30px;break-inside:avoid}
+.world h3{font-size:18px;font-weight:600;margin-bottom:4px;letter-spacing:.04em}
+.world .cat{font-family:var(--sans);font-size:11.5px;color:var(--dim);
+  letter-spacing:.12em;margin-bottom:12px}
+.world .prose p{margin-bottom:10px;text-align:justify;font-size:15px}
+
+/* ---- 关系总表 ---- */
+table.rel-table{width:100%;border-collapse:collapse;font-family:var(--sans);font-size:13px;
+  table-layout:fixed}
+/* 固定列宽：否则「说明」列里的长文会把「从/到」两列挤到只剩两三个字宽，
+   姓名被迫竖排（尚清源 → 尚清 / 源），非常难看 */
+table.rel-table th:nth-child(1),table.rel-table td:nth-child(1){width:19%}
+table.rel-table th:nth-child(2),table.rel-table td:nth-child(2){width:11%}
+table.rel-table th:nth-child(3),table.rel-table td:nth-child(3){width:19%}
+table.rel-table th{text-align:left;font-weight:600;font-size:11.5px;letter-spacing:.16em;
+  color:var(--accent);border-bottom:1px solid var(--accent);padding:8px 6px}
+table.rel-table td{padding:7px 6px;border-bottom:1px solid var(--pale);
+  vertical-align:top;line-height:1.6;word-break:break-word}
+table.rel-table td.t{color:var(--accent);white-space:nowrap}
+table.rel-table td.d{color:var(--dim);font-size:12px}
+
+.colophon{margin-top:80px;padding-top:22px;border-top:1px solid var(--border);
+  font-family:var(--sans);font-size:12px;color:var(--dim);text-align:center;letter-spacing:.1em}
+
+/* ---- 屏幕上的工具条（打印不出现） ---- */
+.bookbar{position:fixed;top:18px;right:18px;display:flex;gap:8px;z-index:99;
+  font-family:var(--sans)}
+.bookbar button{border:1px solid var(--border);background:var(--card);color:var(--text);
+  padding:8px 14px;border-radius:8px;font-size:12.5px;cursor:pointer;
+  box-shadow:0 2px 10px rgba(60,40,20,.08);letter-spacing:.06em}
+.bookbar button:hover{background:var(--pale);border-color:var(--accent-l)}
+@media print{
+  .bookbar{display:none}
+  body{background:#fff;font-size:11.5pt}
+  .page{max-width:none;padding:0}
+  .chapter{break-before:page}
+  .cover{break-after:page;padding:120px 0}
+  .char,.world{break-inside:avoid;box-shadow:none}
+  a{color:inherit;text-decoration:none}
+  @page{margin:18mm 16mm}
+}
+"""
+
+
+BOOK_ERAS = [
+    ("清末 · 1900 年前", 0, 1899),
+    ("民国 · 1900–1949", 1900, 1949),
+    ("建国初期 · 1950–1965", 1950, 1965),
+    ("曲折年代 · 1966–1979", 1966, 1979),
+    ("改革开放 · 1980–1999", 1980, 1999),
+    ("新世纪 · 2000 后", 2000, 3000),
+]
+BOOK_ERA_UNKNOWN = "年代不详"
+
+
+def _book_era(rec) -> str:
+    """按诞生年份分档。birth_time 优先，退到 identity_period（都有 79/86 可解析）。"""
+    for key in ("birth_time", "identity_period"):
+        m = re.search(r"(1[89]\d\d|20\d\d)", rec.get(key) or "")
+        if m:
+            year = int(m.group(1))
+            for label, lo, hi in BOOK_ERAS:
+                if lo <= year <= hi:
+                    return label
+            break
+    return BOOK_ERA_UNKNOWN
+
+
+def _build_setting_book(group: str, with_world: bool, with_rel: bool,
+                        img_mode: str, base: str) -> str:
+    """组装整本设定集的 HTML 源码。"""
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM characters ORDER BY sort_order ASC, id ASC")
+    chars = [dict(r) for r in cursor.fetchall()]
+    cursor.execute("SELECT * FROM world_buildings ORDER BY main_category ASC, sort_order ASC, id ASC")
+    worlds = [dict(r) for r in cursor.fetchall()]
+    cursor.execute("SELECT * FROM relations ORDER BY id ASC")
+    rels = [dict(r) for r in cursor.fetchall()]
+    conn.close()
+
+    name_by_id = {c["id"]: (c.get("name") or "") for c in chars}
+
+    # 书内互链的锚点表：`[[某角色]]` / `[[某设定]]` 能跳过去
+    links = {}
+    for c in chars:
+        if c.get("name"):
+            links[c["name"]] = "ch-%s" % c["id"]
+    for w in worlds:
+        if w.get("title"):
+            links.setdefault(w["title"], "wd-%s" % w["id"])
+
+    # ---- 分章 ----
+    def chapter_key(rec):
+        if group == "family":
+            fams = _book_split_multi(rec.get("family"))
+            return fams[0] if fams else "未归类"
+        if group == "region":
+            return (rec.get("region") or "").strip() or "未分类"
+        if group == "era":
+            return _book_era(rec)
+        # 兜底按学校分 —— 注意本库里 86 个角色正好 86 所学校，等于一人一章
+        return (rec.get("university") or "").strip() or "未分类"
+
+    buckets = {}
+    for c in chars:
+        buckets.setdefault(chapter_key(c), []).append(c)
+    # 人多的章在前；「未归类」这类兜底章永远压到最后。同数量按名字排，保证两次导出顺序一致
+    era_index = {label: i for i, (label, _lo, _hi) in enumerate(BOOK_ERAS)}
+
+    def _chap_order(kv):
+        name, members = kv
+        if group == "era":
+            # 年代章必须按时间顺序排，不能按人数 —— 否则「建国初期」跑到「清末」前面
+            return (1 if name == BOOK_ERA_UNKNOWN else 0, era_index.get(name, 99), name)
+        return (1 if name in ("未归类", "未分类") else 0, -len(members), name)
+
+    chapters = sorted(buckets.items(), key=_chap_order)
+
+    rels_by_char = {}
+    if with_rel:
+        for r in rels:
+            rels_by_char.setdefault(r.get("from_char_id"), []).append(r)
+            rels_by_char.setdefault(r.get("to_char_id"), []).append(r)
+
+    def meta_html(c):
+        pairs = [
+            ("大学", c.get("university")),
+            ("地区", c.get("region")),
+            ("所属家族", "、".join(_book_split_multi(c.get("family")))),
+            ("身份期", c.get("identity_period")),
+            ("诞生", c.get("birth_time")),
+            ("出生地", c.get("birthplace")),
+            ("身高", c.get("height")),
+            ("性别", c.get("gender")),
+            ("生日", c.get("birthday")),
+            ("状态", c.get("status")),
+        ]
+        items = "".join(
+            '<div><span>%s</span> <b>%s</b></div>' % (_esc(k), _esc(str(v)))
+            for k, v in pairs if v and str(v).strip()
+        )
+        return '<div class="meta">%s</div>' % items if items else ""
+
+    def char_html(c):
+        port = _book_image(c.get("image_url") or "", img_mode, base)
+        alias = c.get("alias") or ""
+        uni = " · ".join(x for x in [(c.get("university") or ""), (c.get("region") or "")] if x)
+        head = ['<div class="char-head"><div class="who">']
+        head.append("<h3>%s</h3>" % _esc(c.get("name") or "未命名"))
+        if alias:
+            head.append('<div class="alias">别名 · %s</div>' % _esc(alias))
+        if uni:
+            head.append('<div class="uni">%s</div>' % _esc(uni))
+        head.append("</div>%s</div>" % port)
+
+        body = [meta_html(c)]
+        for label, key in [("外观", "appearance"), ("设定", "setting"), ("命名缘由", "naming_rationale")]:
+            prose = _book_text(c.get(key) or "", links)
+            if prose:
+                body.append('<div class="field"><h4>%s</h4>%s</div>' % (label, prose))
+
+        mine = rels_by_char.get(c["id"]) or []
+        if with_rel and mine:
+            lis = []
+            seen = set()
+            for r in mine:
+                other_id = r.get("to_char_id") if r.get("from_char_id") == c["id"] else r.get("from_char_id")
+                other = name_by_id.get(other_id) or "（已删除）"
+                arrow = "→" if r.get("from_char_id") == c["id"] else "←"
+                sig = (other, r.get("relation_type"))
+                if sig in seen:
+                    continue
+                seen.add(sig)
+                desc = (r.get("description") or "").strip()
+                lis.append(
+                    '<li>%s <span class="type">%s</span> %s%s</li>' % (
+                        arrow, _esc(r.get("relation_type") or ""), _esc(other),
+                        '<span class="desc">%s</span>' % _esc(desc) if desc else "")
+                )
+            body.append('<div class="field"><h4>关系</h4><ul class="rels">%s</ul></div>' % "".join(lis))
+
+        return '<article class="char" id="ch-%s">%s%s</article>' % (c["id"], "".join(head), "".join(body))
+
+    # ---- 目录 ----
+    toc = ['<nav class="toc"><h2>目录</h2><ol>']
+    for name, members in chapters:
+        toc.append('<li><div class="ch"><a href="#chap-%s">%s</a>'
+                   '<span class="n">%d 位</span></div><ul>' % (
+                       _esc(_anchor_slug(name)), _esc(name), len(members)))
+        for c in members:
+            toc.append('<li><a href="#ch-%s">%s</a></li>' % (c["id"], _esc(c.get("name") or "")))
+        toc.append("</ul></li>")
+    if with_world and worlds:
+        toc.append('<li><div class="ch"><a href="#appendix-world">附录一 · 世界观设定</a>'
+                   '<span class="n">%d 条</span></div></li>' % len(worlds))
+    if with_rel and rels:
+        toc.append('<li><div class="ch"><a href="#appendix-rel">附录二 · 关系总表</a>'
+                   '<span class="n">%d 条</span></div></li>' % len(rels))
+    toc.append("</ol></nav>")
+
+    # ---- 正文 ----
+    main = []
+    for name, members in chapters:
+        main.append('<section class="chapter" id="chap-%s">' % _esc(_anchor_slug(name)))
+        main.append("<h2>%s</h2>" % _esc(name))
+        main.append('<div class="chap-meta">%d 位角色</div>' % len(members))
+        main.append("".join(char_html(c) for c in members))
+        main.append("</section>")
+
+    if with_world and worlds:
+        wbuckets = {}
+        for w in worlds:
+            wbuckets.setdefault((w.get("main_category") or "").strip() or "未分类", []).append(w)
+        main.append('<section class="chapter" id="appendix-world"><h2>附录一 · 世界观设定</h2>')
+        main.append('<div class="chap-meta">共 %d 条 · 按大类分节</div>' % len(worlds))
+        for cat, items in sorted(
+            wbuckets.items(),
+            key=lambda kv: (1 if kv[0] == "未分类" else 0, -len(kv[1]), kv[0]),
+        ):
+            main.append("<h3 style=\"font-size:15px;letter-spacing:.14em;color:var(--accent);"
+                        "margin:30px 0 14px;padding-bottom:8px;border-bottom:1px solid var(--pale)\">%s</h3>"
+                        % _esc(cat))
+            for w in items:
+                main.append('<div class="world" id="wd-%s"><h3>%s</h3>' % (w["id"], _esc(w.get("title") or "")))
+                if w.get("category"):
+                    main.append('<div class="cat">%s</div>' % _esc(w["category"]))
+                main.append('<div class="prose">%s</div></div>' % _book_text(w.get("content") or "", links))
+        main.append("</section>")
+
+    if with_rel and rels:
+        rows = []
+        for r in rels:
+            frm = name_by_id.get(r.get("from_char_id")) or "（已删除）"
+            to = name_by_id.get(r.get("to_char_id")) or "（已删除）"
+            rows.append(
+                "<tr><td>%s</td><td class=\"t\">%s</td><td>%s</td><td class=\"d\">%s</td></tr>" % (
+                    _esc(frm), _esc(r.get("relation_type") or ""), _esc(to),
+                    _esc((r.get("description") or "").replace("\n", " "))))
+        main.append('<section class="chapter" id="appendix-rel"><h2>附录二 · 关系总表</h2>')
+        main.append('<div class="chap-meta">共 %d 条</div>' % len(rels))
+        main.append('<table class="rel-table"><thead><tr><th>从</th><th>类型</th><th>到</th>'
+                    '<th>说明</th></tr></thead><tbody>%s</tbody></table></section>' % "".join(rows))
+
+    stats = [
+        ("角色", len(chars)), ("章节", len(chapters)),
+        ("世界观", len(worlds) if with_world else 0),
+        ("关系", len(rels) if with_rel else 0),
+    ]
+    stat_html = "".join("<div><strong>%d</strong>%s</div>" % (n, label) for label, n in stats)
+
+    now = datetime.now().strftime("%Y-%m-%d %H:%M")
+    return "".join([
+        "<!DOCTYPE html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\">",
+        "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">",
+        "<title>高校拟人 OC 设定集</title><style>", BOOK_CSS, "</style></head><body>",
+        '<div class="bookbar no-print">',
+        '<button onclick="window.print()">🖨 打印 / 存为 PDF</button>',
+        '<button onclick="window.scrollTo({top:0,behavior:\'smooth\'})">↑ 回到顶部</button>',
+        "</div>",
+        '<div class="page">',
+        '<header class="cover">',
+        '<div class="kicker">OC Setting Book</div>',
+        "<h1>高校拟人 OC 设定集</h1>",
+        '<div class="sub">导出于 %s</div>' % _esc(now),
+        '<div class="stats">%s</div>' % stat_html,
+        "</header>",
+        "".join(toc),
+        "".join(main),
+        '<div class="colophon">共 %d 位角色 · %d 条世界观 · %d 条关系<br>'
+        '本文件为单文件离线版，图片已内嵌，可直接归档或分享</div>'
+        % (len(chars), len(worlds), len(rels)),
+        "</div></body></html>",
+    ])
+
+
+def _anchor_slug(text: str) -> str:
+    """章节锚点：保留中文，去掉会把选择器搞坏的空格与标点。"""
+    s = re.sub(r"[\s#?&%\"'<>\\/]+", "-", (text or "").strip())
+    return s or "untitled"
+
+
+@app.get("/api/export/setting-book")
+def export_setting_book(
+    request: Request,
+    group: str = "family",
+    world: int = 1,
+    rel: int = 1,
+    img: str = "thumb",
+    download: int = 0,
+):
+    """导出一本可离线阅读的设定集（单文件 HTML）。
+
+    group: family / region / era —— 分章依据
+    world / rel: 是否附上世界观、关系总表
+    img: thumb（内嵌缩略图，默认）/ url（引用服务器图片）/ none
+    download: 1 时带 Content-Disposition 直接下载，否则在浏览器里预览
+    """
+    if group not in ("family", "region", "era", "university"):
+        group = "family"
+    if img not in ("thumb", "url", "none"):
+        img = "thumb"
+    # img=url 时拼绝对地址：导出文件常被移出本站打开，相对路径会全断
+    base = str(request.base_url) if img == "url" else ""
+    html_src = _build_setting_book(group, bool(world), bool(rel), img, base)
+    name = "设定集_%s.html" % datetime.now().strftime("%Y%m%d_%H%M")
+    headers = {}
+    if download:
+        headers["Content-Disposition"] = "attachment; filename*=UTF-8''%s" % quote(name)
+    return Response(content=html_src, media_type="text/html; charset=utf-8", headers=headers)
+
+
+
 # 数据同步 API（供手机端上传/下载全量数据）
 # ============================================================
 from pydantic import BaseModel as PydanticModel
@@ -2458,6 +2943,11 @@ def serve_copy_detail_js():
 @app.get("/face-crop.js")
 def serve_face_crop_js():
     return FileResponse(os.path.join(DESKTOP_DIR, "face-crop.js"), media_type="application/javascript")
+
+
+@app.get("/setting-book.js")
+def serve_setting_book_js():
+    return FileResponse(os.path.join(DESKTOP_DIR, "setting-book.js"), media_type="application/javascript")
 
 
 # ============================================================
