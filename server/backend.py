@@ -2372,6 +2372,158 @@ def get_stats_ranks():
 
 
 # ============================================================
+# 校史时间线
+# ============================================================
+# 数据全部从现有字段推导，**不需要任何手工维护**：
+# · 存续期 ← identity_period（`1956-` / `1888-1952` / `1937-1970，1978-` 三种形态，
+#   只有 `,` 和 `，` 两种分隔符，格式远比想象的规范）
+# · 迁移/分设 ← relations 里 type='继承记忆' 的关系（from=今生，to=前世）。
+#   两端各有 region 与年代，跨地区的那些正好就是「迁校」：尚清洋[上海 1896-1952]
+#   → 秦思远[陕西 1952-] 就是交大西迁，年份严丝合缝。
+# · 停办/复校 ← 两段式的空档（`1937-1970，1978-` 中间断 8 年）
+# · 事件年 ← 按年统计诞生/消逝人数，1952 有 13 人诞生 + 6 人消逝（院系调整），
+#   1956 有 5 人诞生（西迁）—— 这些尖峰不用硬编码历史知识，自己就浮出来了。
+
+_TIMELINE_SEG_RE = re.compile(
+    r"^(1[89]\d\d|20\d\d)"                 # 起始年
+    r"(?:\s*[-–—~至]\s*(1[89]\d\d|20\d\d)?)?"  # 可选的结束年
+)
+_TIMELINE_NOW = 2026
+
+
+def _timeline_parse_period(text: str):
+    """把 identity_period 拆成 [(start, end|None), …]。
+
+    故意用锚定正则而不是「抓到所有 4 位数字」：
+    `1960-（1962年诞生）` 里的 1962 是注释，不是结束年，抓全部就会把那一条画成
+    「1960-1962 就消亡了」。锚定 `起始年 [- 结束年]` 之后，括号里的年份自然被忽略。
+    """
+    out = []
+    for seg in re.split(r"[,，;；]", text or ""):
+        seg = seg.strip()
+        if not seg:
+            continue
+        m = _TIMELINE_SEG_RE.match(seg)
+        if not m:
+            continue
+        start = int(m.group(1))
+        end = int(m.group(2)) if m.group(2) else None
+        if end is not None and end < start:
+            end = None
+        out.append((start, end))
+    return out
+
+
+@app.get("/api/timeline")
+def get_timeline():
+    """校史时间线数据：地区泳道 + 角色存续段 + 继承/迁移链 + 事件年。"""
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT id, name, region, status, family, identity_period, birth_time, image_url "
+        "FROM characters ORDER BY id ASC"
+    )
+    rows = [dict(r) for r in cursor.fetchall()]
+    cursor.execute(
+        "SELECT r.from_char_id, r.to_char_id, r.relation_type, r.description "
+        "FROM relations r WHERE r.relation_type = '继承记忆'"
+    )
+    inherit = [dict(r) for r in cursor.fetchall()]
+    conn.close()
+
+    by_id = {r["id"]: r for r in rows}
+
+    items, no_period = [], []
+    for r in rows:
+        segs = _timeline_parse_period(r.get("identity_period") or "")
+        if not segs:
+            # 退一步用诞生年：至少能标出「这个人从哪年开始存在」
+            bm = re.search(r"(1[89]\d\d|20\d\d)", r.get("birth_time") or "")
+            if bm:
+                segs = [(int(bm.group(1)), None)]
+                derived = "birth_time"
+            else:
+                no_period.append({"id": r["id"], "name": r["name"]})
+                continue
+        else:
+            derived = ""
+        items.append({
+            "id": r["id"],
+            "name": r["name"],
+            "region": (r.get("region") or "").strip() or "未分类",
+            "status": (r.get("status") or "").strip(),
+            "family": _book_split_multi(r.get("family"))[:1],
+            "segments": [[s, e] for s, e in segs],
+            "derived": derived,
+            "open": any(e is None for _s, e in segs),
+        })
+
+    # 继承链：from = 今生，to = 前世，所以「前世结束 → 今生开始」是正向时间流。
+    lineages = []
+    for rel in inherit:
+        nxt, prev = by_id.get(rel["from_char_id"]), by_id.get(rel["to_char_id"])
+        if not nxt or not prev:
+            continue
+        nseg = _timeline_parse_period(nxt.get("identity_period") or "")
+        pseg = _timeline_parse_period(prev.get("identity_period") or "")
+        if not nseg or not pseg:
+            continue
+        prev_end = next((e for _s, e in reversed(pseg) if e is not None), pseg[0][0])
+        next_start = nseg[0][0]
+        lineages.append({
+            "prev_id": prev["id"],
+            "next_id": nxt["id"],
+            "prev_name": prev["name"],
+            "next_name": nxt["name"],
+            "prev_end": prev_end,
+            "next_start": next_start,
+            "prev_region": (prev.get("region") or "").strip() or "未分类",
+            "next_region": (nxt.get("region") or "").strip() or "未分类",
+            "cross": (prev.get("region") or "") != (nxt.get("region") or ""),
+            "desc": (rel.get("description") or "").strip(),
+        })
+    lineages.sort(key=lambda x: (x["next_start"], x["prev_name"]))
+
+    # 地区泳道：按「该地区最早的起始年」排，时间线从左上往右下的走向才顺
+    regions = {}
+    for it in items:
+        g = regions.setdefault(it["region"], {"name": it["region"], "count": 0, "earliest": 9999, "latest": 0})
+        g["count"] += 1
+        for s, e in it["segments"]:
+            g["earliest"] = min(g["earliest"], s)
+            g["latest"] = max(g["latest"], e if e else s)
+    region_list = sorted(regions.values(), key=lambda g: (g["earliest"], -g["count"]))
+
+    # 事件年：某年诞生或消逝 >= 3 人才标出来（1952 是 13/6，1956 是 5）
+    starts, ends = {}, {}
+    for it in items:
+        starts[it["segments"][0][0]] = starts.get(it["segments"][0][0], 0) + 1
+        for _s, e in it["segments"]:
+            if e is not None:
+                ends[e] = ends.get(e, 0) + 1
+    years = sorted(set(starts) | set(ends))
+    events = []
+    for y in years:
+        s, e = starts.get(y, 0), ends.get(y, 0)
+        if s >= 3 or e >= 3:
+            events.append({"year": y, "starts": s, "ends": e, "score": s + e})
+
+    all_years = [it["segments"][0][0] for it in items] + [e for it in items for _s, e in it["segments"] if e]
+    return {
+        "range": {
+            "min": (min(all_years) if all_years else 1900) - 2,
+            "max": _TIMELINE_NOW,
+        },
+        "regions": region_list,
+        "items": items,
+        "lineages": lineages,
+        "events": events,
+        "no_period": no_period,
+        "cross_count": sum(1 for l in lineages if l["cross"]),
+    }
+
+
+# ============================================================
 # 设定集导出（把整库渲染成一本可离线阅读的 HTML）
 # ============================================================
 # 为什么是 HTML 而不是 PDF：不引额外依赖、图片能内嵌、浏览器「打印为 PDF」就是现成的排版器，
@@ -2913,6 +3065,11 @@ def serve_relations():
 @app.get("/stats")
 def serve_stats():
     return FileResponse(os.path.join(DESKTOP_DIR, "stats.html"))
+
+
+@app.get("/timeline")
+def serve_timeline():
+    return FileResponse(os.path.join(DESKTOP_DIR, "timeline.html"))
 
 
 @app.get("/trash")

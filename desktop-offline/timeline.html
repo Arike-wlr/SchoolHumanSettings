@@ -1,0 +1,808 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>校史时间线 · 高校拟人 OC</title>
+<script>
+// 防闪烁：尽早应用主题（与其它页同一份 localStorage key）
+(function(){
+  try {
+    var t = localStorage.getItem('oc-theme');
+    if (t === 'dark' || (!t && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+      document.documentElement.setAttribute('data-theme', 'dark');
+    }
+  } catch(e) {}
+})();
+</script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #f5f0eb;
+    --card-bg: #fffef9;
+    --text: #3d322b;
+    --text-light: #8c7b6e;
+    --accent: #8b5e3c;
+    --accent-light: #c49a6c;
+    --accent-pale: #f0e4d4;
+    --danger: #c0392b;
+    --border: #e0d5c7;
+    --shadow: 0 2px 16px rgba(60,40,20,.08);
+    --radius: 14px;
+    --radius-sm: 8px;
+    --font-serif: 'Georgia', 'Noto Serif SC', 'SimSun', serif;
+    --font-sans: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+    --transition: 0.25s cubic-bezier(.4,0,.2,1);
+    --lane-alt: rgba(139,94,60,.035);
+    --migrate: #b4552d;
+  }
+  html[data-theme="dark"] {
+    --bg: #1c1917;
+    --card-bg: #262220;
+    --text: #ece3d8;
+    --text-light: #a89a8c;
+    --accent: #c49a6c;
+    --accent-light: #d9b58a;
+    --accent-pale: #3a2f26;
+    --danger: #e07060;
+    --border: #3d3733;
+    --shadow: 0 2px 16px rgba(0,0,0,.4);
+    --lane-alt: rgba(196,154,108,.05);
+    --migrate: #e08a5c;
+    color-scheme: dark;
+  }
+
+  body {
+    display: flex;
+    min-height: 100vh;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ====== 侧边栏（与其它页一致） ====== */
+  .sidebar {
+    width: 180px;
+    background: linear-gradient(180deg, #2a1a12 0%, #1a0e08 100%);
+    color: #f5ede4;
+    display: flex;
+    flex-direction: column;
+    transition: width 0.3s cubic-bezier(.4,0,.2,1);
+    flex-shrink: 0;
+    overflow: hidden;
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    z-index: 10;
+    box-shadow: 2px 0 16px rgba(0,0,0,.15);
+  }
+  .sidebar.collapsed { width: 54px; }
+  .sidebar-toggle {
+    background: none; border: none; color: #b8a090; font-size: 1.2rem;
+    padding: 14px 16px 6px; cursor: pointer; transition: var(--transition);
+    text-align: left;
+  }
+  .sidebar.collapsed .sidebar-toggle { text-align: center; padding-left: 0; padding-right: 0; }
+  .sidebar-toggle:hover { color: #fff; }
+  .sidebar-nav { display: flex; flex-direction: column; padding: 8px; gap: 3px; flex: 1; }
+  .sidebar-item {
+    display: flex; align-items: center; gap: 10px; padding: 10px 12px;
+    border-radius: 8px; color: #c8b8a8; text-decoration: none; font-size: .88rem;
+    transition: var(--transition); white-space: nowrap;
+  }
+  .sidebar-item:hover { background: rgba(255,255,255,.06); color: #f5ede4; }
+  .sidebar-item.active { background: rgba(139,94,60,.3); color: #f5ede4; font-weight: 500; }
+  .sidebar-icon { font-size: 1.15rem; flex-shrink: 0; width: 22px; text-align: center; }
+  .sidebar-text { transition: opacity 0.2s, width 0.2s; overflow: hidden; }
+  .sidebar.collapsed .sidebar-text { opacity: 0; width: 0; }
+  .sidebar.collapsed .sidebar-item { gap: 0; justify-content: center; padding: 10px 0; }
+  .sidebar-footer { padding: 12px; border-top: 1px solid rgba(255,255,255,.08); text-align: center; }
+  .sidebar.collapsed .sidebar-footer { display: none; }
+  .theme-toggle {
+    background: none; border: 1px solid rgba(255,255,255,.14); color: #c8b8a8;
+    border-radius: 8px; padding: 7px 10px; cursor: pointer; font-size: .8rem;
+    display: inline-flex; align-items: center; gap: 6px; transition: var(--transition);
+    font-family: inherit;
+  }
+  .theme-toggle:hover { color: #fff; border-color: rgba(255,255,255,.3); }
+
+  /* ====== 主区 ====== */
+  .main { flex: 1; min-width: 0; padding: 26px 30px 60px; }
+
+  .page-head { margin-bottom: 18px; }
+  .page-head h1 {
+    font-family: var(--font-serif); font-size: 1.72rem; font-weight: 600;
+    letter-spacing: .04em;
+  }
+  .page-head .sub {
+    color: var(--text-light); font-size: .82rem; margin-top: 7px; line-height: 1.7;
+  }
+  .page-head .sub b { color: var(--accent); font-weight: 600; }
+
+  /* ====== 工具条 ====== */
+  .tl-bar {
+    display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
+    padding: 10px 14px; background: var(--card-bg); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); margin-bottom: 14px;
+  }
+  .tl-counts { display: flex; gap: 18px; font-size: .78rem; color: var(--text-light); }
+  .tl-counts b { color: var(--text); font-size: .95rem; font-weight: 600; margin-right: 3px; }
+  .tl-zoom { display: flex; align-items: center; gap: 8px; font-size: .78rem; color: var(--text-light); margin-left: auto; }
+  .tl-zoom input { width: 110px; accent-color: var(--accent); cursor: pointer; }
+  .tl-btn {
+    background: var(--card-bg); border: 1px solid var(--border); color: var(--text);
+    border-radius: var(--radius-sm); padding: 5px 11px; font-size: .77rem;
+    cursor: pointer; font-family: inherit; transition: var(--transition);
+  }
+  .tl-btn:hover { border-color: var(--accent-light); background: var(--accent-pale); }
+  .tl-btn.on { background: var(--accent-pale); border-color: var(--accent); color: var(--accent); font-weight: 600; }
+
+  /* ====== 图体：左标签列 + 右可横滚画布 ====== */
+  .tl-body {
+    display: flex; align-items: flex-start;
+    background: var(--card-bg); border: 1px solid var(--border);
+    border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden;
+  }
+  .tl-left {
+    width: 104px; flex-shrink: 0; border-right: 1px solid var(--border);
+    background: var(--card-bg); position: relative; z-index: 3;
+  }
+  .tl-left-spacer { border-bottom: 1px solid var(--border); }
+  .tl-lane-label {
+    display: flex; flex-direction: column; justify-content: flex-start;
+    padding: 7px 10px 0; border-bottom: 1px solid rgba(0,0,0,.045);
+  }
+  html[data-theme="dark"] .tl-lane-label { border-bottom-color: rgba(255,255,255,.05); }
+  .tl-lane-label .nm { font-size: .82rem; font-weight: 600; letter-spacing: .04em; }
+  .tl-lane-label .mt { font-size: .66rem; color: var(--text-light); margin-top: 2px; letter-spacing: .02em; }
+
+  .tl-scroll { flex: 1; min-width: 0; overflow-x: auto; overflow-y: hidden; }
+  .tl-axis {
+    position: sticky; top: 0; z-index: 2;
+    background: var(--card-bg);
+    border-bottom: 1px solid var(--border);
+  }
+  .tl-scroll svg { display: block; }
+
+  /* ====== SVG 元素 ====== */
+  .lane-band { fill: var(--lane-alt); }
+  .lane-line { stroke: var(--border); stroke-width: 1; }
+  .grid-line { stroke: var(--border); stroke-width: 1; stroke-dasharray: 2 6; opacity: .55; }
+  .grid-line.decade { opacity: 1; stroke-dasharray: none; }
+  .axis-tick { stroke: var(--border); stroke-width: 1; }
+  .axis-text { fill: var(--text-light); font-size: 10px; font-family: var(--font-sans); }
+  .axis-event { fill: var(--migrate); font-size: 10px; font-weight: 600; font-family: var(--font-sans); }
+
+  .bar { cursor: pointer; }
+  .bar rect { stroke-width: 1.2; rx: 3; transition: fill-opacity .18s, stroke-width .18s; }
+  .bar:hover rect { stroke-width: 2.4; }
+  .bar.gone rect { fill-opacity: .2; stroke-dasharray: 3 2; }
+  .bar .lb {
+    /* 字色固定深色：横条用的是固定的一套亮色，深色模式下若跟着主题改成浅字，
+       压在亮绿/亮黄上就糊了。这里不跟随主题。 */
+    fill: #241c16; font-size: 9.5px; font-family: var(--font-sans);
+    pointer-events: none; dominant-baseline: middle;
+  }
+  .bar.dim rect { fill-opacity: .12; }
+  .bar.dim .lb { opacity: .25; }
+  .bar.hl rect { stroke-width: 2.6; }
+
+  .open-tail { stroke-dasharray: 2 4; stroke-width: 2; opacity: .5; }
+  .seg-gap { stroke: var(--text-light); stroke-width: 1; stroke-dasharray: 2 3; opacity: .5; }
+
+  .lin { fill: none; stroke-width: 1.6; opacity: .55; }
+  .lin.cross { stroke-width: 2.4; opacity: .95; }
+  .lin.hl { stroke-width: 3.2; opacity: 1; }
+
+  .tl-axis svg { display: block; }
+
+  /* ====== 图例 / 提示 ====== */
+  .tl-legend {
+    display: flex; gap: 20px; flex-wrap: wrap; align-items: center;
+    margin-top: 20px; font-size: .76rem; color: var(--text-light);
+  }
+  .tl-legend .k { display: flex; align-items: center; gap: 6px; }
+  .tl-legend .sw { width: 22px; height: 9px; border-radius: 2px; display: inline-block; }
+  .tl-legend .sw.dash { background: transparent !important; border: 1px dashed var(--text-light); }
+  .tl-note {
+    margin-top: 14px; padding: 11px 14px; border-radius: var(--radius-sm);
+    background: var(--accent-pale); font-size: .78rem; line-height: 1.85; color: var(--text);
+  }
+
+  /* ====== 迁校记录 ====== */
+  .tl-mig { margin-top: 18px; }
+  .tl-mig h3 {
+    font-family: var(--font-serif); font-size: 1rem; font-weight: 600;
+    letter-spacing: .05em; margin-bottom: 4px;
+  }
+  .tl-mig .hint { font-size: .74rem; color: var(--text-light); margin-bottom: 12px; }
+  .mig-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(310px, 1fr)); gap: 10px; }
+  .mig-card {
+    display: flex; align-items: stretch; gap: 0;
+    background: var(--card-bg); border: 1px solid var(--border);
+    border-left: 3px solid var(--migrate);
+    border-radius: var(--radius-sm); padding: 11px 13px; cursor: pointer;
+    transition: var(--transition);
+  }
+  .mig-card:hover { background: var(--accent-pale); border-color: var(--accent-light); }
+  .mig-year {
+    flex-shrink: 0; width: 46px; font-family: var(--font-serif);
+    font-size: 1.02rem; font-weight: 600; color: var(--migrate); line-height: 1.35;
+  }
+  .mig-body { flex: 1; min-width: 0; }
+  .mig-line { font-size: .84rem; line-height: 1.6; }
+  .mig-line b { font-weight: 600; }
+  .mig-line .from { color: var(--text-light); }
+  .mig-line .to { color: var(--text); }
+  .mig-arrow { color: var(--migrate); margin: 0 6px; font-weight: 700; }
+  .mig-regions { font-size: .73rem; color: var(--text-light); margin-top: 3px; }
+  .mig-desc {
+    font-size: .73rem; color: var(--text-light); margin-top: 4px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .tl-note b { color: var(--accent); }
+  .tl-note code {
+    background: rgba(0,0,0,.06); padding: 1px 5px; border-radius: 3px;
+    font-size: .92em;
+  }
+  html[data-theme="dark"] .tl-note code { background: rgba(255,255,255,.09); }
+
+  .tl-tip {
+    position: fixed; z-index: 99; pointer-events: none; opacity: 0;
+    background: rgba(26,14,8,.94); color: #f5ede4; border-radius: 8px;
+    padding: 9px 12px; font-size: .76rem; line-height: 1.7; max-width: 300px;
+    transition: opacity .12s; box-shadow: 0 6px 24px rgba(0,0,0,.25);
+  }
+  .tl-tip.show { opacity: 1; }
+  .tl-tip b { color: #f0c48e; font-weight: 600; }
+  .tl-tip .dim { color: #b8a495; }
+
+  .empty { text-align: center; padding: 80px 20px; color: var(--text-light); }
+
+  @media (max-width: 760px) {
+    .sidebar { width: 54px; }
+    .sidebar .sidebar-text { display: none; }
+    .main { padding: 18px 14px 40px; }
+    .tl-left { width: 78px; }
+  }
+</style>
+</head>
+<body>
+
+<aside class="sidebar" id="sidebar">
+  <button class="sidebar-toggle" onclick="toggleSidebar()" title="展开/收起侧边栏">☰</button>
+  <nav class="sidebar-nav">
+    <a href="/" class="sidebar-item"><span class="sidebar-icon">📖</span><span class="sidebar-text">角色设定</span></a>
+    <a href="/worldview" class="sidebar-item"><span class="sidebar-icon">🌍</span><span class="sidebar-text">世界观设定</span></a>
+    <a href="/relations" class="sidebar-item"><span class="sidebar-icon">🔗</span><span class="sidebar-text">关系网</span></a>
+    <a href="/timeline" class="sidebar-item active"><span class="sidebar-icon">🕰️</span><span class="sidebar-text">校史时间线</span></a>
+    <a href="/stats" class="sidebar-item"><span class="sidebar-icon">📊</span><span class="sidebar-text">总览统计</span></a>
+    <a href="/documents" class="sidebar-item"><span class="sidebar-icon">📄</span><span class="sidebar-text">文档管理</span></a>
+    <a href="/trash" class="sidebar-item"><span class="sidebar-icon">🗑️</span><span class="sidebar-text">回收站</span></a>
+  </nav>
+  <div class="sidebar-footer">
+    <button class="theme-toggle" onclick="toggleTheme()">
+      <span id="themeIcon">🌙</span><span id="themeLabel">深色</span>
+    </button>
+  </div>
+</aside>
+
+<main class="main">
+  <div class="page-head">
+    <h1>校史时间线</h1>
+    <p class="sub">
+      每个地区一条泳道，横条是一位角色的<b>存续期</b>。跨泳道的连线来自关系表里的
+      <b>「继承记忆」</b>—— 旧身份在一地结束、新身份在另一地开始，那就是迁校。
+    </p>
+  </div>
+
+  <div class="tl-bar">
+    <div class="tl-counts" id="tlCounts"></div>
+    <div class="tl-zoom">
+      <button class="tl-btn" id="btnCross" onclick="toggleCrossOnly()">只看跨地区迁校</button>
+      <span>缩放</span>
+      <input type="range" id="zoom" min="5" max="28" value="11" oninput="onZoom(this.value)">
+    </div>
+  </div>
+
+  <div class="tl-body">
+    <div class="tl-left" id="tlLeft"></div>
+    <div class="tl-scroll" id="tlScroll">
+      <div class="tl-axis" id="tlAxis"></div>
+      <svg id="tlSvg"></svg>
+    </div>
+  </div>
+
+  <div class="tl-legend" id="tlLegend"></div>
+  <div class="tl-mig" id="tlMig"></div>
+  <div class="tl-note" id="tlNote"></div>
+</main>
+
+<div class="tl-tip" id="tlTip"></div>
+
+<script>
+// ============================================================
+// 校史时间线
+// ------------------------------------------------------------
+// 全部数据来自 GET /api/timeline，后端已经把 identity_period 解析成段、
+// 把「继承记忆」关系折算成迁移链。这里只做布局与绘制。
+//
+// 布局要点：左标签列是独立 DOM（不随横向滚动跑掉），右侧 SVG 的每条泳道高度
+// 由 JS 统一算出后**同时**写进两边，靠同一个 lane.h 保证严格对齐。
+// 千万不要在 CSS 里给两边各写一套 padding —— 一行差 1px，十几条泳道下来就错开了。
+// ============================================================
+
+var PX_MIN = 5, PX_MAX = 28;
+var px = 9;             // 每年像素
+var AXIS_H = 34;        // 年份轴高度
+var LANE_PAD = 8;       // 泳道上下留白
+var ROW_H = 20;         // 每行高度（含间隙）
+var BAR_H = 13;         // 横条厚度
+var LEFT_W = 104;
+var PAD_R = 34;         // 右端留白（给"延续中"的虚线尾巴）
+var LABEL_MIN_W = 34;   // 少于这个宽度就不写字了，塞不下（靠 hover 看）
+
+var FAMILY_COLORS = [
+  '#e74c3c', '#3498db', '#2ecc71', '#f39c12', '#9b59b6',
+  '#1abc9c', '#e67e22', '#2980b9', '#27ae60', '#8e44ad',
+  '#e91e63', '#00bcd4', '#ff5722', '#607d8b', '#cddc39',
+  '#795548', '#673ab7', '#009688', '#ff9800', '#3f51b5',
+];
+
+var DATA = null;
+var familyColor = {};
+var crossOnly = false;
+
+function toggleSidebar() {
+  document.getElementById('sidebar').classList.toggle('collapsed');
+}
+
+function applyTheme(t) {
+  if (t === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
+  else document.documentElement.removeAttribute('data-theme');
+  document.getElementById('themeIcon').textContent = t === 'dark' ? '☀️' : '🌙';
+  document.getElementById('themeLabel').textContent = t === 'dark' ? '浅色' : '深色';
+}
+
+function toggleTheme() {
+  var isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+  var next = isDark ? 'light' : 'dark';
+  try { localStorage.setItem('oc-theme', next); } catch (e) {}
+  applyTheme(next);
+}
+
+(function initTheme() {
+  var isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+  applyTheme(isDark ? 'dark' : 'light');
+})();
+
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+  });
+}
+
+// ---------- 家族配色（与关系网同一套调色板、同一套「首次出现顺序」规则）----------
+function buildFamilyColors() {
+  familyColor = {};
+  var idx = 0;
+  DATA.items.forEach(function (it) {
+    (it.family || []).forEach(function (f) {
+      if (f && !(f in familyColor)) {
+        familyColor[f] = FAMILY_COLORS[idx % FAMILY_COLORS.length];
+        idx++;
+      }
+    });
+  });
+}
+
+function colorOf(item) {
+  var f = (item.family || [])[0];
+  return (f && familyColor[f]) || '#9c8a7a';
+}
+
+function xOf(year) {
+  return (year - DATA.range.min) * px;
+}
+
+// ---------- 布局：泳道内贪心分行 ----------
+function computeLayout() {
+  var laneByName = {};
+  var lanes = DATA.regions.map(function (r) {
+    var lane = { name: r.name, count: r.count, earliest: r.earliest, rows: [], bars: [] };
+    laneByName[r.name] = lane;
+    return lane;
+  });
+
+  var bars = [];
+  DATA.items.forEach(function (it) {
+    var lane = laneByName[it.region];
+    if (!lane) return;
+
+    // 按**角色**整体分配行，而不是一段一段分。
+    // 一个角色可能有几段（`1937-1970，1978-` 表示停办后复校），若逐段贪心，
+    // 中间会被别人的长条抢走行位，导致「同一人的前世与今生」上下分成两条，看着像两个人。
+    // 这里先取该角色在泳道内的整体区间，占到一个能容下整段区间的行，再让所有段共用它。
+    var spanStart = it.segments[0][0];
+    var spanEnd = 0;
+    it.segments.forEach(function (sg) {
+      spanStart = Math.min(spanStart, sg[0]);
+      spanEnd = Math.max(spanEnd, sg[1] == null ? 9999 : sg[1]);
+    });
+
+    var row = 0;
+    while (lane.rows[row] !== undefined && lane.rows[row] > spanStart) row++;
+    lane.rows[row] = spanEnd;
+
+    it.segments.forEach(function (seg) {
+      var bar = { item: it, start: seg[0], end: seg[1], lane: lane, row: row };
+      lane.bars.push(bar);
+      bars.push(bar);
+    });
+  });
+
+  // 泳道从 SVG 的 y=0 开始：年份轴是 SVG **外面**那个 sticky 的 div，
+  // 左侧标签列用一个高度 AXIS_H 的占位块让出轴的位置。这里若再从 AXIS_H 起算，
+  // SVG 顶部会凭空多出 34px 空白，泳道整体比轴低一截，看着就是刻度和横条对不上。
+  var y = 0;
+  lanes.forEach(function (lane) {
+    lane.rowsCount = Math.max(1, lane.rows.length);
+    lane.height = lane.rowsCount * ROW_H + LANE_PAD * 2;
+    lane.y = y;
+    y += lane.height;
+    lane.bars.forEach(function (b) {
+      b.x = xOf(b.start);
+      b.w = (b.end == null ? xOf(DATA.range.max) : xOf(b.end + 1)) - b.x;
+      b.y = lane.y + LANE_PAD + b.row * ROW_H;
+      b.h = BAR_H;
+    });
+  });
+
+  return { lanes: lanes, bars: bars, totalH: y, width: xOf(DATA.range.max) + PAD_R };
+}
+
+// 每个角色「最先出现」「最后消失」的那条 bar，迁移线要挂在它们上面
+function indexBars(bars) {
+  var first = {}, last = {};
+  bars.forEach(function (b) {
+    var id = b.item.id;
+    if (!first[id] || b.start < first[id].start) first[id] = b;
+    if (!last[id] || b.start > last[id].start) last[id] = b;
+  });
+  return { first: first, last: last };
+}
+
+// ---------- 绘制 ----------
+function render() {
+  var L = computeLayout();
+  var idx = indexBars(L.bars);
+  var min = DATA.range.min, max = DATA.range.max;
+
+  // --- 左侧地区标签（高度与右侧 SVG 逐条对齐）---
+  var left = '<div class="tl-left-spacer" style="height:' + AXIS_H + 'px"></div>';
+  L.lanes.forEach(function (lane) {
+    left += '<div class="tl-lane-label" style="height:' + lane.height + 'px">' +
+      '<div class="nm">' + esc(lane.name) + '</div>' +
+      '<div class="mt">' + lane.count + ' 位 · ' + lane.earliest + ' 起</div></div>';
+  });
+  document.getElementById('tlLeft').innerHTML = left;
+
+  // --- 年份轴（独立 div，sticky 在滚动容器顶部）---
+  var axis = '<svg width="' + L.width + '" height="' + AXIS_H + '" style="display:block">';
+  for (var y0 = Math.ceil(min / 5) * 5; y0 <= max; y0 += 5) {
+    var x = xOf(y0);
+    var isDecade = y0 % 10 === 0;
+    axis += '<line class="axis-tick" x1="' + x + '" y1="' + (isDecade ? 16 : 23) +
+      '" x2="' + x + '" y2="' + AXIS_H + '"/>';
+    if (isDecade) {
+      axis += '<text class="axis-text" x="' + (x + 3) + '" y="13">' + y0 + '</text>';
+    }
+  }
+  // 事件年：刻度文字在轴顶部，事件年压在轴底部，两者错开就不会撞在一条线上
+  (DATA.events || []).forEach(function (ev) {
+    var x = xOf(ev.year);
+    axis += '<line x1="' + x + '" y1="19" x2="' + x + '" y2="' + AXIS_H +
+      '" stroke="var(--migrate)" stroke-width="1.5" opacity=".75"/>';
+    axis += '<text class="axis-event" x="' + x + '" y="' + (AXIS_H - 2) +
+      '" text-anchor="middle">' + ev.year + '</text>';
+  });
+  axis += '</svg>';
+  document.getElementById('tlAxis').innerHTML = axis;
+
+  // --- 画布 ---
+  var s = [];
+  // ⚠️ id 必须带上：下面用 outerHTML 整体替换，漏了 id 之后 getElementById('tlSvg') 就是 null，
+  //    绑定事件时直接抛错（这个页面全靠 JS 生成，一抛就是整屏空白）。
+  s.push('<svg id="tlSvg" width="' + L.width + '" height="' + L.totalH + '" style="display:block">');
+
+  // 泳道底色 + 分隔线
+  L.lanes.forEach(function (lane, i) {
+    if (i % 2 === 1) {
+      s.push('<rect class="lane-band" x="0" y="' + lane.y + '" width="' + L.width +
+        '" height="' + lane.height + '"/>');
+    }
+    s.push('<line class="lane-line" x1="0" y1="' + (lane.y + lane.height) + '" x2="' + L.width +
+      '" y2="' + (lane.y + lane.height) + '"/>');
+  });
+
+  // 竖向网格（十年实线、五年虚线）
+  for (var g = Math.ceil(min / 5) * 5; g <= max; g += 5) {
+    var gx = xOf(g);
+    s.push('<line class="grid-line' + (g % 10 === 0 ? ' decade' : '') + '" x1="' + gx + '" y1="0" x2="' +
+      gx + '" y2="' + L.totalH + '"/>');
+  }
+
+  // 事件年竖线（贯穿全图）—— 故意画得又淡又虚：
+  // 迁校线常常正好落在事件年上（比如 1952 既是一堆人的诞生年，也是上海→陕西的交接年），
+  // 两者都画成醒目的红实线就会糊成一根，分不清哪条是"这一年很多人出生"、哪条是"这所学校搬走了"。
+  (DATA.events || []).forEach(function (ev) {
+    var ex = xOf(ev.year);
+    s.push('<line x1="' + ex + '" y1="0" x2="' + ex + '" y2="' + L.totalH +
+      '" stroke="var(--border)" stroke-width="1" stroke-dasharray="2 6" opacity=".75"/>');
+  });
+
+  // 横条
+  L.bars.forEach(function (b) {
+    var c = colorOf(b.item);
+    var gone = b.item.status === '已消逝';
+    var x = b.x, w = Math.max(6, b.w), y = b.y;
+    var openEnd = b.end == null;
+    s.push('<g class="bar' + (gone ? ' gone' : '') + '" data-cid="' + b.item.id + '" data-bar="1">');
+    s.push('<title>' + esc(b.item.name + ' · ' + b.item.region + ' · ' +
+      b.start + '–' + (b.end == null ? '今' : b.end)) + '</title>');
+    s.push('<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + b.h +
+      '" fill="' + c + '" fill-opacity="' + (gone ? .45 : .82) + '" stroke="' + c + '"/>');
+    if (openEnd) {
+      // 还在延续：右端接一段渐疏的虚线，提示「没有结束年」而不是「刚好到 2026」
+      s.push('<line class="open-tail" x1="' + (x + w - 4) + '" y1="' + (y + b.h / 2) +
+        '" x2="' + (x + w + 14) + '" y2="' + (y + b.h / 2) + '" stroke="' + c + '"/>');
+    }
+    // 名字只在横条够宽时写进条里。塞不下就留空 —— 以前是甩到条的右侧外面，
+    // 结果短条的名字全叠在别人身上，比不写还难认。条里没有字的，hover 有浮层、点击能跳转。
+    var wpx = b.item.name.length * 10 + 12;
+    if (w >= Math.max(LABEL_MIN_W, wpx)) {
+      s.push('<text class="lb" x="' + (x + 6) + '" y="' + (y + b.h / 2 + 0.5) + '">' +
+        esc(b.item.name) + '</text>');
+    }
+    s.push('</g>');
+  });
+
+  // 继承 / 迁移线画在横条**之上**：跨地区的线常常要横跨好几个泳道，
+  // 画在下面会被沿途的横条整段盖住，等于看不见。
+  (DATA.lineages || []).forEach(function (ln, i) {
+    var pb = idx.last[ln.prev_id], nb = idx.first[ln.next_id];
+    if (!pb || !nb) return;
+    if (crossOnly && !ln.cross) return;
+
+    var x1 = pb.x + pb.w, y1 = pb.y + pb.h / 2;
+    var x2 = nb.x, y2 = nb.y + nb.h / 2;
+    var dx = Math.max(30, Math.abs(x2 - x1) * 0.45);
+    var d = 'M' + x1 + ' ' + y1 + ' C' + (x1 + dx) + ' ' + y1 + ' ' +
+      (x2 - dx) + ' ' + y2 + ' ' + x2 + ' ' + y2;
+    var col = ln.cross ? 'var(--migrate)' : 'var(--text-light)';
+    s.push('<path class="lin' + (ln.cross ? ' cross' : '') + '" data-lin="' + i +
+      '" d="' + d + '" stroke="' + col + '"/>');
+
+    // 箭头画在后继那一端。x 几乎不变说明是「同一年直接换地方」，
+    // 这时曲线其实是竖直的，箭头要朝下 —— 画成朝右会看不出方向。
+    var vertical = Math.abs(x2 - x1) < 6;
+    if (vertical) {
+      s.push('<path d="M' + (x2 - 4) + ' ' + (y2 - 5) + ' L' + x2 + ' ' + y2 +
+        ' L' + (x2 + 4) + ' ' + (y2 - 5) + '" fill="none" stroke="' + col +
+        '" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>');
+    } else {
+      s.push('<path d="M' + (x2 - 5) + ' ' + (y2 - 4) + ' L' + x2 + ' ' + y2 +
+        ' L' + (x2 - 5) + ' ' + (y2 + 4) + '" fill="none" stroke="' + col +
+        '" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>');
+    }
+  });
+
+  s.push('</svg>');
+  document.getElementById('tlSvg').outerHTML = s.join('');
+  // outerHTML 换掉后要重新取一次，事件才能绑上
+  bindHover();
+  renderCounts();
+}
+
+function renderCounts() {
+  var cross = DATA.lineages.filter(function (l) { return l.cross; }).length;
+  var gone = DATA.items.filter(function (i) { return i.status === '已消逝'; }).length;
+  document.getElementById('tlCounts').innerHTML =
+    '<span><b>' + DATA.items.length + '</b>位角色</span>' +
+    '<span><b>' + DATA.regions.length + '</b>个地区</span>' +
+    '<span><b>' + DATA.lineages.length + '</b>条继承</span>' +
+    '<span><b>' + cross + '</b>次跨地区迁校</span>' +
+    '<span><b>' + gone + '</b>位已消逝</span>';
+}
+
+// ---------- 交互 ----------
+function bindHover() {
+  var tip = document.getElementById('tlTip');
+  var svg = document.getElementById('tlSvg');
+
+  svg.addEventListener('mouseover', function (e) {
+    var g = e.target.closest ? e.target.closest('.bar') : null;
+    if (!g) return;
+    var cid = Number(g.getAttribute('data-cid'));
+    var it = DATA.items.filter(function (i) { return i.id === cid; })[0];
+    if (!it) return;
+
+    var segTxt = it.segments.map(function (sg) {
+      return sg[0] + '–' + (sg[1] == null ? '今' : sg[1]);
+    }).join('，');
+    var links = DATA.lineages.filter(function (l) { return l.prev_id === cid || l.next_id === cid; });
+    var linkTxt = links.map(function (l) {
+      return l.prev_name + ' → ' + l.next_name + (l.cross ? '（跨地区）' : '');
+    }).join('<br>');
+
+    tip.innerHTML =
+      '<b>' + esc(it.name) + '</b><br>' +
+      '<span class="dim">' + esc(it.region) + ' · ' + esc(it.status || '状态未填') + '</span><br>' +
+      '存续：' + esc(segTxt) + (it.open ? '<span class="dim">（延续中）</span>' : '') + '<br>' +
+      (it.family.length ? '家族：' + esc(it.family.join('、')) + '<br>' : '') +
+      (linkTxt ? '<span class="dim">继承：</span><br>' + linkTxt : '');
+    tip.classList.add('show');
+    placeTip(e);
+
+    // 高亮：本人 + 相关继承线
+    svg.querySelectorAll('.bar').forEach(function (b) {
+      b.classList.toggle('hl', Number(b.getAttribute('data-cid')) === cid);
+      b.classList.toggle('dim', Number(b.getAttribute('data-cid')) !== cid);
+    });
+    svg.querySelectorAll('.lin').forEach(function (p) {
+      // 用 data-lin 回查，不能靠遍历下标：勾了「只看跨地区」时渲染的是子集，下标会对不上。
+      var ln = DATA.lineages[Number(p.getAttribute('data-lin'))];
+      if (!ln) return;
+      p.classList.toggle('hl', ln.prev_id === cid || ln.next_id === cid);
+    });
+  });
+
+  svg.addEventListener('mousemove', function (e) {
+    if (document.getElementById('tlTip').classList.contains('show')) placeTip(e);
+  });
+
+  svg.addEventListener('mouseout', function (e) {
+    var g = e.target.closest ? e.target.closest('.bar') : null;
+    if (!g) return;
+    document.getElementById('tlTip').classList.remove('show');
+    svg.querySelectorAll('.bar').forEach(function (b) { b.classList.remove('hl', 'dim'); });
+    svg.querySelectorAll('.lin').forEach(function (p) { p.classList.remove('hl'); });
+  });
+
+  // 点横条 → 回角色页并打开详情（与关系网的双击跳转同一个 URL 约定）
+  svg.addEventListener('click', function (e) {
+    var g = e.target.closest ? e.target.closest('.bar') : null;
+    if (!g) return;
+    window.location.href = '/index?char=' + g.getAttribute('data-cid');
+  });
+}
+
+function placeTip(e) {
+  var tip = document.getElementById('tlTip');
+  var x = e.clientX + 16, y = e.clientY + 16;
+  var r = tip.getBoundingClientRect();
+  if (x + r.width > window.innerWidth - 12) x = e.clientX - r.width - 14;
+  if (y + r.height > window.innerHeight - 12) y = e.clientY - r.height - 14;
+  tip.style.left = x + 'px';
+  tip.style.top = y + 'px';
+}
+
+function onZoom(v) {
+  px = Math.max(PX_MIN, Math.min(PX_MAX, Number(v) || 11));
+  render();
+}
+
+function toggleCrossOnly() {
+  crossOnly = !crossOnly;
+  document.getElementById('btnCross').classList.toggle('on', crossOnly);
+  render();
+}
+
+// ---------- 迁校记录：光靠图上看线不够，跨地区一跨就是好几个泳道 ----------
+function renderMigrations() {
+  var cross = (DATA.lineages || []).filter(function (l) { return l.cross; });
+  var same = (DATA.lineages || []).length - cross.length;
+  var box = document.getElementById('tlMig');
+  if (!cross.length) { box.innerHTML = ''; return; }
+
+  var html = '<h3>跨地区迁校 · ' + cross.length + ' 次</h3>' +
+    '<div class="hint">点一条可以跳到时间轴上对应的位置。' +
+    (same > 0 ? '另有 ' + same + ' 条同地区的前世今生，只在图上以浅灰连线表示。' : '') + '</div>' +
+    '<div class="mig-grid">';
+
+  cross.forEach(function (l) {
+    html += '<div class="mig-card" onclick="focusMigration(' + l.prev_id + ',' + l.next_id + ',' +
+      l.next_start + ')" title="跳到时间轴">' +
+      '<div class="mig-year">' + l.next_start + '</div>' +
+      '<div class="mig-body">' +
+        '<div class="mig-line">' +
+          '<span class="from">' + esc(l.prev_name) + '</span>' +
+          '<span class="mig-arrow">→</span>' +
+          '<span class="to">' + esc(l.next_name) + '</span>' +
+        '</div>' +
+        '<div class="mig-regions">' + esc(l.prev_region) + ' → ' + esc(l.next_region) +
+          ' · 前身存续至 ' + l.prev_end + '</div>' +
+        (l.desc ? '<div class="mig-desc" title="' + esc(l.desc) + '">' + esc(l.desc) + '</div>' : '') +
+      '</div></div>';
+  });
+  html += '</div>';
+  box.innerHTML = html;
+}
+
+// 点迁校卡：滚到那一年，并把两个人的横条高亮一下
+function focusMigration(prevId, nextId, year) {
+  var sc = document.getElementById('tlScroll');
+  var target = xOf(year) - sc.clientWidth / 2;
+  sc.scrollTo({ left: Math.max(0, target), behavior: 'smooth' });
+
+  var svg = document.getElementById('tlSvg');
+  svg.querySelectorAll('.bar').forEach(function (b) {
+    var cid = Number(b.getAttribute('data-cid'));
+    b.classList.toggle('hl', cid === prevId || cid === nextId);
+    b.classList.toggle('dim', cid !== prevId && cid !== nextId);
+  });
+  svg.querySelectorAll('.lin').forEach(function (p) {
+    var ln = DATA.lineages[Number(p.getAttribute('data-lin'))];
+    if (!ln) return;
+    p.classList.toggle('hl',
+      (ln.prev_id === prevId && ln.next_id === nextId));
+  });
+  clearTimeout(focusMigration._t);
+  focusMigration._t = setTimeout(function () {
+    svg.querySelectorAll('.bar').forEach(function (b) { b.classList.remove('hl', 'dim'); });
+    svg.querySelectorAll('.lin').forEach(function (p) { p.classList.remove('hl'); });
+  }, 2600);
+}
+
+// ---------- 图例 / 说明 ----------
+function renderLegend() {
+  var fams = Object.keys(familyColor).slice(0, 8);
+  var html = '';
+  fams.forEach(function (f) {
+    html += '<span class="k"><span class="sw" style="background:' + familyColor[f] + '"></span>' +
+      esc(f) + '</span>';
+  });
+  html += '<span class="k"><span class="sw dash"></span>已消逝（虚线框）</span>';
+  html += '<span class="k"><span class="sw" style="background:var(--migrate)"></span>跨地区迁校</span>';
+  document.getElementById('tlLegend').innerHTML = html;
+
+  var n = (DATA.no_period || []).length;
+  var names = (DATA.no_period || []).map(function (x) { return x.name; }).join('、');
+  document.getElementById('tlNote').innerHTML =
+    '存续期全部从角色的 <code>身份时间</code> 字段自动解析，' +
+    '<b>不需要手工维护</b>。迁移线来自关系表里类型为「继承记忆」的关系 —— ' +
+    '旧身份在一地结束、新身份在另一地开始，系统据此自动判定为迁校；' +
+    '同地区的前世今生则画成浅色短连线。' +
+    (n ? '<br>另有 <b>' + n + '</b> 位角色没有填身份时间，暂时无法上图：' + esc(names) + '。' : '');
+}
+
+// ---------- 启动 ----------
+// 若页面里带了 window.__TL_DATA__（导出预览用），就直接用内联数据，不再打接口。
+// 这样存下来的预览文件双击也能看，不需要后端在跑。
+var bootP = window.__TL_DATA__
+  ? Promise.resolve(window.__TL_DATA__)
+  : fetch('/api/timeline').then(function (r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    });
+
+bootP.then(function (d) {
+  DATA = d;
+  buildFamilyColors();
+  renderLegend();
+  renderMigrations();
+  render();
+  window.addEventListener('resize', function () { render(); });
+}).catch(function (e) {
+  // 出错了也要把堆栈留在页面上：这个页面全靠 JS 生成，控制台一条报错就整屏空白，
+  // 不写明原因的话在外面看只是"图没了"。
+  document.querySelector('.main').innerHTML =
+    '<div class="empty">时间线加载失败：' + esc(e.message) +
+    '<pre style="text-align:left;margin-top:14px;font-size:.72rem;line-height:1.7;' +
+    'white-space:pre-wrap;opacity:.7">' + esc(e.stack || '') + '</pre></div>';
+});
+</script>
+</body>
+</html>
